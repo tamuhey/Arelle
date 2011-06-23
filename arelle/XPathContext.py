@@ -331,7 +331,7 @@ class XPathContext:
                         innerFocusNodes = contextItem
                     navSequence = []
                     for innerFocusNode in self.flattenSequence(innerFocusNodes):
-                        self.evaluate(p.args, contextItem=innerFocusNode, resultStack=navSequence, parentOp=op)
+                        navSequence += self.evaluate(p.args, contextItem=innerFocusNode, parentOp=op)
                     result = self.documentOrderedNodes(self.flattenSequence(navSequence))
             elif isinstance(p,ProgHeader):
                 self.progHeader = p
@@ -361,7 +361,7 @@ class XPathContext:
                 prefix,sep,localName = type.partition(':')
                 if prefix == 'xs':
                     if localName.endswith('*'): localName = localName[:-1]
-                    if hasattr(result, "__iter__") and not isinstance(result, str):
+                    if isinstance(result, (tuple,list,set)):
                         from arelle import (FunctionXs)
                         if type.endswith('*'):
                             return[FunctionXs.call(self,progHeader,localName,(r,)) for r in result]
@@ -378,7 +378,7 @@ class XPathContext:
             r = self.evaluate(p.bindingSeq, contextItem=contextItem)
             if len(r) == 1: # should be an expr single
                 r = r[0]
-                if hasattr(r, '__iter__') and not isinstance(r, str):
+                if isinstance(r, (tuple,list,set)):
                     if len(r) == 1 and isinstance(r[0],range):
                         r = r[0]
                     rvQname = p.rangeVar.name
@@ -453,7 +453,7 @@ class XPathContext:
             
     def atomize(self, p, x):
         # sequence
-        if hasattr(x, '__iter__') and not isinstance(x, str):
+        if isinstance(x, (tuple,list,set)):
             sequence = []
             for item in self.flattenSequence(x):
                 atomizedItem = self.atomize(p, item)
@@ -476,12 +476,12 @@ class XPathContext:
         else:
             if isinstance(x, ModelObject):
                 e = x
-            if e:
-                if e.getAttributeNS(XbrlConst.xsi,"nil") == "true":
+            if e is not None:
+                if e.get("{http://www.w3.org/2001/XMLSchema-instance}nil") == "true":
                     return []
-                modelXbrl = x.ownerDocument.modelDocument.modelXbrl
+                modelXbrl = x.modelDocument.modelXbrl
                 modelConcept = modelXbrl.qnameConcepts.get(qname(x))
-                if modelConcept:
+                if modelConcept is not None:
                     baseXsdType = modelConcept.baseXsdType
                 v = XmlUtil.text(x)
         if baseXsdType in ("decimal", "float", "double"):
@@ -496,7 +496,7 @@ class XPathContext:
                 raise XPathException(p, 'err:FORG0001', _('Atomizing {0} to an integer does not have a proper value').format(x))
         elif baseXsdType == "boolean":
             x = (v == "true" or v == "1")
-        elif baseXsdType == "QName" and e:
+        elif baseXsdType == "QName" and e is not None:
             x = qname(e, v)
         elif baseXsdType == "anyURI":
             x = anyURI(v.strip())
@@ -519,11 +519,11 @@ class XPathContext:
     # flatten into a sequence
     def flattenSequence(self, x, sequence=None):
         if sequence is None: 
-            if isinstance(x, str) or isinstance(x,range) or not hasattr(x, '__iter__'):
+            if not isinstance(x, (tuple,list,set)):
                 return [x]
             sequence = []
         for el in x:
-            if hasattr(el, '__iter__') and not isinstance(el, str):
+            if isinstance(el, (tuple,list,set)):
                 self.flattenSequence(el, sequence=sequence)
             else:
                 sequence.append(el)
@@ -534,7 +534,7 @@ class XPathContext:
         l = set()  # must have unique nodes only
         for e in x:
             if isinstance(e,ModelObject):
-                h = e.objectIndex
+                h = e.sourceline
             else:
                 h = 0
             l.add((h,e))

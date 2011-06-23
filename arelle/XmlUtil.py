@@ -178,12 +178,7 @@ def parent(element):
     return element.getparent()
 
 def ancestors(element):
-    ancestors = []
-    ancestor = element.getparent()
-    while ancestor is not None:
-        ancestors.append(ancestor)
-        ancestor = ancestor.getparent()
-    return ancestors
+    return [ancestor for ancestor in element.getancestors()]
     
 def childAttr(element, childNamespaceURI, childLocalNames, attrLocalName):
     childElt = child(element, childNamespaceURI, childLocalNames)
@@ -206,7 +201,7 @@ def children(element, childNamespaceURI, childLocalNames):
                 children.append(child)
     return children
 
-def child(element, childNamespaceURI, childLocalNames):
+def child(element, childNamespaceURI=None, childLocalNames=("*",)):
     result = children(element, childNamespaceURI, childLocalNames)
     if result and len(result) > 0:
         return result[0]
@@ -249,7 +244,11 @@ def descendants(element, descendantNamespaceURI, descendantLocalNames, attrName=
             if isinstance(child,ModelObject) and \
                 (wildNamespaceURI or child.elementNamespaceURI == descendantNamespaceURI) and \
                 (wildLocalName or child.localName in descendantLocalNames):
-                descendants.append(child)
+                if attrName:
+                    if child.get(attrName) == attrValue or (attrValue == "*" and child.get(attrName) is not None):
+                        descendants.append(child)
+                else: 
+                    descendants.append(child)
                 if breakOnFirst:
                     break
     return descendants
@@ -320,7 +319,7 @@ def addChild(parent, childName1, childName2=None, attributes=None, text=None, af
 
 def copyNodes(parent, elts):
     modelDocument = parent.modelDocument
-    for origElt in elts if hasattr(elts, '__iter__') else (elts,):
+    for origElt in elts if isinstance(elts, (tuple,list,set)) else (elts,):
         addQnameValue(modelDocument, origElt.elementQname)
         copyElt = modelDocument.parser.makeelement(origElt.tag)
         copyElt.init(modelDocument)
@@ -337,6 +336,12 @@ def copyNodes(parent, elts):
             if isinstance(origElt.xValue,QName):
                 copyElt.text = addQnameValue(modelDocument, origElt.xValue)
                 textContentSet = True
+        if not textContentSet:
+            text = origElt.text
+            if text is not None:
+                text = text.strip()  # don't copy whitespace text
+                if text:
+                    copyElt.text = text
         for childNode in origElt.getchildren():
             if isinstance(childNode,ModelObject):
                 copyNodes(copyElt,childNode)
@@ -347,7 +352,7 @@ def copyChildren(parent, elt):
             copyNodes(parent, childNode)
 
 def addComment(parent, commentText):
-    child = ModelObject.ModelComment( str(commentText) )
+    child = ModelComment( str(commentText) )
     parent.append(child)
     
 def addQnameValue(modelDocument, qnameValue):
@@ -558,18 +563,21 @@ def writexml(writer, node, encoding=None, indent='', parentNsmap=None):
             writer.write("\"")
         hasChildNodes = False
         firstChild = True
+        text = node.text
+        if text is not None:
+            text = text.strip().replace("<","&lt;")
         for child in node.iterchildren():
             hasChildNodes = True
             if firstChild:
                 writer.write(">\n")
-                if node.text:
-                    writer.write(node.text.replace("<","&lt;"))
+                if text:
+                    writer.write(text)
                 firstChild = False
             writexml(writer, child, indent=indent+'    ')
         if hasChildNodes:
             writer.write("%s</%s>\n" % (indent, node.prefixedName))
-        elif node.text:
-            writer.write(">%s</%s>\n" % (node.text.replace("<","&lt;"), node.prefixedName))
+        elif text:
+            writer.write(">%s</%s>\n" % (text, node.prefixedName))
         else:
             writer.write("/>\n")
     elif isinstance(node,ModelComment): # ok to use minidom implementation

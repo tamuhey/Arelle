@@ -88,7 +88,7 @@ class ModelFact(ModelObject):
             return self._isFraction
         except AttributeError:
             concept = self.concept
-            self._isFraction = concept and concept.isFraction
+            self._isFraction = (concept is not None) and concept.isFraction
             return self._isFraction
         
     @property
@@ -100,7 +100,7 @@ class ModelFact(ModelObject):
         try:
             return self._ancestorQnames
         except AttributeError:
-            self._ancestorQnames = set( ModelValue.qname(ancestor) for ancestor in self.getancestors() )
+            self._ancestorQnames = set( ModelValue.qname(ancestor) for ancestor in self.iterancestors() )
             return self._ancestorQnames
 
     @property
@@ -150,7 +150,7 @@ class ModelFact(ModelObject):
     @property
     def value(self):
         v = self.text
-        if len(v) == 0:
+        if v is None:
             if self.concept.default is not None:
                 v = self.concept.default
             elif self.concept.fixed is not None:
@@ -299,7 +299,7 @@ class ModelInlineFact(ModelFact):
         negate = -1 if self.sign else 1
         mult = 1
         decSep = "," if self.format.endswith("comma") else "."
-        for c in self.text:
+        for c in XmlUtil.text(self):
             if c == decSep:
                 mult = 0.1
             elif c.isnumeric():
@@ -530,7 +530,8 @@ class ModelContext(ModelObject):
         try:
             return self._nonDimsHash
         except AttributeError:
-            self._nonDimsHash = hash( (tuple(self.nonDimValues("segment")), tuple(self.nonDimValues("scenario"))) )
+            self._nonDimsHash = hash( (XbrlUtil.equalityHash(self.nonDimValues("segment")), 
+                                       XbrlUtil.equalityHash(self.nonDimValues("scenario"))) )
             return self._nonDimsHash
         
     @property
@@ -650,7 +651,7 @@ class ModelDimensionValue(ModelObject):
         if self.isExplicit:
             return hash( (self.dimensionQname, self.memberQname) )
         else:
-            return None # TBD      
+            return hash( (self.dimensionQname, XbrlUtil.equalityHash(XmlUtil.child(self))) )
        
     @property
     def dimensionQname(self):
@@ -678,7 +679,7 @@ class ModelDimensionValue(ModelObject):
 
     @property
     def memberQname(self):
-        return self.prefixedNameQname(self.text)
+        return self.prefixedNameQname(XmlUtil.text(self))
         
     @property
     def member(self):

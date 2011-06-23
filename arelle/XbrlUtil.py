@@ -24,26 +24,30 @@ def nodesCorrespond(dts1, elt1, elt2, dts2=None):
 #   (as used in versioning reports and multi instance
 
 def equalityHash(elt, equalMode=S_EQUAL, excludeIDs=False):
-    if not isinstance(elt, ModelObject):
+    if isinstance(elt, ModelObject):
+        try:
+            if equalMode == S_EQUAL:
+                return elt._hashSEqual
+            else:
+                return elt._hashXpathEqual
+        except AttributeError:
+            dts = elt.modelXbrl
+            if not hasattr(elt,"xValid"):
+                XmlValidate.validate(dts, elt)
+            _hash = hash((elt.elementQname,
+                          elt.sValue if equalMode == S_EQUAL else elt.xValue,
+                          tuple(attributeDict(dts, elt, (), equalMode, excludeIDs).items()),
+                          tuple(equalityHash(child,equalMode,excludeIDs) for child in childElements(elt))
+                          ))
+            if equalMode == S_EQUAL:
+                elt._hashSEqual = _hash
+            else:
+                elt._hashXpathEqual = _hash
+            return _hash
+    elif isinstance(elt, (tuple,list,set)):
+        return hash( tuple(equalityHash(i) for i in elt) )
+    else:
         return hash(None)
-    try:
-        if equalMode == S_EQUAL:
-            return elt._hashSEqual
-        else:
-            return elt._hashXpathEqual
-    except AttributeError:
-        dts = elt.modelXbrl
-        if not hasattr(elt,"xValid"):
-            XmlValidate.validate(dts, elt)
-        _hash = hash((elt.sValue if equalMode == S_EQUAL else elt.xValue,
-                      tuple(attributeDict(dts, elt, (), equalMode, excludeIDs).items()),
-                      tuple(hash(dts,child,equalMode,excludeIDs) for child in childElements(elt))
-                      ))
-        if equalMode == S_EQUAL:
-            elt._hashSEqual = _hash
-        else:
-            elt._hashXpathEqual = _hash
-        return _hash
 
 def sEqual(dts1, elt1, elt2, equalMode=S_EQUAL, excludeIDs=False, dts2=None, ns2ns1Tbl=None):
     if dts2 is None: dts2 = dts1
@@ -99,13 +103,13 @@ def attributes(modelXbrl, elt, exclusions=set(), ns2ns1Tbl=None, keyByTag=False)
     return tuple( (k,a[k]) for k in sorted(a.keys()) )    
 
 def childElements(elt):
-    children = []
-    for child in elt.getchildren():
-        if isinstance(child,ModelObject):
-            children.append(child)
-    return children
+    return [child for child in elt.getchildren() if isinstance(child,ModelObject)]
 
 def xEqual(elt1, elt2, equalMode=S_EQUAL):
+    if not hasattr(elt1,"xValid"):
+        XmlValidate.validate(elt1.modelXbrl, elt1)
+    if not hasattr(elt2,"xValid"):
+        XmlValidate.validate(elt2.modelXbrl, elt2)
     if equalMode == S_EQUAL:
         return elt1.sValue == elt2.sValue
     else:
@@ -120,13 +124,14 @@ def vEqual(elt1, elt2):
 
 def typedValue(dts, element, attrQname=None):
     try:
-        if element.xValid == XmlValidate.VALID:
-            if attrQname:
-                valid, xValue, sValue = element.xAttributes[attrQname.clarkNotation]
-            else:
-                xValue = element.xValue
-            return xValue
-    except AttributeError:
+        if attrQname: # PSVI attribute value
+            valid, xValue, sValue = element.xAttributes[attrQname.clarkNotation]
+            if valid == XmlValidate.VALID:
+                return xValue
+        else: # PSVI element value (of text)
+            if element.xValid == XmlValidate.VALID:
+                return element.xValue
+    except (AttributeError, KeyError):
         if dts:
             XmlValidate.validate(dts, element, recurse=False, attrQname=attrQname)
             return typedValue(None, element, attrQname=attrQname)

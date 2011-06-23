@@ -302,7 +302,7 @@ def aspectMatches(fact1, fact2, aspects):
                     elif dimValue1 != dimValue2.memberQname:
                         matches = False 
             elif dimValue1 is None:
-                if dimValue2:
+                if dimValue2 is not None:
                     matches = False
         if not matches: 
             break
@@ -482,20 +482,20 @@ def produceOutputFact(xpCtx, formula, result):
                 dimConcept = xpCtx.modelXbrl.qnameConcepts[dimQname]
                 dimAttr = ("dimension", XmlUtil.addQnameValue(xbrlElt, dimConcept.qname))
                 if dimConcept.isTypedDimension:
-                    dimElt = XmlUtil.addChild(contextElt, XbrlConst.xbrldi, "typedMember", 
+                    dimElt = XmlUtil.addChild(contextElt, XbrlConst.xbrldi, "xbrldi:typedMember", 
                                               attributes=dimAttr)
                     if isinstance(dimValue, ModelDimensionValue) and dimValue.isTyped:
                         XmlUtil.copyChildren(dimElt, dimValue.typedMember)
                 elif dimMemberQname:
-                    dimElt = XmlUtil.addChild(contextElt, XbrlConst.xbrldi, "explicitMember",
+                    dimElt = XmlUtil.addChild(contextElt, XbrlConst.xbrldi, "xbrldi:explicitMember",
                                               attributes=dimAttr,
                                               text=XmlUtil.addQnameValue(xbrlElt, dimMemberQname))
         if segOCCs:
-            if not segmentElt: 
+            if segmentElt is None: 
                 segmentElt = XmlUtil.addChild(entityElt, XbrlConst.xbrli, "segment")
             XmlUtil.copyNodes(segmentElt, segOCCs)
         if scenOCCs:
-            if not scenarioElt: 
+            if scenarioElt is None: 
                 scenarioElt = XmlUtil.addChild(newCntxElt, XbrlConst.xbrli, "scenario")
             XmlUtil.copyNodes(scenarioElt, scenOCCs)
                 
@@ -576,11 +576,11 @@ def produceOutputFact(xpCtx, formula, result):
                 v = XmlUtil.dateunionValue(x)
             else:
                 v = xsString(xpCtx, x)
-        itemElt = XmlUtil.addChild(xbrlElt, conceptQname,
+        newFact = XmlUtil.addChild(xbrlElt, conceptQname,
                                    attributes=attrs, text=v,
                                    afterSibling=xpCtx.outputLastFact.get(outputInstanceQname))
-        xpCtx.outputLastFact[outputInstanceQname] = itemElt
-        newFact = outputXbrlInstance.modelDocument.factDiscover(itemElt, outputXbrlInstance.facts)
+        xpCtx.outputLastFact[outputInstanceQname] = newFact
+        outputXbrlInstance.modelDocument.factDiscover(newFact, outputXbrlInstance.facts)
         return newFact
 
 def aspectValue(xpCtx, formula, aspect, srcMissingErr):
