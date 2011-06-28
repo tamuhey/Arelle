@@ -117,7 +117,7 @@ class ViewRenderedGrid(ViewWinGrid.ViewGrid):
             
             xAxisObj = yAxisObj = zAxisObj = None
             for tblAxisRel in tblAxisRelSet.fromModelObject(table):
-                axisType = tblAxisRel.element.getAttribute("axisType")
+                axisType = tblAxisRel.get("axisType")
                 axisObj = tblAxisRel.toModelObject
                 if axisType == "xAxis": xAxisObj = axisObj
                 elif axisType == "yAxis": yAxisObj = axisObj
@@ -450,7 +450,7 @@ class ViewRenderedGrid(ViewWinGrid.ViewGrid):
         except KeyError:
             if self.hcDimRelSet:
                 for dimHcRel in self.hcDimRelSet.toModelObject(dimConcept):
-                    if dimHcRel.fromModelObject:
+                    if dimHcRel.fromModelObject is not None:
                         for hcRel in self.hcDimRelSet.toModelObject(dimHcRel.fromModelObject):
                             contextElement = hcRel.contextElement
                             self.dimsContextElement[dimConcept] = contextElement

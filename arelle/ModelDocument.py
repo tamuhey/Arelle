@@ -13,7 +13,7 @@ from arelle.ModelDtsObject import ModelLink, ModelResource
 from arelle.ModelInstanceObject import ModelFact
 from arelle.ModelObjectFactory import parser
 
-def load(modelXbrl, uri, base=None, isEntry=False, isIncluded=None, namespace=None, reloadCache=False):
+def load(modelXbrl, uri, base=None, isEntry=False, isDiscovered=False, isIncluded=None, namespace=None, reloadCache=False):
     normalizedUri = modelXbrl.modelManager.cntlr.webCache.normalizeUrl(uri, base)
     if isEntry:
         modelXbrl.uri = normalizedUri
@@ -59,7 +59,7 @@ def load(modelXbrl, uri, base=None, isEntry=False, isIncluded=None, namespace=No
     modelXbrl.modelManager.showStatus(_("parsing {0}").format(uri))
     file = None
     try:
-        if modelXbrl.modelManager.validateDisclosureSystem:
+        if modelXbrl.modelManager.disclosureSystem.validateFileText:
             file = ValidateFilingText.checkfile(modelXbrl,filepath)
         else:
             file = modelXbrl.fileSource.file(filepath)
@@ -125,7 +125,14 @@ def load(modelXbrl, uri, base=None, isEntry=False, isIncluded=None, namespace=No
             type = Type.RSSFEED
         else:
             type = Type.Unknown
-            nestedInline = XmlUtil.descendant(rootNode, XbrlConst.xhtml, ("html", "xhtml"))
+            nestedInline = None
+            for htmlElt in rootNode.iter(tag="{http://www.w3.org/1999/xhtml}html"):
+                nestedInline = htmlElt
+                break
+            if nestedInline is None:
+                for htmlElt in rootNode.iter(tag="{http://www.w3.org/1999/xhtml}xhtml"):
+                    nestedInline = htmlElt
+                    break
             if nestedInline:
                 if XbrlConst.ixbrl in nestedInline.nsmap.values():
                     type = Type.INLINEXBRL
@@ -145,7 +152,7 @@ def load(modelXbrl, uri, base=None, isEntry=False, isIncluded=None, namespace=No
         modelDocument.xmlRootElement = rootNode
         modelDocument.schemaLocationElements.add(rootNode)
 
-        if isEntry:
+        if isEntry or isDiscovered:
             modelDocument.inDTS = True
         
         # discovery (parsing)
@@ -173,7 +180,7 @@ def load(modelXbrl, uri, base=None, isEntry=False, isIncluded=None, namespace=No
 
 def loadSchemalocatedSchema(modelXbrl, element, relativeUrl, namespace, baseUrl):
     importSchemaLocation = modelXbrl.modelManager.cntlr.webCache.normalizeUrl(relativeUrl, baseUrl)
-    doc = load(modelXbrl, importSchemaLocation, isIncluded=False, namespace=namespace)
+    doc = load(modelXbrl, importSchemaLocation, isIncluded=False, isDiscovered=False, namespace=namespace)
     if doc:
         doc.inDTS = False
     return doc
@@ -264,6 +271,9 @@ class Type:
     
 # schema elements which end the include/import scah
 schemaBottom = {"element", "attribute", "notation", "simpleType", "complexType", "group", "attributeGroup"}
+fractionParts = {"{http://www.xbrl.org/2003/instance}numerator",
+                 "{http://www.xbrl.org/2003/instance}denominator"}
+
 
 
 class ModelDocument:
@@ -365,14 +375,16 @@ class ModelDocument:
             # BUG: should not set this if obtained from schemaLocation instead of import (but may be later imported)
             self.modelXbrl.hasXDT = True
         try:
-            self.schemaDiscoverChildElements(rootElement)
+            self.schemaImportElements(rootElement)
+            if self.inDTS:
+                self.schemaDiscoverChildElements(rootElement)
         except (ValueError, LookupError) as err:
             self.modelXbrl.modelManager.addToLog("discovery: {0} error {1}".format(
                         self.basename,
                         err))
             
     
-    def schemaDiscoverChildElements(self, parentModelObject):
+    def schemaImportElements(self, parentModelObject):
         # must find import/include before processing linkbases or elements
         for modelObject in parentModelObject.iterchildren():
             if isinstance(modelObject,ModelObject) and modelObject.namespaceURI == XbrlConst.xsd:
@@ -381,6 +393,8 @@ class ModelDocument:
                     self.importDiscover(modelObject)
                 if ln in schemaBottom:
                     break
+
+    def schemaDiscoverChildElements(self, parentModelObject):
         # find roleTypes, elements, and linkbases
         for modelObject in parentModelObject.iterchildren():
             if isinstance(modelObject,ModelObject):
@@ -442,15 +456,16 @@ class ModelDocument:
             for otherDoc in self.modelXbrl.namespaceDocs[importNamespace]:
                 if otherDoc.uri == importSchemaLocation:
                     doc = otherDoc
-                    doc.inDTS = True
+                    if self.inDTS and not doc.inDTS:
+                        doc.inDTS = True    # now known to be discovered
+                        doc.schemaDiscoverChildElements(doc.xmlRootElement)
                     break
             if doc is None:
-                doc = load(self.modelXbrl, importSchemaLocation, 
+                doc = load(self.modelXbrl, importSchemaLocation, isDiscovered=self.inDTS, 
                            isIncluded=isIncluded, namespace=importNamespace)
             if doc is not None and self.referencesDocument.get(doc) is None:
                 self.referencesDocument[doc] = element.localName #import or include
                 self.referencedNamespaces.add(importNamespace)
-                doc.inDTS = True
                 
     def schemalocateElementNamespace(self, element):
         eltNamespace = element.namespaceURI 
@@ -584,10 +599,14 @@ class ModelDocument:
             if url == "":
                 doc = self
             else:
-                doc = load(self.modelXbrl, url, base=self.baseForElement(element))
+                # href discovery only can happein within a DTS
+                doc = load(self.modelXbrl, url, isDiscovered=True, base=self.baseForElement(element))
                 if not nonDTS and doc is not None and self.referencesDocument.get(doc) is None:
                     self.referencesDocument[doc] = "href"
-                    doc.inDTS = doc.type != Type.Unknown    # non-XBRL document is not in DTS
+                    if not doc.inDTS and doc.type != Type.Unknown:    # non-XBRL document is not in DTS
+                        doc.inDTS = True    # now known to be discovered
+                        if doc.type == Type.SCHEMA: # schema coming newly into DTS
+                            doc.schemaDiscoverChildElements(doc.xmlRootElement)
             href = (element, doc, id if len(id) > 0 else None)
             self.hrefObjects.append(href)
             return href
@@ -686,7 +705,7 @@ class ModelDocument:
             parentModelFacts.append( modelFact )
             self.modelXbrl.factsInInstance.append( modelFact )
             for tupleElement in modelFact.getchildren():
-                if isinstance(tupleElement,ModelObject):
+                if isinstance(tupleElement,ModelObject) and tupleElement.tag not in fractionParts:
                     self.factDiscover(tupleElement, modelFact.modelTupleFacts)
         else:
             self.modelXbrl.error(
@@ -723,12 +742,12 @@ class ModelDocument:
 
     def registryDiscover(self, rootNode):
         base = self.filepath
-        for entryElement in rootNode.getdescendants(tag="{http://xbrl.org/2008/registry}entry"):
+        for entryElement in rootNode.iterdescendants(tag="{http://xbrl.org/2008/registry}entry"):
             if isinstance(entryElement,ModelObject): 
-                uri = XmlUtil.childAttr(entryElement, XbrlConst.registry, "url", "xlink:href")
+                uri = XmlUtil.childAttr(entryElement, XbrlConst.registry, "url", "{http://www.w3.org/1999/xlink}href")
                 functionDoc = load(self.modelXbrl, uri, base=base)
                 if functionDoc is not None:
-                    testuri = XmlUtil.childAttr(functionDoc.xmlRootElement, XbrlConst.function, "conformanceTest", "xlink:href")
+                    testuri = XmlUtil.childAttr(functionDoc.xmlRootElement, XbrlConst.function, "conformanceTest", "{http://www.w3.org/1999/xlink}href")
                     testbase = functionDoc.filepath
                     testcaseDoc = load(self.modelXbrl, testuri, base=testbase)
                     if testcaseDoc is not None and self.referencesDocument.get(testcaseDoc) is None:

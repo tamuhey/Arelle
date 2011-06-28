@@ -25,11 +25,10 @@ class ModelObject(etree.ElementBase):
             modelDocument.idObjects[id] = self
                 
     def __del__(self):
-        if self.modelDocument is not None and self.modelDocument.modelXbrl is not None:
+        if hasattr(self, "modelDocument") and self.modelDocument.modelXbrl is not None:
             self.modelXbrl.modelObjects[self.objectIndex] = None
-        self.modelDocument = None
-        self.objectIndex = None
-        self.element = None
+        del self.modelDocument
+        del self.objectIndex
         
     def objectId(self,refId=""):
         return "_{0}_{1}".format(refId, self.objectIndex)
@@ -70,10 +69,6 @@ class ModelObject(etree.ElementBase):
             self.setNamespaceLocalName()
             return self._prefixedName
         
-    def getElementsByTagNameNS(self, ns, tag):
-        from arelle import XmlUtil
-        return XmlUtil.descendants(self, ns, tag)
-    
     @property
     def namespaceURI(self):
         try:

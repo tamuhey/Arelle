@@ -117,7 +117,7 @@ class ViewRelationshipSet(ViewWinTree.ViewTree):
         isRelation = isinstance(modelObject, ModelDtsObject.ModelRelationship)
         if isinstance(concept, ModelDtsObject.ModelConcept):
             text = labelPrefix + concept.label(preferredLabel,lang=self.lang)
-        elif self.arcrole == "EU-rendering" and isRelation:
+        elif self.arcrole == "EU-rendering":
             text = concept.genLabel(lang=self.lang)
             if isRelation:
                 relArcrole = modelObject.arcrole
@@ -147,7 +147,7 @@ class ViewRelationshipSet(ViewWinTree.ViewTree):
                 self.treeView.set(childnode, "usable", modelObject.usable)
         elif self.arcrole == "EU-rendering" and isRelation: # extra columns
             if relArcrole == XbrlConst.euTableAxis:
-                self.treeView.set(childnode, "axis", modelObject.element.getAttribute("axisType"))
+                self.treeView.set(childnode, "axis", modelObject.get("axisType"))
             if isinstance(concept, ModelAxisCoord):
                 self.treeView.set(childnode, "priItem", concept.primaryItemQname)
                 self.treeView.set(childnode, "dims", ' '.join(("{0},{1}".format(dim[0],dim[1]) for dim in concept.explicitDims)))

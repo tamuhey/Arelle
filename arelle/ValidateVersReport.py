@@ -42,8 +42,8 @@ class ValidateVersReport():
 
         versReportElt = versReport.xmlRootElement
         # check actions
-        for assignmentRef in versReportElt.getElementsByTagNameNS(XbrlConst.ver,"assignmentRef"):
-            ref = assignmentRef.getAttribute("ref")
+        for assignmentRef in versReportElt.iterdescendants(tag="{http://xbrl.org/2010/versioning-base}assignmentRef"):
+            ref = assignmentRef.get("ref")
             if ref not in versReport.idObjects or \
                not isinstance(versReport.idObjects[ref], ModelVersObject.ModelAssignment):
                     self.modelVersReport.error(
@@ -78,22 +78,22 @@ class ValidateVersReport():
                 
         # check reportRefs
         # check actions
-        for reportRef in versReportElt.getElementsByTagNameNS(XbrlConst.ver,"reportRef"):
-            xlinkType = reportRef.getAttributeNS(XbrlConst.xlink, "type")
+        for reportRef in versReportElt.iterdescendants(tag="{http://xbrl.org/2010/versioning-base}reportRef"):
+            xlinkType = reportRef.get("{http://www.w3.org/1999/xlink}type")
             if xlinkType != "simple":
                 self.modelVersReport.error(
                     _("ReportRef xlink:type {0} must be \"simple\"").format(xlinkType), 
                     "err", "vere:invalidXlinkType")
             # if existing it must be valid
-            href = reportRef.getAttributeNS(XbrlConst.xlink, "href")
+            href = reportRef.get("{http://www.w3.org/1999/xlink}href")
             # TBD
             
-            if not reportRef.hasAttributeNS(XbrlConst.xlink, "arcrole"):
+            arcrole = reportRef.get("{http://www.w3.org/1999/xlink}arcrole")
+            if arcrole is None:
                 self.modelVersReport.error(
                     _("ReportRef xlink:arcrole is missing"), 
                     "err", "vere:missingXlinkArcrole")
             else:
-                arcrole = reportRef.getAttributeNS(XbrlConst.xlink, "arcrole")
                 if arcrole != "http://xbrl.org/arcrole/2010/versioning/related-report":
                     self.modelVersReport.error(
                         _("ReportRef xlink:arcrole {0} is invalid").format(arcrole), 
@@ -373,10 +373,10 @@ class ValidateVersReport():
             # check instance aspect changes
             for iaChange in versReport.instanceAspectChanges:
                 # validate related concepts
-                for aspectName in ("concept", "member"):
-                    for aspectElt in iaChange.getElementsByTagNameNS(XbrlConst.veria, aspectName):
+                for aspectName in ("{http://xbrl.org/2010/versioning-instance-aspects}concept", "{http://xbrl.org/2010/versioning-instance-aspects}member"):
+                    for aspectElt in iaChange.iterdescendants(aspectName):
                         # check link attribute
-                        if aspectElt.hasAttribute("link"):
-                            link = aspectElement.hasAttribute("link")
+                        link = aspectElement.get("link")
+                        if link is not None:
                             iaChange.hrefToModelObject(link, dts)
             '''
