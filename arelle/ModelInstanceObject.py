@@ -205,7 +205,12 @@ class ModelFact(ModelObject):
                 return float(self.value) == float(other.value)
             else:
                 return False
-        return self.value.strip() == other.value.strip()
+        selfValue = self.value
+        otherValue = other.value
+        if isinstance(selfValue,str) and isinstance(otherValue,str):
+            return selfValue.strip() == otherValue.strip()
+        else:
+            return selfValue == otherValue
 
     @property
     def propertyView(self):
@@ -288,38 +293,36 @@ class ModelInlineFact(ModelFact):
 
     @property
     def format(self):
-        return self.get("format")
+        return self.prefixedNameQname(self.get("format"))
 
     @property
     def scale(self):
         return self.get("scale")
     
-    def transformedValue(self):
+    def transformedValue(self, value):
         num = 0
         negate = -1 if self.sign else 1
-        mult = 1
-        decSep = "," if self.format.endswith("comma") else "."
-        for c in XmlUtil.text(self):
-            if c == decSep:
-                mult = 0.1
-            elif c.isnumeric():
-                if mult >= 1:
-                    num = num * 10 + int(c)
-                else:
-                    num += int(c) * mult
-                    mult *= .1
         try:
-            num *= 10 ** int(self.scale)
+            num = float(value) * 10 ** int(self.scale)
         except ValueError:
             pass
         return "{0}".format(num * negate)
     
     @property
     def value(self):
+        v = XmlUtil.innerText(self, ixExclude=True)
+        f = self.format
+        if f is not None:
+            if (f.namespaceURI.startswith("http://www.xbrl.org/inlineXBRL/transformation/2010-04-20") and
+                f.localName in FunctionIxt.ixtFunctions_2010_04_20):
+                v = FunctionIxt.ixtFunctions_2010_04_20[f.localName](v)
+            elif (f.namespaceURI.startswith("http://www.xbrl.org/inlineXBRL/transformation/2011-07-31") and
+                f.localName in FunctionIxt.ixtFunctions_2011_07_31):
+                v = FunctionIxt.ixtFunctions_2011_07_31[f.localName](v)
         if self.localName == "nonNumeric" or self.localName == "tuple":
-            return XmlUtil.innerText(self, ixExclude=True)
+            return v
         else:
-            return self.transformedValue()
+            return self.transformedValue(v)
 
     @property
     def propertyView(self):
@@ -518,7 +521,7 @@ class ModelContext(ModelObject):
     @property
     def segmentHash(self):
         # s-equality hash
-        return XbrlUtil.equalityHash( self.scenario ) # self-caching
+        return XbrlUtil.equalityHash( self.segment ) # self-caching
         
     @property
     def scenarioHash(self):
@@ -578,6 +581,10 @@ class ModelContext(ModelObject):
             return result
         
     def isEqualTo_(self, cntx2, dimensionalAspectModel):
+        if cntx2 is None:
+            return False
+        if cntx2 == self:   # same context
+            return True
         if (self.periodHash != cntx2.periodHash or
             self.entityIdentifierHash != cntx2.entityIdentifierHash):
             return False 
@@ -744,19 +751,7 @@ class ModelUnit(ModelObject):
         return len(measures[0]) == 1 and len(measures[1]) == 0
     
     def isEqualTo(self, unit2):
-        '''
-        meas1 = self.measures
-        meas2 = unit2.measures
-        num1 = list(meas1[0])
-        denom1 = list(meas1[1])
-        num2 = list(meas2[0])
-        denom2 = list(meas2[1])
-        num1.sort()
-        num2.sort()
-        denom1.sort()
-        denom2.sort()
-        return num1 == num2 and denom1 == denom2
-        '''
+        if unit2 is None: return False
         return self.measures == unit2.measures
     
     @property
@@ -773,6 +768,7 @@ class ModelUnit(ModelObject):
             return tuple(('',m) for m in self.measures[0])
 
 from arelle.ModelFormulaObject import Aspect
+from arelle import FunctionIxt
            
 from arelle.ModelObjectFactory import elementSubstitutionModelClass
 elementSubstitutionModelClass.update((

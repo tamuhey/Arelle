@@ -428,6 +428,7 @@ def validate(val):
     # add instances with variable sets with no variables or other dependencies
     for independentInstance in instanceProducingVariableSets.keys() - orderedInstancesList:
         orderedInstancesList.append(independentInstance)
+        orderedInstancesSet.add(independentInstance)
     if None not in orderedInstancesList:
         orderedInstancesList.append(None)  # assertions come after all formulas that produce outputs
 
@@ -580,7 +581,7 @@ def checkFilterAspectModel(val, variableSet, filterRelationships, xpathContext, 
                 else:
                     acfAspectsCovering[aspect] = (varFilterRel.isCovered, filter.xlinkLabel)
             isAllAspectCoverFilter = filter.isAll
-        if varFilterRel.isCovered:
+        if True: # changed for test case 50210 v03 varFilterRel.isCovered:
             try:
                 aspectsCovered = filter.aspectsCovered(None)
                 if (not isAllAspectCoverFilter and 

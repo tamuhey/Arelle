@@ -83,22 +83,22 @@ class ValidateHmrc(ValidateXbrl.ValidateXbrl):
             for iF1, f1 in enumerate(modelXbrl.facts):
                 context = f1.context
                 unit = f1.unit
-                factElementName = f1.element.localName
-                if busNamespacePattern.match(f1.element.namespaceURI) and factElementName in busLocalNames:
+                factElementName = f1.localName
+                if busNamespacePattern.match(f1.namespaceURI) and factElementName in busLocalNames:
                         busItems[factElementName] = f1
-                elif gaapNamespacePattern.match(f1.element.namespaceURI) and factElementName in gaapLocalNames:
+                elif gaapNamespacePattern.match(f1.namespaceURI) and factElementName in gaapLocalNames:
                         gaapItems[factElementName] = f1
-                elif ifrsNamespacePattern.match(f1.element.namespaceURI) and factElementName in ifrsLocalNames:
+                elif ifrsNamespacePattern.match(f1.namespaceURI) and factElementName in ifrsLocalNames:
                         ifrsItems[factElementName] = f1
-                elif direpNamespacePattern.match(f1.element.namespaceURI) and factElementName in direpLocalNames:
+                elif direpNamespacePattern.match(f1.namespaceURI) and factElementName in direpLocalNames:
                         direpItems[factElementName] = f1
 
-                if context:
+                if context is not None:
                     for f2 in modelXbrl.facts[iF1:]:
                         if (f1.qname == f2.qname and 
-                            f2.context and context.isEqualTo(f2.context) and 
-                            ((not unit and not f2.unit) or
-                             (unit and f2.unit and unit.isEqualTo(f2.unit))) and
+                            f2.context is not None and context.isEqualTo(f2.context) and 
+                            ((unit is None and f2.unit is None) or
+                             (unit is not None and f2.unit is not None and unit.isEqualTo(f2.unit))) and
                             f1.xmlLang == f2.xmlLang and 
                             f1.effectiveValue != f2.effectiveValue):
                             modelXbrl.error(

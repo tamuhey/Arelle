@@ -32,25 +32,29 @@ class gridBorder(Separator):
         if border == TOPBORDER:
             rowspan = None
             y = y * 2 - 1
-            self.rowconfigure(y, weight=0, uniform=1)
+            #master.columnconfigure(x, weight=1, uniform='stretchX')
+            master.rowconfigure(y, weight=0, uniform='noStretch')
         elif border == BOTTOMBORDER:
             if rowspan:
                 y = (y + rowspan - 1) * 2 + 1
                 rowspan = None
             else:
                 y = y * 2 + 1
-            self.rowconfigure(y, weight=0, uniform=1)
+            #master.columnconfigure(x, weight=1, uniform='stretchX')
+            master.rowconfigure(y, weight=0, uniform='noStretch')
         elif border == LEFTBORDER:
             columnspan = None
             x = x * 2 - 1
-            self.columnconfigure(x, weight=0, uniform=1)
+            master.columnconfigure(x, weight=0, uniform='noStretch')
+            #master.rowconfigure(y, weight=1, uniform='stretchY')
         elif border == RIGHTBORDER:
             if columnspan:
                 x = (x + columnspan - 1) * 2 + 1
                 columnspan = None
             else:
                 x = x * 2 + 1
-            self.columnconfigure(x, weight=0, uniform=1)
+            master.columnconfigure(x, weight=0, uniform='noStretch')
+            #master.rowconfigure(y, weight=1, uniform='stretchY')
         if columnspan and columnspan > 1 and rowspan and rowspan > 1:
             self.grid(column=x, row=y, sticky=sticky, columnspan=columnspan, rowspan=rowspan)
         elif columnspan and columnspan > 1:
@@ -87,6 +91,11 @@ class gridSpacer(Frame):
         self.grid(column=x, row=y) # same dimensions as separator in col/row headers
         self.x = x
         self.y = y
+        self.config(width=2,height=2) # need same default as Spacer, which is 2 pixels (shadow pixel and highlight pixel)
+        if where in (TOPBORDER, BOTTOMBORDER):
+            master.rowconfigure(y, weight=0, uniform='noStretch')
+        elif where in (LEFTBORDER, RIGHTBORDER):
+            master.columnconfigure(x, weight=0, uniform='noStretch')
         # copy bindings
         try:
             contextMenuBinding = master.bind(master.contextMenuClick)
@@ -98,13 +107,17 @@ class gridSpacer(Frame):
         #    self.bind("<Configure>", master.master.master._configure_cell)
   
 class gridHdr(Label): 
-    def __init__(self, master, x, y, text, columnspan=None, rowspan=None, anchor='center', padding=None, wraplength=None, width=None, objectId=None, onClick=None): 
+    def __init__(self, master, x, y, text, columnspan=None, rowspan=None, anchor='center', padding=None, 
+                 wraplength=None, width=None, minwidth=None,
+                 objectId=None, onClick=None): 
         Label.__init__(self, master=master) 
         if isinstance(master.master.master, scrolledHeaderedFrame):
             x = x * 2
             y = y * 2
             if columnspan: columnspan = columnspan * 2 - 1
             if rowspan: rowspan = rowspan * 2 - 1
+#           #master.columnconfigure(x, weight=1, uniform='stretchX')
+            #master.rowconfigure(y, weight=1, uniform='stretch')
         self.config(text=text if text is not None else "",
                     #relief="solid", use border instead to effect row-col spanned cells properly 
                     #bg="#ffffff000", fg="#000000fff", 
@@ -130,6 +143,9 @@ class gridHdr(Label):
         self.columnspan = columnspan
         self.rowspan = rowspan
         self.objectId = objectId
+        
+        if minwidth:
+            master.columnconfigure(x, minsize=minwidth)
         # copy bindings
         try:
             contextMenuBinding = master.bind(master.contextMenuClick)
@@ -322,6 +338,7 @@ class scrolledHeaderedFrame(Frame):
         Frame.__init__(self, parent, *args, **kw)            
 
         self.colsConfigured = False
+        self.bodyCellsConfigured = False
         self.hdrVscrollbar = Scrollbar(self, orient=VERTICAL)
         self.hdrHscrollbar = Scrollbar(self, orient=HORIZONTAL)
         self.bodyVscrollbar = Scrollbar(self, orient=VERTICAL)
@@ -423,8 +440,9 @@ class scrolledHeaderedFrame(Frame):
         self.colsConfigured = False
 
     def _configure_colHdrInterior(self,event):
-        if not self.colsConfigured:
-            self.conformHdrsToBody()
+        # seems to not help:
+        #if not self.colsConfigured:
+        #    self.conformHdrsToBody()
         interiorW = self.colHdrInterior.winfo_reqwidth()
         interiorH = self.colHdrInterior.winfo_reqheight()
         self.colHdrCanvas.config(scrollregion=(0,0,interiorW,interiorH))
@@ -442,6 +460,9 @@ class scrolledHeaderedFrame(Frame):
         #   interiorW != self.tblHdrInterior.tk.call( ('grid', 'columnconfigure', self.tblHdrInterior._w, 1, '-minsize' ) ):
         #    self.tblHdrInterior.tk.call( ('grid', 'columnconfigure', self.tblHdrInterior._w, 1, '-minsize', interiorW ) )
     def _configure_bodyInterior(self,event):
+        # seems to not help:
+        #if not self.bodyCellsConfigured:
+        #    self.conformBodyCellsToHeader()
         interiorW = self.bodyInterior.winfo_reqwidth()
         interiorH = self.bodyInterior.winfo_reqheight()
         self.bodyCanvas.config(scrollregion=(0,0,interiorW,interiorH))
@@ -491,19 +512,20 @@ class scrolledHeaderedFrame(Frame):
                 columnspan = cell.columnspan # this is the non borders columns spanned
             else:
                 columnspan = 1
-            w = int(cellW / columnspan)
+            cellspan = ((columnspan + 1)/2)
+            w = int( ( cellW - ((columnspan - 1)/2) ) / cellspan )
             wWiderAlloced = 0
             wNumWider = 0
-            for X in range(x, x + columnspan*2, 2): # spanned cols divided equally over their columns
+            for X in range(x, x + columnspan, 2): # spanned cols divided equally over their columns
                 bodyColW = self.bodyInterior.tk.call( ('grid', 'columnconfigure', self.bodyInterior._w, X, '-minsize' ) )
                 if bodyColW > w:
                     wWiderAlloced += bodyColW
                     wNumWider += 1
-            if columnspan - wNumWider > 0 and cellW > wWiderAlloced:
-                W = int((cellW - wWiderAlloced) / (columnspan - wNumWider))
-                for X in range(x, x + columnspan*2, 2): # spanned cols divided equally over their columns
+            if cellspan - wNumWider > 0 and cellW > wWiderAlloced:
+                W = int((cellW - wWiderAlloced) / (cellspan - wNumWider))
+                for X in range(x, x + columnspan, 2): # spanned cols divided equally over their columns
                     bodyColW = self.bodyInterior.tk.call( ('grid', 'columnconfigure', self.bodyInterior._w, X, '-minsize' ) )
-                    if w > bodyColW: # even cells only
+                    if W > bodyColW: # even cells only
                         self.bodyInterior.tk.call( ('grid', 'columnconfigure', self.bodyInterior._w, X, '-minsize', W ) )
                         #self.bodyInterior.update()
             '''
@@ -515,10 +537,11 @@ class scrolledHeaderedFrame(Frame):
                     #self.bodyInterior.update()
             '''
         if isRowHdrCell:
-            bodyRowH = self.bodyInterior.tk.call( ('grid', 'rowconfigure', self.bodyInterior._w, y, '-minsize' ) )
-            if cellH > bodyRowH:
-                self.bodyInterior.tk.call( ('grid', 'rowconfigure', self.bodyInterior._w, y, '-minsize', cellH ) )
-                #self.bodyInterior.update()
+            if not hasattr(cell,'rowspan') or not cell.rowspan: # ignore abstract spanned rows
+                bodyRowH = self.bodyInterior.tk.call( ('grid', 'rowconfigure', self.bodyInterior._w, y, '-minsize' ) )
+                if cellH > bodyRowH:
+                    self.bodyInterior.tk.call( ('grid', 'rowconfigure', self.bodyInterior._w, y, '-minsize', cellH ) )
+                    #self.bodyInterior.update()
         if isBodyCell:
             rowHdrH = self.rowHdrInterior.tk.call( ('grid', 'rowconfigure', self.rowHdrInterior._w, y, '-minsize' ) )
             if cellH > rowHdrH:
@@ -581,6 +604,24 @@ class scrolledHeaderedFrame(Frame):
                     if W > bodyColW: # even (body) cells only
                         self.bodyInterior.tk.call( ('grid', 'columnconfigure', self.bodyInterior._w, X, '-minsize', W ) )
                         #self.bodyInterior.update()
+                            
+    def conformBodyCellsToHeader(self):
+        self.bodyCellsConfigured = True
+        
+        for bodyCell in self.bodyInterior.children.values():
+            if isinstance(bodyCell,gridSpacer):
+                continue
+            bodyCellW = bodyCell.winfo_reqwidth()
+            bodyCellH = bodyCell.winfo_reqheight()
+            x = bodyCell.x
+            hdrColW = self.colHdrInterior.tk.call( ('grid', 'columnconfigure', self.colHdrInterior._w, x, '-minsize' ) )
+            if bodyCellW < hdrColW:
+                self.bodyInterior.tk.call( ('grid', 'columnconfigure', self.bodyInterior._w, x, '-minsize', hdrColW ) )
+            y = bodyCell.y
+            rowColH = self.colHdrInterior.tk.call( ('grid', 'rowconfigure', self.rowHdrInterior._w, y, '-minsize' ) )
+            if bodyCellH < rowColH:
+                self.bodyInterior.tk.call( ('grid', 'rowconfigure', self.bodyInterior._w, y, '-minsize', rowColH ) )
+        
 #self.colHdrInterior.update()
         #self.rowHdrInterior.update()
         #self.bodyInterior.update()
