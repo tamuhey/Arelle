@@ -22,7 +22,7 @@ arcroleChecks = {
                                      XbrlConst.qnEqualityDefinition, 
                                      "xbrlve:info"),
     XbrlConst.assertionSet:          (XbrlConst.qnAssertionSet,
-                                      XbrlConst.qnAssertion,
+                                      (XbrlConst.qnAssertion, XbrlConst.qnVariableSetAssertion),
                                       "xbrlvalide:info"),
     XbrlConst.variableSet:           (XbrlConst.qnVariableSet,
                                       (XbrlConst.qnVariableVariable, XbrlConst.qnParameter),
@@ -188,8 +188,8 @@ def validate(val):
     # determine parameter values
     xpathContext = XPathContext.create(val.modelXbrl)
     for paramQname in orderedParameters:
+        modelParameter = val.modelXbrl.qnameParameters[paramQname]
         if not isinstance(modelParameter, ModelInstance):
-            modelParameter = val.modelXbrl.qnameParameters[paramQname]
             asType = modelParameter.asType
             asLocalName = asType.localName if asType else "string"
             try:

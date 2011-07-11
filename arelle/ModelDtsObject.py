@@ -78,7 +78,7 @@ class ModelSchemaObject(ModelObject):
         
     @property
     def name(self):
-        return self.get("name")
+        return self.getStripped("name")
     
     @property
     def namespaceURI(self):
@@ -500,19 +500,28 @@ class ModelType(ModelSchemaObject):
         
     @property
     def name(self):
-        if self.get("name"):
-            return self.get("name")
+        nameAttr = self.getStripped("name")
+        if nameAttr:
+            return nameAttr
         # may be anonymous type of parent
         element = self.getparent()
         while element is not None:
-            if element.get("name"):
-                return element.get("name") + "@anonymousType"
+            nameAttr = element.getStripped("name")
+            if nameAttr:
+                return nameAttr + "@anonymousType"
             element = element.getparent()
         return None
     
     @property
     def qnameDerivedFrom(self):
         return self.prefixedNameQname(XmlUtil.descendantAttr(self, XbrlConst.xsd, ("extension","restriction"), "base"))
+    
+    @property
+    def typeDerivedFrom(self):
+        qnameDerivedFrom = self.qnameDerivedFrom
+        if qnameDerivedFrom is not None:
+            self.modelXbrl.qnameTypes.get(qnameDerivedFrom)
+        return None
     
     @property
     def baseXsdType(self):
@@ -522,12 +531,14 @@ class ModelType(ModelSchemaObject):
             if self.qname == XbrlConst.qnXbrliDateUnion:
                 return "XBRLI_DATEUNION"
             qnameDerivedFrom = self.qnameDerivedFrom
-            if qnameDerivedFrom and qnameDerivedFrom.namespaceURI == XbrlConst.xsd:
+            if qnameDerivedFrom is None:
+                self._baseXsdType =  "anyType"
+            elif qnameDerivedFrom.namespaceURI == XbrlConst.xsd:
                 self._baseXsdType = qnameDerivedFrom.localName
             else:
                 typeDerivedFrom = self.modelXbrl.qnameTypes.get(qnameDerivedFrom)
                 #assert typeDerivedFrom is not None, _("Unable to determine derivation of {0}").format(qnameDerivedFrom)
-                self._baseXsdType = typeDerivedFrom.baseXsdType if typeDerivedFrom is not None else None
+                self._baseXsdType = typeDerivedFrom.baseXsdType if typeDerivedFrom is not None else "anyType"
             return self._baseXsdType
     
     @property
@@ -539,7 +550,7 @@ class ModelType(ModelSchemaObject):
             if self.qname == XbrlConst.qnXbrliDateUnion:
                 return "XBRLI_DATEUNION"
             qnameDerivedFrom = self.qnameDerivedFrom
-            if qnameDerivedFrom:
+            if qnameDerivedFrom is not None:
                 if qnameDerivedFrom.namespaceURI == XbrlConst.xbrli:  # xbrli type
                     self._baseXbrliType = qnameDerivedFrom.localName
                 elif qnameDerivedFrom.namespaceURI == XbrlConst.xsd:    # xsd type
@@ -547,6 +558,8 @@ class ModelType(ModelSchemaObject):
                 else:
                     typeDerivedFrom = self.modelXbrl.qnameTypes.get(qnameDerivedFrom)
                     self._baseXbrliType = typeDerivedFrom.baseXbrliType if typeDerivedFrom is not None else None
+            else:
+                self._baseXbrliType = None
             return self._baseXbrliType
     
     @property
@@ -556,7 +569,7 @@ class ModelType(ModelSchemaObject):
         if self.name == "escapedItemType" and self.modelDocument.targetNamespace.startswith(XbrlConst.dtrTypesStartsWith):
             return True
         qnameDerivedFrom = self.qnameDerivedFrom
-        if qnameDerivedFrom and (qnameDerivedFrom.namespaceURI in(XbrlConst.xsd,XbrlConst.xbrli)):
+        if qnameDerivedFrom is None or (qnameDerivedFrom.namespaceURI in(XbrlConst.xsd,XbrlConst.xbrli)):
             return False
         typeDerivedFrom = self.modelXbrl.qnameTypes.get(qnameDerivedFrom)
         return typeDerivedFrom.isTextBlock if typeDerivedFrom is not None else False
@@ -568,13 +581,15 @@ class ModelType(ModelSchemaObject):
             self.modelDocument.targetNamespace.startswith(XbrlConst.dtrTypesStartsWith)):
             return True
         qnameDerivedFrom = self.qnameDerivedFrom
-        if qnameDerivedFrom and (qnameDerivedFrom.namespaceURI in (XbrlConst.xsd,XbrlConst.xbrli)):
+        if qnameDerivedFrom is None or (qnameDerivedFrom.namespaceURI in (XbrlConst.xsd,XbrlConst.xbrli)):
             return False
         typeDerivedFrom = self.modelXbrl.qnameTypes.get(qnameDerivedFrom)
         return typeDerivedFrom.isDomainItemType if typeDerivedFrom is not None else False
     
     def isDerivedFrom(self, typeqname):
         qnameDerivedFrom = self.qnameDerivedFrom
+        if qnameDerivedFrom is None:    # not derived from anything
+            return typeqname is None
         if qnameDerivedFrom == typeqname:
             return True
         typeDerivedFrom = self.modelXbrl.qnameTypes.get(qnameDerivedFrom)
@@ -608,7 +623,7 @@ class ModelType(ModelSchemaObject):
         if "enumeration" not in facetValues:
             for facetElt in XmlUtil.descendants(self, XbrlConst.xsd, "enumeration"):
                 facetValues.setdefault("enumeration",set()).add(facetElt.get("value"))
-        typeDerivedFrom = self.modelXbrl.qnameTypes.get(self.qnameDerivedFrom)
+        typeDerivedFrom = self.typeDerivedFrom
         if typeDerivedFrom is not None:
             typeDerivedFrom.constrainingFacets(facetValues)
         return facetValues
@@ -628,6 +643,8 @@ class ModelType(ModelSchemaObject):
                         qnameAttrType = ModelValue.qname(restriction, restriction.get("base"))
             if qnameAttrType and qnameAttrType.namespaceURI == XbrlConst.xsd:
                 return qnameAttrType.localName
+            if qnameAttrType is None:
+                return "anyType"
             typeDerivedFrom = self.modelXbrl.qnameTypes.get(qnameAttrType)
             if typeDerivedFrom is not None:
                 return typeDerivedFrom.baseXsdType
@@ -835,11 +852,12 @@ class ModelRelationship(ModelObject):
 
     @property
     def variablename(self):
-        return self.get("name")
+        return self.getStripped("name")
 
     @property
     def variableQname(self):
-        return ModelValue.qname(self.arcElement, self.get("name"), noPrefixIsNoNamespace=True) if self.get("name") else None
+        varName = self.variablename
+        return ModelValue.qname(self.arcElement, varName, noPrefixIsNoNamespace=True) if varName else None
 
     @property
     def linkrole(self):
