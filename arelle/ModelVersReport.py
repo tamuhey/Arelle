@@ -252,25 +252,26 @@ class ModelVersReport(ModelDocument.ModelDocument):
         
         # determine namespaces
         schemaLocations = []
-        schemasRelPath = os.path.relpath(schemaDir, os.path.dirname(versReportFile)) + os.sep
-        for prefix in self.reportElement.nsmap.values():
-            if prefix  == XbrlConst.ver:
-                schemaLocations.append(XbrlConst.ver)
-                schemaLocations.append(schemasRelPath + "versioning-base.xsd")
-            elif prefix  == XbrlConst.vercb:
-                schemaLocations.append(XbrlConst.vercb)
-                schemaLocations.append(schemasRelPath + "versioning-concept-basic.xsd")
-            elif prefix  == XbrlConst.verce:
-                schemaLocations.append(XbrlConst.verce)
-                schemaLocations.append(schemasRelPath + "versioning-concept-extended.xsd")
-            elif prefix  == XbrlConst.verrels:
-                schemaLocations.append(XbrlConst.verrels)
-                schemaLocations.append(schemasRelPath + "versioning-relationship-sets.xsd")
-            elif prefix  == XbrlConst.veria:
-                schemaLocations.append(XbrlConst.veria)
-                schemaLocations.append(schemasRelPath + "versioning-instance-aspects.xsd")
-        self.reportElement.set("{http://www.w3.org/2001/XMLSchema-instance}schemaLocation", 
-                               " ".join(schemaLocations))
+        if schemaDir is not None:
+            schemasRelPath = os.path.relpath(schemaDir, os.path.dirname(versReportFile)) + os.sep
+            for prefix in self.reportElement.nsmap.values():
+                if prefix  == XbrlConst.ver:
+                    schemaLocations.append(XbrlConst.ver)
+                    schemaLocations.append(schemasRelPath + "versioning-base.xsd")
+                elif prefix  == XbrlConst.vercb:
+                    schemaLocations.append(XbrlConst.vercb)
+                    schemaLocations.append(schemasRelPath + "versioning-concept-basic.xsd")
+                elif prefix  == XbrlConst.verce:
+                    schemaLocations.append(XbrlConst.verce)
+                    schemaLocations.append(schemasRelPath + "versioning-concept-extended.xsd")
+                elif prefix  == XbrlConst.verrels:
+                    schemaLocations.append(XbrlConst.verrels)
+                    schemaLocations.append(schemasRelPath + "versioning-relationship-sets.xsd")
+                elif prefix  == XbrlConst.veria:
+                    schemaLocations.append(XbrlConst.veria)
+                    schemaLocations.append(schemasRelPath + "versioning-instance-aspects.xsd")
+            self.reportElement.set("{http://www.w3.org/2001/XMLSchema-instance}schemaLocation", 
+                                   " ".join(schemaLocations))
         
         self.modelXbrl.modelManager.showStatus(_("Checking report file"))
         self.modelXbrl.modelDocument = self # model document is now established
@@ -623,6 +624,7 @@ class ModelVersReport(ModelDocument.ModelDocument):
                         explDim = self.createInstanceAspectsEvent("typedDimension" if dimConcept.isTypedDimension else "explicitDimension", 
                                                                   (('name',dimConcept.qname),) + \
                                                                   ((('excluded','true'),) if isNotAll else ()),
+                                                                  comment=self.typedDomainElementComment(dimConcept),
                                                                   eventParent=aspectEvent)
                         for domRel in self.DRSdomRels(dts, dimRel):
                             domHasMemRels = dts.relationshipSet(XbrlConst.domainMember, linkrole).fromModelObject(priItemConcept)
@@ -648,8 +650,8 @@ class ModelVersReport(ModelDocument.ModelDocument):
                         for fromRel, toRel, fromAttrSet, toAttrSet in priItemDifferences:
                             if fromRel is not None:
                                 if toRel is not None: e = "aspectModelChange"
-                                else:                 e = "aspectModelAdd"
-                            else:                     e = "aspectModelDelete"
+                                else:                 e = "aspectModelDelete"
+                            else:                     e = "aspectModelAdd"
                             aspectMdlEvent = self.createInstanceAspectsEvent(e)
                             for rel, attrSet, e in ((fromRel, fromAttrSet-toAttrSet, "fromAspects"),
                                                     (toRel, toAttrSet-fromAttrSet, "toAspects")):
@@ -667,6 +669,7 @@ class ModelVersReport(ModelDocument.ModelDocument):
                                         explDim = self.createInstanceAspectsEvent("typedDimension" if dimConcept.isTypedDimension else "explicitDimension",
                                                                                   (('name',dimConcept.qname),) + \
                                                                                   ((('excluded','true'),) if isNotAll else ()),
+                                                                                  comment=self.typedDomainElementComment(dimConcept),
                                                                                   eventParent=aspectEvent)
                                         for domRel in self.DRSdomRels(dts, dimRel):
                                             domHasMemRels = dts.relationshipSet(XbrlConst.domainMember, linkrole).fromModelObject(priItemConcept)
@@ -680,8 +683,8 @@ class ModelVersReport(ModelDocument.ModelDocument):
                         for fromDimRel, toDimRel, isNotAll, mbrDiffs in dimsDifferences:
                             if fromDimRel is not None:
                                 if toDimRel is not None: e = "aspectModelChange"
-                                else:                    e = "aspectModelAdd"
-                            else:                        e = "aspectModelDelete"
+                                else:                    e = "aspectModelDelete"
+                            else:                        e = "aspectModelAdd"
                             aspectMdlEvent = self.createInstanceAspectsEvent(e)
                             for dimRel, e, isFrom in ((fromDimRel, "fromAspects", True),
                                                       (toDimRel, "toAspects", False)):
@@ -698,6 +701,7 @@ class ModelVersReport(ModelDocument.ModelDocument):
                                     explDim = self.createInstanceAspectsEvent("typedDimension" if dimConcept.isTypedDimension else "explicitDimension", 
                                                                               (('name',dimConcept.qname),) + \
                                                                               ((('excluded','true'),) if isNotAll else ()),
+                                                                              comment=self.typedDomainElementComment(dimConcept),
                                                                               eventParent=aspectEvent)
                                     if mbrDiffs:
                                         for fromRel, toRel, fromAttrSet, toAttrSet in mbrDiffs:
@@ -797,6 +801,13 @@ class ModelVersReport(ModelDocument.ModelDocument):
             self.typedDomainsCorrespond[fromDimConcept, toDimConcept] = isCorresponding
             return isCorresponding
 
+    def typedDomainElementComment(self, dimConcept):
+        if dimConcept.isTypedDimension:
+            if dimConcept.typedDomainElement is not None:
+                return _('typed domain element {0}').format(dimConcept.typedDomainElement.qname)
+            else:
+                return _('typedDomainRef={0} (element qname cannot be determined)').format(dimConcept.typedDomainRef)
+        return None
 
     def DRSdimsDiff(self, fromDTS, fromPriItemDRSrels, toDTS, toPriItemDRSrels):
         fromDims = {}
@@ -900,9 +911,7 @@ class ModelVersReport(ModelDocument.ModelDocument):
         return action
             
     def conceptHref(self, concept):
-        conceptId = concept.id
-        return (self.relativeUri(concept.modelDocument.uri) + "#" + 
-            (conceptId if conceptId else XmlUtil.elementFragmentIdentifier(concept)))  
+        return self.relativeUri(concept.modelDocument.uri) + "#" + XmlUtil.elementFragmentIdentifier(concept) 
         
     def createRelationshipSetEvent(self, eventName, linkrole=None, arcrole=None, fromConcept=None, toConcept=None, axis=None, attrValues=None, comment=None, eventParent=None):
         if eventParent is None:
