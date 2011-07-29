@@ -95,46 +95,14 @@ class ModelXbrl:
 
     def close(self):
         self.closeViews()
-        if hasattr(self,"modelDocument") and self.modelDocument:
-            self.modelDocument.close([])
-        self.modelDocument = None
-        self.xbrlManager = None
-        self.namespaceDocs = defaultdict(list)
-        self.urlDocs = {}
-        self.errors = []
-        self.logCountErr = 0
-        self.logCountWrn = 0
-        self.logCountInfo = 0
-        self.arcroleTypes = defaultdict(list)
-        self.roleTypes = defaultdict(list)
-        self.qnameConcepts = {}
-        self.qnameAttributes = {}
-        self.nameConcepts = defaultdict(list) # contains ModelConcepts by name 
-        self.qnameTypes = {}
-        self.baseSets = defaultdict(list)
-        self.relationshipSets = {}
-        self.facts = []
-        self.factsInInstance = []
-        self.contexts = {}
-        self.units = {}
-        self.modelObjects = []
-        self.qnameParameters = {}
-        self.modelParameters = set()
-        self.modelVariableSets = set()
-        self.modelCustomFunctionSignatures = {}
-        self.modelCustomFunctionImplementations = set()
-        self.views = []
-        self.langs = set()
-        self.labelroles = set()
-        if hasattr(self,"fileSource"):
-            self.fileSource.close()
-        self.hasXDT = False
-        self.hasFormulae = False
-        self.hasTableRendering = False
         if self.formulaOutputInstance:
             self.formulaOutputInstance.close()
-        del self.log
-        del self.modelXbrl
+        if hasattr(self,"fileSource"):
+            self.fileSource.close()
+        modelDocument = self.modelDocument if hasattr(self,"modelDocument") else None
+        self.__dict__.clear() # dereference everything before closing document
+        if modelDocument:
+            modelDocument.close()
             
     def reload(self,nextaction,reloadCache=False):
         from arelle import ModelDocument

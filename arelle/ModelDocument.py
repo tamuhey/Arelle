@@ -9,7 +9,7 @@ from lxml import etree
 from arelle import (XbrlConst, XmlUtil, UrlUtil, ValidateFilingText, XmlValidate)
 from arelle.ModelObject import ModelObject
 from arelle.ModelValue import qname
-from arelle.ModelDtsObject import ModelLink, ModelResource
+from arelle.ModelDtsObject import ModelLink, ModelResource, ModelRelationship
 from arelle.ModelInstanceObject import ModelFact
 from arelle.ModelObjectFactory import parser
 
@@ -326,27 +326,27 @@ class ModelDocument:
     def __repr__(self):
         return ("{0}[{1}]{2})".format(self.__class__.__name__, self.objectId(),self.propertyView))
 
-    def close(self, visited):
+    def close(self, visited=None):
+        if visited is None: visited = []
         visited.append(self)
-        for referencedDocument in self.referencesDocument.keys():
-            if referencedDocument not in visited:
-                referencedDocument.close(visited)
-        if self.type == Type.VERSIONINGREPORT:
-            if self.fromDTS:
-                self.fromDTS.close()
-                self.fromDTS = None
-            if self.toDTS:
-                self.toDTS.close()
-                self.toDTS = None
-        self.modelXbrl = None
-        self.referencesDocument = {}
-        self.idObjects = {}  # by id
-        self.modelObjects = []
-        self.hrefObjects = []
-        self.schemaLocationElements = set()
-        self.referencedNamespaces = set()
-        self.xmlRootElement = None
-        self.xmlDocument = None
+        try:
+            for referencedDocument in self.referencesDocument.keys():
+                if referencedDocument not in visited:
+                    referencedDocument.close(visited)
+            if self.type == Type.VERSIONINGREPORT:
+                if self.fromDTS:
+                    self.fromDTS.close()
+                if self.toDTS:
+                    self.toDTS.close()
+            xmlDocument = self.xmlDocument
+            parser = self.parser
+            for modelObject in self.modelObjects:
+                if not isinstance(modelObject, ModelRelationship):
+                    modelObject.clear() # clear children
+            self.__dict__.clear() # dereference everything before clearing xml tree
+            xmlDocument._setroot(parser.makeelement("{http://dummy}dummy"))
+        except AttributeError:
+            pass    # maybe already cloased
         visited.remove(self)
         
     def gettype(self):
