@@ -28,7 +28,7 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
        not modelXbrl.modelManager.disclosureSystem.hrefValid(normalizedUri):
         blocked = modelXbrl.modelManager.disclosureSystem.blockDisallowedReferences
         modelXbrl.error(("EFM.6.22.02", "GFM.1.1.3", "SBR.NL.2.1.0.06"),
-                "Prohibited file for filings %(blockedIndicator)s: %(url)s",
+                _("Prohibited file for filings %(blockedIndicator)s: %(url)s"),
                 modelObject=referringElement, url=normalizedUri, blockedIndicator=_(" blocked") if blocked else "")
         if blocked:
             return None
@@ -50,7 +50,7 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
             uri = modelXbrl.modelManager.cntlr.webCache.normalizeUrl(filepath)
     if filepath is None: # error such as HTTPerror is already logged
         modelXbrl.error("FileNotLoadable",
-                "File can not be loaded: %(fileName)s",
+                _("File can not be loaded: %(fileName)s"),
                 modelObject=referringElement, fileName=mappedUri)
         type = Type.Unknown
         return None
@@ -68,12 +68,12 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
             file = ValidateFilingText.checkfile(modelXbrl,filepath)
         else:
             file = modelXbrl.fileSource.file(filepath)
-        _parser = parser(modelXbrl,filepath)
+        _parser, _parserLookupName, _parserLookupClass = parser(modelXbrl,filepath)
         xmlDocument = etree.parse(file,parser=_parser,base_url=filepath)
         file.close()
     except EnvironmentError as err:
         modelXbrl.error("IOerror",
-                "%(fileName)s: file error: %(error)s",
+                _("%(fileName)s: file error: %(error)s"),
                 modelObject=referringElement, fileName=os.path.basename(uri), error=str(err))
         type = Type.Unknown
         if file:
@@ -82,7 +82,7 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
     except (etree.LxmlError,
             ValueError) as err:  # ValueError raised on bad format of qnames, xmlns'es, or parameters
         modelXbrl.error("XMLsyntax",
-                "%(fileName)s: import error: %(error)s",
+                _("%(fileName)s: import error: %(error)s"),
                 modelObject=referringElement, fileName=os.path.basename(uri), error=str(err))
         type = Type.Unknown
         if file:
@@ -152,6 +152,8 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
             modelDocument = ModelDocument(modelXbrl, type, mappedUri, filepath, xmlDocument)
         rootNode.init(modelDocument)
         modelDocument.parser = _parser # needed for XmlUtil addChild's makeelement 
+        modelDocument.parserLookupName = _parserLookupName
+        modelDocument.parserLookupClass = _parserLookupClass
         modelDocument.xmlRootElement = rootNode
         modelDocument.schemaLocationElements.add(rootNode)
 
@@ -219,7 +221,7 @@ def create(modelXbrl, type, uri, schemaRefs=None, isEntry=False):
     if Xml:
         import io
         file = io.StringIO(Xml)
-        _parser = parser(modelXbrl,filepath)
+        _parser, _parserLookupName, _parserLookupClass = parser(modelXbrl,filepath)
         xmlDocument = etree.parse(file,parser=_parser,base_url=filepath)
         file.close()
     else:
@@ -231,6 +233,8 @@ def create(modelXbrl, type, uri, schemaRefs=None, isEntry=False):
         modelDocument = ModelDocument(modelXbrl, type, normalizedUri, filepath, xmlDocument)
     if Xml:
         modelDocument.parser = _parser # needed for XmlUtil addChild's makeelement 
+        modelDocument.parserLookupName = _parserLookupName
+        modelDocument.parserLookupClass = _parserLookupClass
         rootNode = xmlDocument.getroot()
         rootNode.init(modelDocument)
         if xmlDocument:
@@ -341,8 +345,11 @@ class ModelDocument:
             xmlDocument = self.xmlDocument
             parser = self.parser
             for modelObject in self.modelObjects:
+                modelObject.__dict__.clear() # remove all references
                 if not isinstance(modelObject, ModelRelationship):
                     modelObject.clear() # clear children
+            self.parserLookupName.__dict__.clear()
+            self.parserLookupClass.__dict__.clear()
             self.__dict__.clear() # dereference everything before clearing xml tree
             xmlDocument._setroot(parser.makeelement("{http://dummy}dummy"))
         except AttributeError:
@@ -364,13 +371,13 @@ class ModelDocument:
             self.modelXbrl.namespaceDocs[targetNamespace].append(self)
             if namespace and targetNamespace != namespace:
                 self.modelXbrl.error("xmlSchema1.4.2.3:refSchemaNamespace",
-                    "Discovery of %(fileName)s expected namespace %(namespace)s found targetNamespace %(targetNamespace)s",
+                    _("Discovery of %(fileName)s expected namespace %(namespace)s found targetNamespace %(targetNamespace)s"),
                     modelObject=rootElement, fileName=self.basename,
                     namespace=namespace, targetNamespace=targetNamespace)
             if (self.modelXbrl.modelManager.validateDisclosureSystem and 
                 self.modelXbrl.modelManager.disclosureSystem.disallowedHrefOfNamespace(self.uri, targetNamespace)):
                     self.modelXbrl.error(("EFM.6.22.02", "GFM.1.1.3", "SBR.NL.2.1.0.06"),
-                            "Namespace: %(namespace)s disallowed schemaLocation %(schemaLocation)s",
+                            _("Namespace: %(namespace)s disallowed schemaLocation %(schemaLocation)s"),
                             modelObject=rootElement, namespace=targetNamespace, schemaLocation=self.uri)
 
         else:
@@ -426,7 +433,7 @@ class ModelDocument:
             if baseAttr:
                 if self.modelXbrl.modelManager.validateDisclosureSystem:
                     self.modelXbrl.error(("EFM.6.03.11", "GFM.1.1.7"),
-                        "Prohibited base attribute: %(attribute)s",
+                        _("Prohibited base attribute: %(attribute)s"),
                         modelObejct=element, attribute=baseAttr)
                 else:
                     if baseAttr.startswith("/"):
@@ -455,7 +462,7 @@ class ModelDocument:
                     self.modelXbrl.modelManager.disclosureSystem.blockDisallowedReferences and
                     self.modelXbrl.modelManager.disclosureSystem.disallowedHrefOfNamespace(importSchemaLocation, importNamespace)):
                 self.modelXbrl.error(("EFM.6.22.02", "GFM.1.1.3", "SBR.NL.2.1.0.06"),
-                        "Namespace: %(namespace)s disallowed schemaLocation blocked %(schemaLocation)s",
+                        _("Namespace: %(namespace)s disallowed schemaLocation blocked %(schemaLocation)s"),
                         modelObject=element, namespace=importNamespace, schemaLocation=importSchemaLocation)
                 return
             doc = None
@@ -519,7 +526,7 @@ class ModelDocument:
                         href = self.discoverHref(lbElement)
                         if href is None:
                             self.modelXbrl.error("xbrl:hrefMissing",
-                                    "Linkbase reference for %(linkbaseRefElement)s href attribute missing or malformed",
+                                    _("Linkbase reference for %(linkbaseRefElement)s href attribute missing or malformed"),
                                     modelObject=lbElement, linkbaseRefElement=lbLn)
                         else:
                             self.hrefObjects.append(href)
@@ -550,7 +557,7 @@ class ModelDocument:
                                     href = self.discoverHref(linkElement, nonDTS=nonDTS)
                                     if href is None:
                                         self.modelXbrl.error("xbrl:hrefMissing",
-                                                "Locator href attribute missing or malformed",
+                                                _("Locator href attribute missing or malformed"),
                                                 modelObejct=linkElement)
                                     else:
                                         linkElement.modelHref = href
@@ -589,7 +596,7 @@ class ModelDocument:
                                         .append(modelResource)
                     else:
                         self.modelXbrl.error("xbrl:schemaImportMissing",
-                                "Linkbase extended link %(element)s missing schema import",
+                                _("Linkbase extended link %(element)s missing schema import"),
                                 modelObject=lbElement, element=lbElement.prefixedName)
                         
                 
@@ -692,7 +699,7 @@ class ModelDocument:
         if tupleRef:
             if tupleRef not in tuplesByTupleID:
                 self.modelXbrl.error("ixerr:tupleRefMissing",
-                        "Inline XBRL tupleRef %(tupleRef)s not found",
+                        _("Inline XBRL tupleRef %(tupleRef)s not found"),
                         modelObject=modelFact, tupleRef=tupleRef)
             else:
                 tuple = tuplesByTupleID[tupleRef]
@@ -714,7 +721,7 @@ class ModelDocument:
                     self.factDiscover(tupleElement, modelFact.modelTupleFacts)
         else:
             self.modelXbrl.error("xbrl:schemaImportMissing",
-                    "Instance fact %(element)s missing schema definition ",
+                    _("Instance fact %(element)s missing schema definition "),
                     modelObject=modelFact, element=modelFact.prefixedName)
     
     def testcasesIndexDiscover(self, rootNode):
