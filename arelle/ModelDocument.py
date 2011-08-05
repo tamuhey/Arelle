@@ -71,7 +71,7 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
         _parser, _parserLookupName, _parserLookupClass = parser(modelXbrl,filepath)
         xmlDocument = etree.parse(file,parser=_parser,base_url=filepath)
         file.close()
-    except EnvironmentError as err:
+    except (EnvironmentError, KeyError) as err:  # missing zip file raises KeyError
         modelXbrl.error("IOerror",
                 _("%(fileName)s: file error: %(error)s"),
                 modelObject=referringElement, fileName=os.path.basename(uri), error=str(err))
@@ -624,6 +624,7 @@ class ModelDocument:
         self.schemaLinkbaseRefsDiscover(xbrlElement)
         self.linkbaseDiscover(xbrlElement,inInstance=True) # for role/arcroleRefs and footnoteLinks
         self.instanceContentsDiscover(xbrlElement)
+        XmlValidate.validate(self.modelXbrl, xbrlElement) # validate instance elements
 
     def instanceContentsDiscover(self,xbrlElement):
         for instElement in xbrlElement.iterchildren():
@@ -650,7 +651,7 @@ class ModelDocument:
                 for sElt in containerElement.iterchildren():
                     if isinstance(sElt,ModelObject):
                         if sElt.namespaceURI == XbrlConst.xbrldi and sElt.localName in ("explicitMember","typedMember"):
-                            XmlValidate.validate(self.modelXbrl, sElt)
+                            #XmlValidate.validate(self.modelXbrl, sElt)
                             dimension = sElt.dimension
                             if dimension is not None and dimension not in containerDimValues:
                                 containerDimValues[dimension] = sElt

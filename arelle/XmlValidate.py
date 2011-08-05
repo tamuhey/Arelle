@@ -5,15 +5,17 @@ Created on Feb 20, 2011
 (c) Copyright 2011 Mark V Systems Limited, All rights reserved.
 '''
 from lxml import etree
-import xml.dom.minidom, os
+import xml.dom.minidom, os, re
 from arelle import (XbrlConst, XmlUtil)
-from arelle.ModelValue import (qname, dateTime, DATE, DATETIME)
+from arelle.ModelValue import (qname, dateTime, DATE, DATETIME, DATEUNION, anyURI)
 
 UNKNOWN = 0
 INVALID = 1
 NONE = 2
 VALID = 3
 VALID_ID = 4
+
+normalizeWhitespacePattern = re.compile(r"\s+")
 
 def xmlValidate(entryModelDocument):
     # test of schema validation using lxml (trial experiment, commented out for production use)
@@ -67,14 +69,17 @@ def validate(modelXbrl, elt, recurse=True, attrQname=None):
         modelConcept = modelXbrl.qnameConcepts.get(qnElt)
         if modelConcept is not None:
             baseXsdType = modelConcept.baseXsdType
+            isNillable = modelConcept.isNillable
             if len(text) == 0 and modelConcept.default is not None:
                 text = modelConcept.default
         elif qnElt == XbrlConst.qnXbrldiExplicitMember: # not in DTS
             baseXsdType = "QName"
+            isNillable = False
         else:
             baseXsdType = None
+            isNillable = False
         if attrQname is None:
-            validateValue(modelXbrl, elt, None, baseXsdType, text)
+            validateValue(modelXbrl, elt, None, baseXsdType, text, isNillable)
         if not hasattr(elt, "xAttributes"):
             elt.xAttributes = {}
         # validate attributes
@@ -97,14 +102,16 @@ def validate(modelXbrl, elt, recurse=True, attrQname=None):
         for child in elt.getchildren():
             validate(modelXbrl, child)
 
-def validateValue(modelXbrl, elt, attrTag, baseXsdType, value):
+def validateValue(modelXbrl, elt, attrTag, baseXsdType, value, isNillable=False):
     if baseXsdType:
         try:
+            if len(value) == 0 and not isNillable and baseXsdType not in ("anyType", "string", "normalizedString", "token", "NMTOKEN"):
+                raise ValueError("missing value for not nillable element")
             xValid = VALID
             if baseXsdType in ("decimal", "float", "double"):
-                xValue = sValue = float(value)
+                xValue = sValue = float(value) if value else None
             elif baseXsdType in ("integer",):
-                xValue = sValue = int(value)
+                xValue = sValue = int(value) if value else None
             elif baseXsdType == "boolean":
                 if value in ("true", "1"):  
                     xValue = sValue = True
@@ -114,13 +121,25 @@ def validateValue(modelXbrl, elt, attrTag, baseXsdType, value):
             elif baseXsdType == "QName":
                 xValue = qname(elt, value, castException=ValueError)
                 sValue = value
-            elif baseXsdType in ("normalizedString","token","language","NMTOKEN","Name","NCName","IDREF","ENTITY"):
+            elif baseXsdType == "normalizedString":
                 xValue = value.strip()
+                sValue = value
+            elif baseXsdType in ("token","language","NMTOKEN","Name","NCName","IDREF","ENTITY"):
+                xValue = normalizeWhitespacePattern.sub(' ', value.strip())
+                sValue = value
+            elif baseXsdType == "anyURI":
+                xValue = anyURI(value.strip())
                 sValue = value
             elif baseXsdType == "ID":
                 xValue = value.strip()
                 sValue = value
                 xValid = VALID_ID
+            elif baseXsdType in ("XBRLI_DECIMALSUNION", "XBRLI_PRECISIONUNION"):
+                xValue = value if value == "INF" else int(value)
+                sValue = value
+            elif baseXsdType == "XBRLI_DATEUNION":
+                xValue = dateTime(value, type=DATEUNION, castException=ValueError)
+                sValue = value
             elif baseXsdType == "dateTime":
                 xValue = dateTime(value, type=DATETIME, castException=ValueError)
                 sValue = value

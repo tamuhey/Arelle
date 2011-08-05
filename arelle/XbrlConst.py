@@ -16,6 +16,8 @@ qnXbrliMonetaryItemType = qname("{http://www.xbrl.org/2003/instance}xbrli:moneta
 qnXbrliPure = qname("{http://www.xbrl.org/2003/instance}xbrli:pure")
 qnXbrliShares = qname("{http://www.xbrl.org/2003/instance}xbrli:shares")
 qnXbrliDateUnion = qname("{http://www.xbrl.org/2003/instance}xbrli:dateUnion")
+qnXbrliDecimalsUnion = qname("{http://www.xbrl.org/2003/instance}xbrli:decimalsType")
+qnXbrliPrecisionUnion = qname("{http://www.xbrl.org/2003/instance}xbrli:precisionType")
 link = "http://www.xbrl.org/2003/linkbase"
 qnLinkLabelLink = qname("{http://www.xbrl.org/2003/linkbase}link:labelLink")
 qnLinkLabelArc = qname("{http://www.xbrl.org/2003/linkbase}link:labelArc")
@@ -227,7 +229,9 @@ tableFilter = "http://xbrl.org/arcrole/2011/table-filter"
 qnTableTable = qname("{http://xbrl.org/2011/table}table:table")
 qnTableExplicitAxis = qname("{http://xbrl.org/2011/axis/explicit}expaxis:explicitAxis")
 qnTableExplicitAxisMember = qname("{http://xbrl.org/2011/axis/explicit}expaxis:explicitAxisMember")
+qnTableFilterAxis = qname("{http://xbrl.org/2011/axis/filter}filaxis:filterAxis")
 explicitAxisMember = "http://xbrl.org/arcrole/2011/axis/explicit-axis-member"
+axisFilter = "http://xbrl.org/arcrole/2011/axis/axis-filter"
 
 errMsgPrefixNS = {
     "err": xpath2err,
@@ -394,7 +398,7 @@ def isDimensionArcrole(arcrole):
     return arcrole.startswith("http://xbrl.org/int/dim/arcrole/")
 
 def isTableRenderingArcrole(arcrole):
-    return arcrole in (euTableAxis, euAxisMember, tableAxis, tableFilter, explicitAxisMember)
+    return arcrole in (euTableAxis, euAxisMember, tableAxis, tableFilter, explicitAxisMember, axisFilter)
    
 def isFormulaArcrole(arcrole):
     return arcrole in {"http://xbrl.org/arcrole/2008/assertion-set",
