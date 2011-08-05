@@ -1047,12 +1047,15 @@ class WinMainLogHandler(logging.Handler):
     def flush(self):
         ''' Nothing to flush '''
     def emit(self, logRecord):
-         # add to logView        
-        msg = self.format(logRecord)        
-        try:            
-            self.cntlr.addToLog(msg)
-        except:
-            pass
+         # add to logView
+         try:
+             msg = self.format(logRecord)
+         except KeyError:
+             msg = logRecord.message
+         try:            
+             self.cntlr.addToLog(msg)
+         except:
+             pass
 
 def main():
     # this is the entry called by arelleGUI.pyw for windows
