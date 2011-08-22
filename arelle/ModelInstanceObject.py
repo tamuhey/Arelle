@@ -7,7 +7,8 @@ Refactored from ModelObject on Jun 11, 2011
 '''
 from collections import defaultdict
 from lxml import etree
-from arelle import (XmlUtil, XbrlConst, XbrlUtil, UrlUtil, Locale, ModelValue)
+from arelle import XmlUtil, XbrlConst, XbrlUtil, UrlUtil, Locale, ModelValue
+from arelle.ValidateXbrlCalcs import inferredPrecision, inferredDecimals, roundValue
 from arelle.ModelObject import ModelObject
 
 class ModelFact(ModelObject):
@@ -198,7 +199,11 @@ class ModelFact(ModelObject):
             if other.concept.isNumeric:
                 if not self.unit.isEqualTo(other.unit):
                     return False
-                return float(self.value) == float(other.value)
+                if self.modelXbrl.modelManager.validateInferDecimals:
+                    d = min((inferredDecimals(self), inferredDecimals(other))); p = None
+                else:
+                    d = None; p = min((inferredPrecision(self), inferredPrecision(other)))
+                return roundValue(float(self.value),precision=p,decimals=d) == roundValue(float(other.value),precision=p,decimals=d)
             else:
                 return False
         selfValue = self.value
@@ -242,14 +247,6 @@ class ModelInlineFact(ModelFact):
     @property
     def qname(self):
         return self.prefixedNameQname(self.get("name")) if self.get("name") else None
-
-    @property
-    def contextID(self):
-        return self.get("contextRef")
-
-    @property
-    def unitID(self):
-        return self.get("unitRef")
 
     @property
     def sign(self):
@@ -664,7 +661,10 @@ class ModelDimensionValue(ModelObject):
     
     @property
     def typedMember(self):
-        return self
+        # to get <typedMember> element use 'self'; this get's its contents
+        for child in self.iterchildren():
+            return child
+        return None
 
     @property
     def isTyped(self):
@@ -682,7 +682,7 @@ class ModelDimensionValue(ModelObject):
             self._member = self.modelXbrl.qnameConcepts.get(self.memberQname)
             return  self._member
         
-    def isEqualTo(self, other):
+    def isEqualTo(self, other, equalMode=XbrlUtil.XPATH_EQ):
         if isinstance(other, ModelValue.QName):
             return self.isExplicit and self.memberQname == other
         elif other is None:
@@ -690,7 +690,8 @@ class ModelDimensionValue(ModelObject):
         elif self.isExplicit:
             return self.memberQname == other.memberQname
         else:
-            return XbrlUtil.nodesCorrespond(self.modelXbrl, self.typedMember, other.typedMember)
+            return XbrlUtil.nodesCorrespond(self.modelXbrl, self.typedMember, other.typedMember, 
+                                            equalMode=equalMode, excludeIDs=XbrlUtil.NO_IDs_EXCLUDED)
         
     @property
     def contextElement(self):

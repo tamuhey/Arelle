@@ -2,11 +2,13 @@ from arelle.ModelValue import qname
 import os
 
 xsd = "http://www.w3.org/2001/XMLSchema"
+qnXsdSchema = qname("{http://www.w3.org/2001/XMLSchema}xsd:schema")
 qnXsdDefaultType = qname("{http://www.w3.org/2001/XMLSchema}xsd:anyType")
 xsi = "http://www.w3.org/2001/XMLSchema-instance"
 qnXsiNil = qname(xsi,"xsi:nil") # need default prefix in qname
 xml = "http://www.w3.org/XML/1998/namespace"
 xbrli = "http://www.xbrl.org/2003/instance"
+qnXbrliXbrl = qname("{http://www.xbrl.org/2003/instance}xbrli:xbrl")
 qnXbrliItem = qname("{http://www.xbrl.org/2003/instance}xbrli:item")
 qnXbrliTuple = qname("{http://www.xbrl.org/2003/instance}xbrli:tuple")
 qnXbrliContext = qname("{http://www.xbrl.org/2003/instance}xbrli:context")
@@ -18,6 +20,7 @@ qnXbrliShares = qname("{http://www.xbrl.org/2003/instance}xbrli:shares")
 qnXbrliDateUnion = qname("{http://www.xbrl.org/2003/instance}xbrli:dateUnion")
 qnXbrliDecimalsUnion = qname("{http://www.xbrl.org/2003/instance}xbrli:decimalsType")
 qnXbrliPrecisionUnion = qname("{http://www.xbrl.org/2003/instance}xbrli:precisionType")
+qnXbrliNonZeroDecimalUnion = qname("{http://www.xbrl.org/2003/instance}xbrli:nonZeroDecimal")
 link = "http://www.xbrl.org/2003/linkbase"
 qnLinkLabelLink = qname("{http://www.xbrl.org/2003/linkbase}link:labelLink")
 qnLinkLabelArc = qname("{http://www.xbrl.org/2003/linkbase}link:labelArc")
@@ -51,6 +54,9 @@ xl = "http://www.xbrl.org/2003/XLink"
 qnXlExtended = qname("{http://www.xbrl.org/2003/XLink}xl:extended")
 qnXlLocator = qname("{http://www.xbrl.org/2003/XLink}xl:locator")
 qnXlResource = qname("{http://www.xbrl.org/2003/XLink}xl:resource")
+qnXlExtendedType = qname("{http://www.xbrl.org/2003/XLink}xl:extendedType")
+qnXlLocatorType = qname("{http://www.xbrl.org/2003/XLink}xl:locatorType")
+qnXlResourceType = qname("{http://www.xbrl.org/2003/XLink}xl:resourceType")
 xhtml = "http://www.w3.org/1999/xhtml"
 ixbrl = "http://www.xbrl.org/2008/inlineXBRL"
 qnIXbrlTuple = qname("{http://www.xbrl.org/2008/inlineXBRL}tuple")

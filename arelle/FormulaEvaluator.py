@@ -231,7 +231,7 @@ def aspectMatchFilter(xpCtx, facts, aspects, varBindings, filterType):
                 if xpCtx.formulaOptions.traceVariableFilterWinnowing:
                     a = str(aspect) if isinstance(aspect,QName) else Aspect.label[aspect]
                     xpCtx.modelXbrl.info("formula:trace",
-                        _("Fact Variable %(variable)s %(filter)s filter $(aspect)s passes %(factCount)s facts"), 
+                        _("Fact Variable %(variable)s %(filter)s filter %(aspect)s passes %(factCount)s facts"), 
                         modelObject=vb.var, variable=vb.qname, filter=filterType, aspect=a, factCount=len(facts)),
                 if len(facts) == 0: break
     return facts
@@ -513,7 +513,7 @@ def produceOutputFact(xpCtx, formula, result):
                     dimElt = XmlUtil.addChild(contextElt, XbrlConst.xbrldi, "xbrldi:typedMember", 
                                               attributes=dimAttr)
                     if isinstance(dimValue, ModelDimensionValue) and dimValue.isTyped:
-                        XmlUtil.copyChildren(dimElt, dimValue.typedMember)
+                        XmlUtil.copyChildren(dimElt, dimValue)
                 elif dimMemberQname:
                     dimElt = XmlUtil.addChild(contextElt, XbrlConst.xbrldi, "xbrldi:explicitMember",
                                               attributes=dimAttr,
@@ -667,7 +667,7 @@ def aspectValue(xpCtx, formula, aspect, srcMissingErr):
         return aspectSourceValue
     elif aspect == Aspect.UNIT_MEASURES:
         augment = formula.evaluateRule(xpCtx, Aspect.AUGMENT)
-        if aspectSourceValue and (not augment or augment == "true"):
+        if aspectSourceValue and (not augment or augment == "true"): # true is the default behavior
             return aspectSourceValue
         else:
             return ([],[])

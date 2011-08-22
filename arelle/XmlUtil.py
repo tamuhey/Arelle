@@ -102,7 +102,11 @@ def prefixedNameToClarkNotation(element, prefixedName):
 
 def encoding(xml):
     if isinstance(xml,bytes):
-        str = xml[0:80].decode("latin-1")
+        s = xml[0:120]
+        if b"x\0m\0l" in s:
+            str = s.decode("utf-16")
+        else:
+            str = s.decode("latin-1")
     else:
         str = xml[0:80]
     match = xmlEncodingPattern.match(str)
@@ -310,6 +314,36 @@ def schemaBaseTypeDerivedFrom(element):
             if qn is not None:
                 return qn
     return None
+
+def schemaAttributesGroups(element, attributes=None, attributeGroups=None):
+    if attributes is None: attributes = []; attributeGroups = []
+    for child in element.iterchildren():
+        if child.tag == "{http://www.w3.org/2001/XMLSchema}attribute":
+            attributes.append(child) 
+        elif child.tag == "{http://www.w3.org/2001/XMLSchema}attributeGroup":
+            attributeGroups.append(child) 
+        elif child.tag in {"{http://www.w3.org/2001/XMLSchema}complexType",
+                           "{http://www.w3.org/2001/XMLSchema}simpleType",
+                           "{http://www.w3.org/2001/XMLSchema}complexContent",
+                           "{http://www.w3.org/2001/XMLSchema}simpleContent",
+                           "{http://www.w3.org/2001/XMLSchema}restriction",
+                           "{http://www.w3.org/2001/XMLSchema}extension"
+                           }:
+            schemaAttributesGroups(child, attributes=attributes, attributeGroups=attributeGroups)
+    return (attributes, attributeGroups)
+
+def emptyContentModel(element):
+    for child in element.iterchildren():
+        if child.tag == "{http://www.w3.org/2001/XMLSchema}complexType" and child.get("mixed") == "true":
+            return False
+        elif child.tag in ("{http://www.w3.org/2001/XMLSchema}simpleType",
+                           "{http://www.w3.org/2001/XMLSchema}simpleContent",
+                           "{http://www.w3.org/2001/XMLSchema}sequence",
+                           "{http://www.w3.org/2001/XMLSchema}choice",
+                           "{http://www.w3.org/2001/XMLSchema}all"):
+            return False
+    return True
+
 
 # call with parent, childNamespaceURI, childLocalName, or just childQName object
 # attributes can be (localName, value) or (QName, value)

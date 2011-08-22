@@ -12,8 +12,8 @@ elementSubstitutionModelClass = {}
 from lxml import etree
 from arelle import XbrlConst
 from arelle.ModelValue import qname
-from arelle.ModelDtsObject import (ModelConcept, ModelAttribute, ModelType, ModelEnumeration,
-                                   ModelRoleType, ModelLocator, ModelLink)
+from arelle.ModelDtsObject import (ModelConcept, ModelAttribute, ModelAttributeGroup, ModelType, ModelEnumeration,
+                                   ModelRoleType, ModelLocator, ModelLink, ModelResource)
 from arelle.ModelRssItem import ModelRssItem
 from arelle.ModelTestcaseObject import ModelTestcaseVariation
 from arelle.ModelVersObject import (ModelAssignment, ModelAction, ModelNamespaceRename,
@@ -49,6 +49,8 @@ class KnownNamespacesModelObjectClassLookup(etree.CustomElementClassLookup):
                     return ModelConcept
                 elif ln == "attribute":
                     return ModelAttribute
+                elif ln == "attributeGroup":
+                    return ModelAttributeGroup
                 elif ln == "complexType" or ln == "simpleType":
                     return ModelType
                 elif ln == "enumeration":
@@ -127,4 +129,8 @@ class DiscoveringClassLookup(etree.PythonElementClassLookup):
         if modelObjectClass is not None:
             return modelObjectClass
         else:
+            xlinkType = proxyElement.get("{http://www.w3.org/1999/xlink}type")
+            if xlinkType == "extended": return ModelLink
+            elif xlinkType == "locator": return ModelLocator
+            elif xlinkType == "resource": return ModelResource
             return ModelObject

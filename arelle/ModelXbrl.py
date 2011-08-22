@@ -54,6 +54,8 @@ def create(modelManager, newDocumentType=None, url=None, schemaRefs=None, create
         modelXbrl.closeFileSource= True
         if createModelDocument:
             modelXbrl.modelDocument = ModelDocument.create(modelXbrl, newDocumentType, url, schemaRefs=schemaRefs, isEntry=isEntry)
+            if isEntry:
+                del modelXbrl.entryLoadingUrl
     return modelXbrl
     
 class ModelXbrl:
@@ -73,6 +75,7 @@ class ModelXbrl:
         self.roleTypes = defaultdict(list)
         self.qnameConcepts = {} # contains ModelConcepts by Py key {ns}}localname of schema elements
         self.qnameAttributes = {}
+        self.qnameAttributeGroups = {}
         self.nameConcepts = defaultdict(list) # contains ModelConcepts by name 
         self.qnameTypes = {} # contains ModelTypes by Py key {ns}localname of type
         self.baseSets = defaultdict(list) # contains ModelLinks for keys arcrole, arcrole#linkrole
@@ -262,6 +265,8 @@ class ModelXbrl:
                 else:
                     extras["href"] = file
                     extras["sourceLine"] = ""
+            elif argName == "sourceLine":
+                extras["sourceLine"] = argValue
             elif argName != "exc_info":
                 if isinstance(argValue, (ModelValue.QName, ModelObject)):
                     fmtArgs[argName] = str(argValue)

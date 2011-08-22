@@ -65,9 +65,9 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
     try:
         if (modelXbrl.modelManager.validateDisclosureSystem and 
             modelXbrl.modelManager.disclosureSystem.validateFileText):
-            file = ValidateFilingText.checkfile(modelXbrl,filepath)
+            file, _encoding = ValidateFilingText.checkfile(modelXbrl,filepath)
         else:
-            file = modelXbrl.fileSource.file(filepath)
+            file, _encoding = modelXbrl.fileSource.file(filepath)
         _parser, _parserLookupName, _parserLookupClass = parser(modelXbrl,filepath)
         xmlDocument = etree.parse(file,parser=_parser,base_url=filepath)
         file.close()
@@ -156,6 +156,7 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
         modelDocument.parserLookupClass = _parserLookupClass
         modelDocument.xmlRootElement = rootNode
         modelDocument.schemaLocationElements.add(rootNode)
+        modelDocument.documentEncoding = _encoding
 
         if isEntry or isDiscovered:
             modelDocument.inDTS = True
@@ -194,6 +195,7 @@ def create(modelXbrl, type, uri, schemaRefs=None, isEntry=False):
     normalizedUri = modelXbrl.modelManager.cntlr.webCache.normalizeUrl(uri, None)
     if isEntry:
         modelXbrl.uri = normalizedUri
+        modelXbrl.entryLoadingUrl = normalizedUri
         modelXbrl.uriDir = os.path.dirname(normalizedUri)
         for i in range(modelXbrl.modelManager.disclosureSystem.maxSubmissionSubdirectoryEntryNesting):
             modelXbrl.uriDir = os.path.dirname(modelXbrl.uriDir)
@@ -235,6 +237,7 @@ def create(modelXbrl, type, uri, schemaRefs=None, isEntry=False):
         modelDocument.parser = _parser # needed for XmlUtil addChild's makeelement 
         modelDocument.parserLookupName = _parserLookupName
         modelDocument.parserLookupClass = _parserLookupClass
+        modelDocument.documentEncoding = "utf-8"
         rootNode = xmlDocument.getroot()
         rootNode.init(modelDocument)
         if xmlDocument:
@@ -248,6 +251,8 @@ def create(modelXbrl, type, uri, schemaRefs=None, isEntry=False):
         modelDocument.rssFeedDiscover(modelDocument.xmlRootElement)
     elif type == Type.SCHEMA:
         modelDocument.targetNamespace = None
+        modelDocument.isQualifiedElementFormDefault = False
+        modelDocument.isQualifiedAttributeFormDefault = False
     return modelDocument
 
     
@@ -387,10 +392,12 @@ class ModelDocument:
         if targetNamespace == XbrlConst.xbrldt:
             # BUG: should not set this if obtained from schemaLocation instead of import (but may be later imported)
             self.modelXbrl.hasXDT = True
+        self.isQualifiedElementFormDefault = rootElement.get("elementFormDefault") == "qualified"
+        self.isQualifiedAttributeFormDefault = rootElement.get("attributeFormDefault") == "qualified"
         try:
             self.schemaImportElements(rootElement)
-            if self.inDTS:
-                self.schemaDiscoverChildElements(rootElement)
+            # if self.inDTS: (need all elements defined, even if not in DTS
+            self.schemaDiscoverChildElements(rootElement)
         except (ValueError, LookupError) as err:
             self.modelXbrl.modelManager.addToLog("discovery: {0} error {1}".format(
                         self.basename,
@@ -413,7 +420,7 @@ class ModelDocument:
             if isinstance(modelObject,ModelObject):
                 ln = modelObject.localName
                 ns = modelObject.namespaceURI
-                if ns == XbrlConst.link:
+                if self.inDTS and ns == XbrlConst.link:
                     if ln == "roleType":
                         self.modelXbrl.roleTypes[modelObject.roleURI].append(modelObject)
                     elif ln == "arcroleType":
@@ -595,8 +602,8 @@ class ModelDocument:
                                     lbElement.labeledResources[linkElement.get("{http://www.w3.org/1999/xlink}label")] \
                                         .append(modelResource)
                     else:
-                        self.modelXbrl.error("xbrl:schemaImportMissing",
-                                _("Linkbase extended link %(element)s missing schema import"),
+                        self.modelXbrl.error("xbrl:schemaDefinitionMissing",
+                                _("Linkbase extended link %(element)s missing schema definition"),
                                 modelObject=lbElement, element=lbElement.prefixedName)
                         
                 
@@ -608,7 +615,7 @@ class ModelDocument:
                 doc = self
             else:
                 # href discovery only can happein within a DTS
-                doc = load(self.modelXbrl, url, isDiscovered=True, base=self.baseForElement(element), referringElement=element)
+                doc = load(self.modelXbrl, url, isDiscovered=not nonDTS, base=self.baseForElement(element), referringElement=element)
                 if not nonDTS and doc is not None and self.referencesDocument.get(doc) is None:
                     self.referencesDocument[doc] = "href"
                     if not doc.inDTS and doc.type != Type.Unknown:    # non-XBRL document is not in DTS
