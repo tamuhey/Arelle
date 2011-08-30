@@ -721,7 +721,7 @@ class CntlrWinMain (Cntlr.Cntlr):
                 self.config["windowState"] = state
             self.config["tabWinTopLeftSize"] = (self.tabWinTopLeft.winfo_width() - 4,   # remove border growth
                                                 self.tabWinTopLeft.winfo_height() - 6)
-            super().close()
+            super().close(saveConfig=True)
             self.parent.unbind_all(())
             self.parent.destroy()
             if self.logFile:
@@ -779,7 +779,6 @@ class CntlrWinMain (Cntlr.Cntlr):
         self.setValidateTooltipText()
         
     def formulaParametersDialog(self, *args):
-        from arelle import DialogFormulaParameters
         DialogFormulaParameters.getParameters(self)
         self.setValidateTooltipText()
         
@@ -1042,6 +1041,8 @@ class CntlrWinMain (Cntlr.Cntlr):
                             filetypes=[] if self.isMac else filetypes,
                             defaultextension=defaultextension,
                             parent=self.parent)
+
+from arelle import DialogFormulaParameters
 
 class WinMainLogHandler(logging.Handler):
     def __init__(self, cntlr):
