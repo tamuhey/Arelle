@@ -198,6 +198,17 @@ def pushFunction( sourceStr, loc, toks ):
     name = toks[0]
     operation = OperationDef(sourceStr, loc, name, toks, True)
     exprStack[exprStack.index(toks[0]):] = [operation]  # replace tokens with production
+    if isinstance(name, QNameDef): # function call
+        ns = name.namespaceURI
+        if (not name.unprefixed and 
+            ns not in {XbrlConst.fn, XbrlConst.xfi, XbrlConst.xff, XbrlConst.xsd} and
+            not ns.startswith("http://www.xbrl.org/inlineXBRL/transformation")):
+            if name not in modelXbrl.modelCustomFunctionSignatures:
+                modelXbrl.error("xbrlve:noCustomFunctionSignature",
+                    _("No custom function signature for %(custFunction)s in %(resource)s"),
+                    modelObject=xmlElement,
+                    resource=xmlElement.localName,
+                    custFunction=name)
     return operation
 
 def pushSequence( sourceStr, loc, toks ):
