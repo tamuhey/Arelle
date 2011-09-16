@@ -36,20 +36,21 @@ class ModelRoleType(ModelObject):
             return self._definition
         except AttributeError:
             definition = XmlUtil.child(self, XbrlConst.link, "definition")
-            self._definition = XmlUtil.text(definition) if definition is not None else None
+            self._definition = definition.elementText.strip() if definition is not None else None
             return self._definition
 
     @property
     def definitionNotStripped(self):
         definition = XmlUtil.child(self, XbrlConst.link, "definition")
-        return XmlUtil.textNotStripped(definition) if definition is not None else None
+        return definition.elementText if definition is not None else None
     
     @property
     def usedOns(self): 
         try:
             return self._usedOns
         except AttributeError:
-            self._usedOns = set(ModelValue.qname(usedOn, usedOn.text)
+            XmlValidate.validate(self.modelXbrl, self)
+            self._usedOns = set(usedOn.xValue
                                 for usedOn in self.iterdescendants("{http://www.xbrl.org/2003/linkbase}usedOn")
                                 if isinstance(usedOn,ModelObject))
             return self._usedOns
@@ -175,6 +176,7 @@ class ModelConcept(ModelSchemaObject):
     def facets(self):
         return self.type.facets if self.type is not None else None
     
+    ''' unused, remove???
     def baseXsdAttrType(self,attrName):
         try:
             return self._baseXsdAttrType[attrName]
@@ -185,6 +187,7 @@ class ModelConcept(ModelSchemaObject):
                 attrType = "anyType"
             self._baseXsdAttrType[attrName] = attrType
             return attrType
+    '''
     
     @property
     def baseXbrliType(self):
@@ -793,13 +796,6 @@ class ModelLink(ModelObject):
     def role(self):
         return self.get("{http://www.w3.org/1999/xlink}role")
         
-    def modelResourceOfResourceElement(self,resourceElement):
-        label = resourceElement.get("{http://www.w3.org/1999/xlink}label")
-        for modelResource in self.labeledResources[label]:
-            if modelResource == resourceElement:
-                return modelResource
-        return None
-
 class ModelResource(ModelObject):
     def init(self, modelDocument):
         super().init(modelDocument)
@@ -982,7 +978,7 @@ class ModelRelationship(ModelObject):
     
     @property
     def linkQname(self):
-        return ModelValue.qname(self.arcElement.getparent())
+        return self.arcElement.getparent().elementQname
     
     @property
     def contextElement(self):
