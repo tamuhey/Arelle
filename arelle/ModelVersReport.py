@@ -382,10 +382,11 @@ class ModelVersReport(ModelDocument.ModelDocument):
                 if fromConcept.isItem and toConcept.isItem:
                     if fromConcept.typeQname != self.fromDTSqname(toConcept.typeQname):
                         action = self.createConceptEvent(verce, "verce:conceptTypeChange", fromConcept, toConcept, action, fromValue=fromConcept.typeQname, toValue=toConcept.typeQname)
-                    if fromConcept.nillable != toConcept.nillable:
-                        action = self.createConceptEvent(verce, "verce:conceptNillableChange", fromConcept, toConcept, action, fromValue=fromConcept.nillable, toValue=toConcept.nillable)
-                    if fromConcept.abstract != toConcept.abstract:
-                        action = self.createConceptEvent(verce, "verce:conceptAbstractChange", fromConcept, toConcept, action, fromValue=fromConcept.abstract, toValue=toConcept.abstract)
+                if fromConcept.nillable != toConcept.nillable:
+                    action = self.createConceptEvent(verce, "verce:conceptNillableChange", fromConcept, toConcept, action, fromValue=fromConcept.nillable, toValue=toConcept.nillable)
+                if fromConcept.abstract != toConcept.abstract:
+                    action = self.createConceptEvent(verce, "verce:conceptAbstractChange", fromConcept, toConcept, action, fromValue=fromConcept.abstract, toValue=toConcept.abstract)
+                if fromConcept.isItem and toConcept.isItem:
                     if fromConcept.block != toConcept.block:
                         action = self.createConceptEvent(verce, "verce:conceptBlockChange", fromConcept, toConcept, action, fromValue=fromConcept.block, toValue=toConcept.block)
                     if fromConcept.default != toConcept.default:
@@ -402,7 +403,8 @@ class ModelVersReport(ModelDocument.ModelDocument):
                     fromType = fromConcept.type # it is null for xsd:anyType
                     toType = toConcept.type
                     # TBD change to xml comparison with namespaceURI mappings, prefixes ignored
-                    if fromType is not None and toType and XbrlUtil.nodesCorrespond(self.fromDTS, fromType, toType, self.toDTS):
+                    if (fromType is not None and toType is not None and 
+                        not XbrlUtil.nodesCorrespond(self.fromDTS, fromType, toType, self.toDTS)):
                         action = self.createConceptEvent(verce, "verce:tupleContentModelChange", fromConcept, toConcept, action)
                 # custom attributes in from Concept
                 fromCustAttrs = {}
@@ -551,7 +553,7 @@ class ModelVersReport(ModelDocument.ModelDocument):
                 if toRel is not None:
                     comment = _('corresponding relationship {0} toDTS toName="{1}"').format(i+1, XmlUtil.addQnameValue(self.reportElement, toRel.toModelObject.qname))
                 else:
-                    comment = _('toDTS does not have a corresponding relationship at position {0}'.format(i+1))
+                    comment = _('toDTS does not have a corresponding relationship at position {0}').format(i+1)
                 self.createRelationshipSetEvent("relationships", eventParent=self.relSetDeletedEvent, fromConcept=fromConcept, toConcept=fromTgtConcept, comment=comment)
         for i, toRel in enumerate(toRels):
             toTgtConcept = toRel.toModelObject
@@ -565,7 +567,7 @@ class ModelVersReport(ModelDocument.ModelDocument):
                 if fromRel is not None:
                     comment = _('corresponding relationship {0} toDTS toName="{1}"').format(i+1, XmlUtil.addQnameValue(self.reportElement, fromRel.toModelObject.qname))
                 else:
-                    comment = _('fromDTS does not have a corresponding relationship at position {0}'.format(i+1))
+                    comment = _('fromDTS does not have a corresponding relationship at position {0}').format(i+1)
                 self.createRelationshipSetEvent("relationships", eventParent=self.relSetAddedEvent, fromConcept=toConcept, toConcept=toTgtConcept, comment=comment)
     
     def diffDimensionDefaults(self):
