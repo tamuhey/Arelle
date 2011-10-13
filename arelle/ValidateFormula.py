@@ -15,7 +15,8 @@ from arelle.ModelFormulaObject import (ModelParameter, ModelInstance,
                                        Aspect, aspectModels, ModelAspectCover)
 from arelle.ModelObject import (ModelObject)
 from arelle.ModelValue import (qname,QName)
-from arelle import (XbrlConst, XmlUtil, ModelXbrl, ModelDocument, XPathParser, XPathContext, FunctionXs) 
+from arelle import (XbrlConst, XmlUtil, ModelXbrl, ModelDocument, XPathParser, XPathContext, FunctionXs,
+                    ValidateXbrlDimensions) 
 
 arcroleChecks = {
     XbrlConst.equalityDefinition:   (None, 
@@ -302,7 +303,7 @@ def validate(val):
                 if isinstance(variable, ModelFactVariable):
                     for depVar in XPathParser.variableReferencesSet(variable.fallbackValueProg, variable):
                         if depVar in qnameRels and isinstance(qnameRels[depVar].toModelObject,ModelVariable):
-                            val.modelXbrl.error("xbrlve:factVariableReferenceNotAllowed",
+                            val.modelXbrl.error("xbrlve:fallbackValueVariableReferenceNotAllowed",
                                 _("Variable set %(xlinkLabel)s fallbackValue '%(fallbackValue)s' cannot refer to variable %(dependency)s"),
                                 modelObject=variable, xlinkLabel=modelVariableSet.xlinkLabel, 
                                 fallbackValue=variable.fallbackValue, dependency=depVar)
@@ -494,6 +495,15 @@ def validate(val):
                     consisAsser.orderedVariableRelationships.append(consisParamRel)
             consisAsser.compile()
             modelRel.toModelObject.hasConsistencyAssertion = True
+
+    # validate default dimensions in instances and accumulate multi-instance-default dimension aspects
+    xpathContext.defaultDimensionAspects = set(val.modelXbrl.qnameDimensionDefaults.keys())
+    for instanceQname in instanceQnames:
+        if (instanceQname not in (XbrlConst.qnStandardInputInstance,XbrlConst.qnStandardOutputInstance) and
+            val.parameters and instanceQname in val.parameters):
+            namedInstance = val.parameters[instanceQname][1][0]
+            ValidateXbrlDimensions.loadDimensionDefaults(namedInstance)
+            xpathContext.defaultDimensionAspects |= namedInstance.qnameDimensionDefaults.keys()
 
     if initialErrorCount < val.modelXbrl.logCountErr:
         return  # don't try to execute
