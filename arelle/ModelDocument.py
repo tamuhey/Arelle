@@ -740,7 +740,7 @@ class ModelDocument:
                 if isinstance(tupleElement,ModelObject) and tupleElement.tag not in fractionParts:
                     self.factDiscover(tupleElement, modelFact.modelTupleFacts)
         else:
-            self.modelXbrl.error("xbrl:schemaImportMissing",
+            self.modelXbrl.error(("xbrl:schemaImportMissing", "xbrl:invalidFactMissingConcept"),
                     _("Instance fact %(element)s missing schema definition "),
                     modelObject=modelFact, element=modelFact.prefixedName)
     
