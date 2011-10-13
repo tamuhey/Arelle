@@ -148,6 +148,14 @@ def get_options():
 def run_validation():
     return validate(**vars(get_options()))
 
+class OutputEncoder(json.JSONEncoder):
+    def default(self, o):
+        try:
+            return super(OutputEncoder, self).default(o)
+        except TypeError:
+            return str(o)
+
+    
 if __name__ == "__main__":
     v = run_validation()
-    print(json.dumps(v))
+    print(json.dumps(v, cls=OutputEncoder))
