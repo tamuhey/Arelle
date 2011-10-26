@@ -8,6 +8,8 @@ import os, posixpath, sys, re, shutil, time, urllib.request, pickle
 from urllib.error import (URLError, HTTPError, ContentTooShortError)
 from urllib.parse import unquote
 
+from arelle import config
+
 def proxyDirFmt(httpProxyTuple):
     if isinstance(httpProxyTuple,tuple) and len(httpProxyTuple) == 5:
         useOsProxy, urlAddr, urlPort, user, password = httpProxyTuple
@@ -54,10 +56,7 @@ class WebCache:
 
         #self.opener = WebCacheUrlOpener(cntlr, proxyDirFmt(httpProxyTuple)) # self.proxies)
         
-        if sys.platform == "darwin":
-            self.cacheDir = cntlr.userAppDir.replace("Application Support","Caches")
-        else:  #windows and unix
-            self.cacheDir = cntlr.userAppDir + os.sep + "cache"
+        self.cacheDir = config.cache_dir()
         self.workOffline = False
         self.maxAgeSeconds = 60.0 * 60.0 * 24.0 * 7.0 # seconds before checking again for file
         self.urlCheckPickleFile = cntlr.userAppDir + os.sep + "cachedUrlCheckTimes.pickle"
