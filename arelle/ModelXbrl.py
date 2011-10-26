@@ -10,7 +10,7 @@ import logging
 from arelle import UrlUtil, XmlUtil, ModelValue
 from arelle.ModelObject import ModelObject
 from arelle.Locale import format_string
-from arelle.ViewUtilRenderedGrid import FactPrototype
+
 
 def load(modelManager, url, nextaction=None, base=None, useFileSource=None):
     if nextaction is None: nextaction = _("loading")
@@ -215,6 +215,7 @@ class ModelXbrl:
     
     # UI thread viewModelObject
     def viewModelObject(self, objectId):
+        from arelle.ViewUtilRenderedGrid import FactPrototype
         modelObject = ""
         try:
             if isinstance(objectId, (ModelObject,FactPrototype)):

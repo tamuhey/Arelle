@@ -6,10 +6,11 @@ Created on Sep 13, 2011
 '''
 import os
 from arelle import XbrlConst
-from tkinter import BooleanVar
+
 
 
 def setDefaults(view):
+    from tkinter import BooleanVar
     view.ignoreDimValidity = BooleanVar(value=True)
     view.xAxisChildrenFirst = BooleanVar(value=True)
     view.yAxisChildrenFirst = BooleanVar(value=False)
