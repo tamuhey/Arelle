@@ -4,7 +4,7 @@ Created on Oct 5, 2010
 @author: Mark V Systems Limited
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
-import os, posixpath, sys, re, shutil, time, urllib.request, pickle
+import os, os.path, posixpath, sys, re, shutil, time, urllib.request, pickle
 from urllib.error import (URLError, HTTPError, ContentTooShortError)
 from urllib.parse import unquote
 
@@ -59,7 +59,7 @@ class WebCache:
         self.cacheDir = config.cache_dir()
         self.workOffline = False
         self.maxAgeSeconds = 60.0 * 60.0 * 24.0 * 7.0 # seconds before checking again for file
-        self.urlCheckPickleFile = cntlr.userAppDir + os.sep + "cachedUrlCheckTimes.pickle"
+        self.urlCheckPickleFile = os.path.join(config.data_dir(), "cachedUrlCheckTimes.pickle")
         try:
             with open(self.urlCheckPickleFile, 'rb') as f:
                 self.cachedUrlCheckTimes = pickle.load(f)
