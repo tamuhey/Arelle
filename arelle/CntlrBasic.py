@@ -14,6 +14,7 @@ gettext.install("arelle")
 
 from arelle.Cntlr import Cntlr
 from arelle import FileSource
+from arelle import config
 
 log = logging.getLogger(__name__)
 
@@ -140,13 +141,20 @@ def cmd_parser():
     parser.add_argument('--calc_linkbase', action='store_true')
     parser.add_argument('--utr', action='store_true')
     parser.add_argument('-f','--file', dest='file_or_path', required=True)
+    parser.add_argument('--app_dir', dest='data_dir')
+    parser.add_argument('--cache', dest='cache_dir')
     return parser
 
 def get_options():
     return cmd_parser().parse_args(sys.argv[1:])
 
 def run_validation():
-    return validate(**vars(get_options()))
+    options = vars(get_options())
+    if options.get('data_dir', None):
+        config.overrides['data_dir'] = options['data_dir']
+    if options.get('cache_dir', None):
+        config.overrides['cache_dir'] = options['cache_dir']
+    return validate(**options)
 
 class OutputEncoder(json.JSONEncoder):
     def default(self, o):
