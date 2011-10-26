@@ -101,6 +101,11 @@ vercb = "http://xbrl.org/2010/versioning-concept-basic"
 verce = "http://xbrl.org/2010/versioning-concept-extended"
 verrels = "http://xbrl.org/2010/versioning-relationship-sets"
 veria = "http://xbrl.org/2010/versioning-instance-aspects"
+verPrefixNS = {"ver":ver,
+               "vercb":vercb,
+               "verce":verce,
+               "verrels":verrels,
+               "veria":veria}
 
 # formula specs
 variable = "http://xbrl.org/2008/variable"
@@ -259,7 +264,11 @@ errMsgPrefixNS = {
     "xbrldfe": "http://xbrl.org/2008/filter/dimension/error",  
     "xffe": "http://www.xbrl.org/2010/function/formula/error",
     "xfie": "http://www.xbrl.org/2008/function/instance/error",
+    "vere": "http://xbrl.org/2010/versioning-base/error",
+    "vercbe": "http://xbrl.org/2010/versioning-concept-basic/error",
+    "vercee" :"http://xbrl.org/2010/versioning-concept-extended/error",
     "verrelse": "http://xbrl.org/2010/versioning-relationship-sets/error",
+    "veriae": "http://xbrl.org/2010/versioning-instance-aspects/error",
     "xbrlacfe": "http://xbrl.org/2010/filter/aspect-cover/error",
     "xbrlcfie": "http://xbrl.org/2010/custom-function/error",
     "xbrlmfe": "http://xbrl.org/2008/filter/match/error",

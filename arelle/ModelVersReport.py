@@ -726,7 +726,7 @@ class ModelVersReport(ModelDocument.ModelDocument):
                                         for domRel in self.DRSdomRels(dts, dimRel):
                                             domHasMemRels = dts.relationshipSet(XbrlConst.domainMember, linkrole).fromModelObject(priItemConcept)
                                             self.createInstanceAspectsEvent("member", (('name',domRel.toModelObject.qname),) + \
-                                                                                      ((('linkrole',rel.linkrole),
+                                                                                      ((('linkrole',domRel.linkrole),
                                                                                         ('arcrole',XbrlConst.domainMember),
                                                                                         ('axis', 'DRS-descendant-or-self')) if domHasMemRels else ()),
                                                                                       eventParent=explDim)
@@ -878,7 +878,7 @@ class ModelVersReport(ModelDocument.ModelDocument):
         XmlUtil.addChild(event, XbrlConst.ver, "ver:toURI", ("value",toURI))
     
     def createConceptEvent(self, eventNS, eventName, fromConcept=None, toConcept=None, action=None, fromCustomAttribute=None, toCustomAttribute=None, fromResource=None, toResource=None, fromValue=None, toValue=None, fromResourceText=None, toResourceText=None):
-        if not action:
+        if action is None:
             action = self.createAction()
         event = XmlUtil.addChild(action, eventNS, eventName)
         if fromConcept is not None:
