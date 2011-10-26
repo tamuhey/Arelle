@@ -37,7 +37,15 @@ def getUserLocale():
 
 def getLanguageCode():
     import locale
-    return locale.getdefaultlocale()[0].replace("_","-")
+    try:
+        return locale.getdefaultlocale()[0].replace("_","-")
+    except AttributeError: #language code and encoding may be None if their values cannot be determined.
+        return "en"    
+
+def getLanguageCodes():
+    lang = getLanguageCode()
+    # allow searching on the lang with country part, either python or standard form, or just language
+    return [lang, lang.replace("-","_"), lang.partition("-")[0]]
 
 # Iterate over grouping intervals
 def _grouping_intervals(grouping):

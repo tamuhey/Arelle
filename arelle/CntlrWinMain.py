@@ -15,7 +15,6 @@ import tkinter.messagebox, traceback
 from arelle.Locale import format_string
 from arelle.CntlrWinTooltip import ToolTip
 from arelle import XbrlConst
-import gettext
 import logging
 
 import threading, queue
@@ -502,7 +501,7 @@ class CntlrWinMain (Cntlr.Cntlr):
                 self.config["importOpenDir"] = os.path.dirname(filename)
             else:
                 if not filename.startswith("http://"):
-                    self.config["fileOpenDir"] = os.path.dirname(filename)
+                    self.config["fileOpenDir"] = os.path.dirname(filesource.baseurl if filesource.isArchive else filename)
             self.updateFileHistory(filename, importToDTS)
             thread = threading.Thread(target=lambda: self.backgroundLoadXbrl(filesource,importToDTS,selectTopView))
             thread.daemon = True
@@ -1095,7 +1094,6 @@ class WinMainLogHandler(logging.Handler):
 
 def main():
     # this is the entry called by arelleGUI.pyw for windows
-    gettext.install("arelle")
     global restartMain
     while restartMain:
         restartMain = False

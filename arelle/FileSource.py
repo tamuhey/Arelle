@@ -183,7 +183,7 @@ class FileSource:
             else: # filepath.startswith(self.baseurl)
                 archiveFileName = filepath[len(archiveFileSource.baseurl) + 1:]
             if archiveFileSource.isZip:
-                b = archiveFileSource.fs.read(archiveFileName)
+                b = archiveFileSource.fs.read(archiveFileName.replace("\\","/"))
                 encoding = XmlUtil.encoding(b)
                 return (io.TextIOWrapper(
                         io.BytesIO(b), 
@@ -293,5 +293,7 @@ class FileSource:
         self.selection = selection
         if selection.startswith("http://") or os.path.isabs(selection):
             self.url = selection
-        else:
-            self.url = self.baseurl + ("/" if self.baseIsHttp else os.sep) + selection
+        elif self.baseIsHttp or os.sep == '/':
+            self.url = self.baseurl + "/" + selection
+        else: # MSFT os.sep == '\\'
+            self.url = self.baseurl + os.sep + selection.replace("/", os.sep)
