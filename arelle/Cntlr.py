@@ -7,33 +7,25 @@ Created on Oct 3, 2010
 import tempfile, os, pickle, sys, logging, gettext
 from arelle import ModelManager
 from arelle.Locale import getLanguageCodes
+from arelle import config
 
 class Cntlr:
 
     __version__ = "0.0.4"
     
     def __init__(self, logFileName=None, logFileMode=None, logFileEncoding=None, logFormat=None):
+        self.userAppDir = config.data_dir()
+        self.hasClipboard = config.has_clipboard()
         self.hasWin32gui = False
         if sys.platform == "darwin":
             self.isMac = True
             self.isMSW = False
-            self.userAppDir = os.path.expanduser("~") + "/Library/Application Support/Arelle"
             self.contextMenuClick = "<Button-2>"
-            self.hasClipboard = True
             self.updateURL = "http://arelle.org/downloads/8"
         elif sys.platform.startswith("win"):
             self.isMac = False
             self.isMSW = True
-            tempDir = tempfile.gettempdir()
-            if tempDir.endswith('local\\temp'):
-                self.userAppDir = tempDir[:-10] + 'local\\Arelle'
-            else:
-                self.userAppDir = tempDir + os.sep + 'arelle'
-            try:
-                import win32clipboard
-                self.hasClipboard = True
-            except ImportError:
-                self.hasClipboard = False
+
             try:
                 import win32gui
                 self.hasWin32gui = True # active state for open file dialogs
@@ -47,58 +39,20 @@ class Cntlr:
         else: # Unix/Linux
             self.isMac = False
             self.isMSW = False
-            self.userAppDir = os.path.join(
-                   os.getenv('XDG_CONFIG_HOME', os.path.expanduser("~/.config")),
-                   "arelle")
-            try:
-                import gtk
-                self.hasClipboard = True
-            except ImportError:
-                self.hasClipboard = False
             self.contextMenuClick = "<Button-3>"
         self.moduleDir = os.path.dirname(__file__)
         # for python 3.2 remove __pycache__
         if self.moduleDir.endswith("__pycache__"):
             self.moduleDir = os.path.dirname(self.moduleDir)
-        if self.moduleDir.endswith("python32.zip/arelle"):
-            '''
-            distZipFile = os.path.dirname(self.moduleDir)
-            d = os.path.join(self.userAppDir, "arelle")
-            self.configDir = os.path.join(d, "config")
-            self.imagesDir = os.path.join(d, "images")
-            import zipfile
-            distZip = zipfile.ZipFile(distZipFile, mode="r")
-            distNames = distZip.namelist()
-            distZip.extractall(path=self.userAppDir,
-                               members=[f for f in distNames if "/config/" in f or "/images/" in f]
-                               )
-            distZip.close()
-            '''
-            resources = os.path.dirname(os.path.dirname(os.path.dirname(self.moduleDir)))
-            self.configDir = os.path.join(resources, "config")
-            self.imagesDir = os.path.join(resources, "images")
-            self.localeDir = os.path.join(resources, "locale")
-        elif self.moduleDir.endswith("library.zip\\arelle"): # cx_Freexe
-            resources = os.path.dirname(os.path.dirname(self.moduleDir))
-            self.configDir = os.path.join(resources, "config")
-            self.imagesDir = os.path.join(resources, "images")
-            self.localeDir = os.path.join(resources, "locale")
-        else:
-            self.configDir = os.path.join(self.moduleDir, "config")
-            self.imagesDir = os.path.join(self.moduleDir, "images")
-            self.localeDir = os.path.join(self.moduleDir, "locale")
+
+        self.configDir = config.config_dir()
+        self.imagesDir = config.images_dir()
+        self.localeDir = config.locale_dir()
         # assert that app dir must exist
         if not os.path.exists(self.userAppDir):
             os.makedirs(self.userAppDir)
         # load config if it exists
-        self.configPickleFile = self.userAppDir + os.sep + "config.pickle"
-        self.config = None
-        if os.path.exists(self.configPickleFile):
-            try:
-                with open(self.configPickleFile, 'rb') as f:
-                    self.config = pickle.load(f)
-            except Exception as ex:
-                self.config = None # restart with a new config
+        self.config = config.load_user_config()
         if not self.config:
             self.config = {
                 'fileHistory': [],
@@ -147,8 +101,7 @@ class Cntlr:
             self.logHandler.close()
         
     def saveConfig(self):
-        with open(self.configPickleFile, 'wb') as f:
-            pickle.dump(self.config, f, pickle.HIGHEST_PROTOCOL)
+        config.save_user_config(self.config)
             
     # default non-threaded viewModelObject                 
     def viewModelObject(self, modelXbrl, objectId):

@@ -6,7 +6,7 @@ Created on Jan 30, 2011
 '''
 import sys, os
 
-setup_requires = []
+setup_requires = ["appdirs"]
 options = {}
 scripts = []
 
@@ -34,7 +34,7 @@ if sys.platform == 'darwin':
 	('images',['arelle/images/' + f for f in os.listdir('arelle/images')]),
     ('config',['arelle/config/' + f for f in os.listdir('arelle/config')]),
     ('examples',['arelle/examples/' + f for f in os.listdir('arelle/examples')]),
-    ('scripts',['arelle/scripts/' + f for f in os.listdir('arelle/scripts-macOS')]),
+    #('scripts',['arelle/scripts/' + f for f in os.listdir('arelle/scripts-macOS')]),
       ]
     for dir, subDirs, files in os.walk('arelle/locale'):
         dir = dir.replace('\\','/')
