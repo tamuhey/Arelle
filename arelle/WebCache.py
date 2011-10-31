@@ -6,7 +6,7 @@ Created on Oct 5, 2010
 '''
 import os, os.path, posixpath, sys, re, shutil, time, urllib.request, pickle
 from urllib.error import (URLError, HTTPError, ContentTooShortError)
-from urllib.parse import unquote
+from urllib.parse import unquote, urljoin
 
 from arelle import config
 
@@ -91,30 +91,29 @@ class WebCache:
         #self.opener.close()
         #self.opener = WebCacheUrlOpener(self.cntlr, proxyDirFmt(httpProxyTuple))
         
-    
     def normalizeUrl(self, url, base=None):
-        if url and not (url.startswith('http://') or os.path.isabs(url)):
-            if base is not None and not base.startswith('http:') and '%' in url:
-                url = unquote(url)
-            if base:
-                if base.startswith("http://"):
-                    prot, sep, path = base.partition("://")
-                    normedPath = prot + sep + posixpath.normpath(os.path.dirname(path) + "/" + url)
-                else:
-                    normedPath = os.path.normpath(os.path.join(os.path.dirname(base),url))
-            else:
-                normedPath = url
-            if normedPath.startswith("file://"): normedPath = normedPath[7:]
-            elif normedPath.startswith("file:\\"): normedPath = normedPath[6:]
-        else:
-            normedPath = url
+        cacheDir = self.cacheDir
         
-        if normedPath:
-            if normedPath.startswith('http:'):
-                return normedPath.replace('\\','/')
-            if normedPath.startswith(self.cacheDir):
-                urlparts = normedPath[len(self.cacheDir)+1:].partition(os.sep)
-                normedPath = urlparts[0] + '://' + urlparts[2].replace('\\','/')
+        # Convert url, base, and cacheDir into posix-style paths
+        if url is not None:
+            url = url.replace('\\', '/')
+        if base is not None:
+            base = base.replace('\\', '/')
+        if cacheDir is not None:
+            cacheDir = cacheDir.replace('\\', '/')
+
+        # Join url against base
+        normedPath = urljoin(base, url)
+
+        # Strip leading file://
+        if normedPath.startswith("file://"):
+            normedPath = normedPath[7:]
+
+        # If this is a 'cache' path, dervive the original url
+        if normedPath and normedPath.startswith(cacheDir):
+            urlparts = normedPath[len(cacheDir)+1:].partition('/')
+            normedPath = urlparts[0] + '://' + urlparts[2]
+        
         return normedPath
     
     def getfilename(self, url, base=None, reload=False):
