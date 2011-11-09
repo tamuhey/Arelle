@@ -267,6 +267,27 @@ class ModelXbrl:
                 else:
                     extras["href"] = file
                     extras["sourceLine"] = ""
+            elif argName == "variables":
+                extras["variables"] = dict()
+                for vName,vFact in argValue.items():
+                    if isinstance(vFact, ModelObject):
+                        try:
+                            entryUrl = self.modelDocument.uri
+                        except AttributeError:
+                            entryUrl = self.entryLoadingUrl
+                        try:
+                            objectUrl = vFact.modelDocument.uri
+                        except AttributeError:
+                            try:
+                                objectUrl = self.modelDocument.uri
+                            except AttributeError:
+                                objectUrl = self.entryLoadingUrl
+                        file = UrlUtil.relativeUri(entryUrl, objectUrl)
+                        extras["variables"][vName.clarkNotation] = {
+                            "href" : file + "#" + XmlUtil.elementFragmentIdentifier(vFact),
+                            "sourceLine" : vFact.sourceline,
+                            "objectId" : vFact.objectId()
+                        }
             elif argName == "sourceLine":
                 extras["sourceLine"] = argValue
             elif argName != "exc_info":
