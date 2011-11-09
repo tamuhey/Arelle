@@ -41,6 +41,9 @@ class StructuredLogHandler(logging.Handler):
                 "file": logRecord.file,
                 "sourceLine": logRecord.sourceLine,
                 "href": logRecord.href}
+        if hasattr(logRecord, 'variables'):
+            data["variables"] = logRecord.variables
+            
         self.messages.append(data)
 
 class BasicController(Cntlr):
