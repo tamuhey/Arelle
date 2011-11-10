@@ -107,10 +107,10 @@ def evaluateVar(xpCtx, varSet, varIndex):
                 msg = varSet.message(result)
                 if msg is not None:
                     xpCtx.modelXbrl.info("assertion:value:" + (varSet.id or varSet.xlinkLabel or _("unlabeled variableSet")),
-                            msg.evaluate(xpCtx), modelObject=varSet, variables=dict(xpCtx.inScopeVars))
+                            msg.evaluate(xpCtx), modelObject=varSet, variables=dict(xpCtx.inScopeVars), result=result)
                 else:
                     xpCtx.modelXbrl.info("assertion:value:" + (varSet.id or varSet.xlinkLabel or _("unlabeled variableSet")),
-                        modelObject=varSet, variables=dict(xpCtx.inScopeVars))
+                        modelObject=varSet, variables=dict(xpCtx.inScopeVars), result=result)
                 traceOf = "Value Assertion"
             if xpCtx.formulaOptions.traceVariableSetExpressionResult:
                 xpCtx.modelXbrl.info("formula:trace",
