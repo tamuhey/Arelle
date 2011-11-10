@@ -43,6 +43,8 @@ class StructuredLogHandler(logging.Handler):
                 "href": logRecord.href}
         if hasattr(logRecord, 'variables'):
             data["variables"] = logRecord.variables
+        if hasattr(logRecord, 'results'):
+            data["results"] = logRecord.results
             
         self.messages.append(data)
 
