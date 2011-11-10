@@ -288,6 +288,8 @@ class ModelXbrl:
                             "sourceLine" : vFact.sourceline,
                             "objectId" : vFact.objectId()
                         }
+            elif argName == "result":
+                extras["result"] = argValue
             elif argName == "sourceLine":
                 extras["sourceLine"] = argValue
             elif argName != "exc_info":
