@@ -283,7 +283,7 @@ class ModelXbrl:
                             except AttributeError:
                                 objectUrl = self.entryLoadingUrl
                         file = UrlUtil.relativeUri(entryUrl, objectUrl)
-                        extras["variables"][vName.clarkNotation] = {
+                        extras["variables"][vName.localname] = {
                             "href" : file + "#" + XmlUtil.elementFragmentIdentifier(vFact),
                             "sourceLine" : vFact.sourceline,
                             "objectId" : vFact.objectId()
