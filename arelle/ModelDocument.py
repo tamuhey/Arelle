@@ -27,7 +27,7 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
        not normalizedUri.startswith(modelXbrl.uriDir) and \
        not modelXbrl.modelManager.disclosureSystem.hrefValid(normalizedUri):
         blocked = modelXbrl.modelManager.disclosureSystem.blockDisallowedReferences
-        modelXbrl.error(("EFM.6.22.02", "GFM.1.1.3", "SBR.NL.2.1.0.06"),
+        modelXbrl.error(("EFM.6.22.02", "GFM.1.1.3", "SBR.NL.2.1.0.06" if normalizedUri.startswith("http") else "SBR.NL.2.2.0.17"),
                 _("Prohibited file for filings %(blockedIndicator)s: %(url)s"),
                 modelObject=referringElement, url=normalizedUri, blockedIndicator=_(" blocked") if blocked else "")
         if blocked:
@@ -72,12 +72,16 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
         xmlDocument = etree.parse(file,parser=_parser,base_url=filepath)
         file.close()
     except (EnvironmentError, KeyError) as err:  # missing zip file raises KeyError
+        if file:
+            file.close()
+        # retry in case of well known schema locations
+        if not isIncluded and namespace and namespace in XbrlConst.standardNamespaceSchemaLocations and uri != XbrlConst.standardNamespaceSchemaLocations[namespace]:
+            return load(modelXbrl, XbrlConst.standardNamespaceSchemaLocations[namespace], 
+                        base, referringElement, isEntry, isDiscovered, isIncluded, namespace, reloadCache)
         modelXbrl.error("IOerror",
                 _("%(fileName)s: file error: %(error)s"),
                 modelObject=referringElement, fileName=os.path.basename(uri), error=str(err))
         type = Type.Unknown
-        if file:
-            file.close()
         return None
     except (etree.LxmlError,
             ValueError) as err:  # ValueError raised on bad format of qnames, xmlns'es, or parameters
@@ -254,6 +258,7 @@ def create(modelXbrl, type, uri, schemaRefs=None, isEntry=False):
         modelDocument.targetNamespace = None
         modelDocument.isQualifiedElementFormDefault = False
         modelDocument.isQualifiedAttributeFormDefault = False
+    modelDocument.definesUTR = False
     return modelDocument
 
     
@@ -309,6 +314,7 @@ class ModelDocument:
         self.schemaLocationElements = set()
         self.referencedNamespaces = set()
         self.inDTS = False
+        self.definesUTR = False
 
     def objectId(self,refId=""):
         return "_{0}_{1}".format(refId, self.objectIndex)
@@ -382,7 +388,7 @@ class ModelDocument:
                     namespace=namespace, targetNamespace=targetNamespace)
             if (self.modelXbrl.modelManager.validateDisclosureSystem and 
                 self.modelXbrl.modelManager.disclosureSystem.disallowedHrefOfNamespace(self.uri, targetNamespace)):
-                    self.modelXbrl.error(("EFM.6.22.02", "GFM.1.1.3", "SBR.NL.2.1.0.06"),
+                    self.modelXbrl.error(("EFM.6.22.02", "GFM.1.1.3", "SBR.NL.2.1.0.06" if self.uri.startswith("http") else "SBR.NL.2.2.0.17"),
                             _("Namespace: %(namespace)s disallowed schemaLocation %(schemaLocation)s"),
                             modelObject=rootElement, namespace=targetNamespace, schemaLocation=self.uri)
 
@@ -395,33 +401,24 @@ class ModelDocument:
             self.modelXbrl.hasXDT = True
         self.isQualifiedElementFormDefault = rootElement.get("elementFormDefault") == "qualified"
         self.isQualifiedAttributeFormDefault = rootElement.get("attributeFormDefault") == "qualified"
+        self.definesUTR = any(ns == XbrlConst.utr for ns in rootElement.nsmap.values())
         try:
-            self.schemaImportElements(rootElement)
-            # if self.inDTS: (need all elements defined, even if not in DTS
             self.schemaDiscoverChildElements(rootElement)
         except (ValueError, LookupError) as err:
             self.modelXbrl.modelManager.addToLog("discovery: {0} error {1}".format(
                         self.basename,
                         err))
             
-    
-    def schemaImportElements(self, parentModelObject):
-        # must find import/include before processing linkbases or elements
-        for modelObject in parentModelObject.iterchildren():
-            if isinstance(modelObject,ModelObject) and modelObject.namespaceURI == XbrlConst.xsd:
-                ln = modelObject.localName
-                if ln == "import" or ln == "include":
-                    self.importDiscover(modelObject)
-                if ln in schemaBottom:
-                    break
-
     def schemaDiscoverChildElements(self, parentModelObject):
         # find roleTypes, elements, and linkbases
+        # must find import/include before processing linkbases or elements
         for modelObject in parentModelObject.iterchildren():
             if isinstance(modelObject,ModelObject):
                 ln = modelObject.localName
                 ns = modelObject.namespaceURI
-                if self.inDTS and ns == XbrlConst.link:
+                if modelObject.namespaceURI == XbrlConst.xsd and ln in {"import", "include"}:
+                    self.importDiscover(modelObject)
+                elif self.inDTS and ns == XbrlConst.link:
                     if ln == "roleType":
                         self.modelXbrl.roleTypes[modelObject.roleURI].append(modelObject)
                     elif ln == "arcroleType":
@@ -432,7 +429,8 @@ class ModelDocument:
                         self.linkbaseDiscover(modelObject)
                 # recurse to children
                 self.schemaDiscoverChildElements(modelObject)
-            
+
+                        
     def baseForElement(self, element):
         base = ""
         baseElt = element
@@ -469,7 +467,7 @@ class ModelDocument:
             if (self.modelXbrl.modelManager.validateDisclosureSystem and 
                     self.modelXbrl.modelManager.disclosureSystem.blockDisallowedReferences and
                     self.modelXbrl.modelManager.disclosureSystem.disallowedHrefOfNamespace(importSchemaLocation, importNamespace)):
-                self.modelXbrl.error(("EFM.6.22.02", "GFM.1.1.3", "SBR.NL.2.1.0.06"),
+                self.modelXbrl.error(("EFM.6.22.02", "GFM.1.1.3", "SBR.NL.2.1.0.06" if importSchemaLocation.startswith("http") else "SBR.NL.2.2.0.17"),
                         _("Namespace: %(namespace)s disallowed schemaLocation blocked %(schemaLocation)s"),
                         modelObject=element, namespace=importNamespace, schemaLocation=importSchemaLocation)
                 return
@@ -538,7 +536,7 @@ class ModelDocument:
                     if lbLn == "roleRef" or lbLn == "arcroleRef":
                         href = self.discoverHref(lbElement)
                         if href is None:
-                            self.modelXbrl.error("xbrl:hrefMissing",
+                            self.modelXbrl.error("xmlSchema:requiredAttribute",
                                     _("Linkbase reference for %(linkbaseRefElement)s href attribute missing or malformed"),
                                     modelObject=lbElement, linkbaseRefElement=lbLn)
                         else:
@@ -571,7 +569,7 @@ class ModelDocument:
                                     href = self.discoverHref(linkElement, nonDTS=nonDTS)
                                     if href is None:
                                         if isStandardExtLink:
-                                            self.modelXbrl.error("xbrl:hrefMissing",
+                                            self.modelXbrl.error("xmlSchema:requiredAttribute",
                                                     _("Locator href attribute missing or malformed in standard extended link"),
                                                     modelObejct=linkElement)
                                         else:

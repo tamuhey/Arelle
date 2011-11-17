@@ -43,7 +43,7 @@ qnGenReference = qname("{http://xbrl.org/2008/reference}reference")
 elementLabel = "http://xbrl.org/arcrole/2008/element-label"
 genLabel = "http://xbrl.org/2008/label"
 qnGenLabel = qname("{http://xbrl.org/2008/label}label")
-elementLabel = "http://xbrl.org/arcrole/2008/element-label"
+elementReference = "http://xbrl.org/arcrole/2008/element-reference"
 xbrldt = "http://xbrl.org/2005/xbrldt"
 qnXbrldtHypercubeItem = qname("{http://xbrl.org/2005/xbrldt}xbrldt:hypercubeItem")
 qnXbrldtDimensionItem = qname("{http://xbrl.org/2005/xbrldt}xbrldt:dimensionItem")
@@ -82,7 +82,6 @@ hypercubeDimension = "http://xbrl.org/int/dim/arcrole/hypercube-dimension"
 dimensionDomain = "http://xbrl.org/int/dim/arcrole/dimension-domain"
 domainMember = "http://xbrl.org/int/dim/arcrole/domain-member"
 dimensionDefault = "http://xbrl.org/int/dim/arcrole/dimension-default"
-usTypesStartsWith = "http://xbrl.us/us-types/"
 dtrTypesStartsWith = "http://www.xbrl.org/dtr/type/"
 dtrNumeric = "http://www.xbrl.org/dtr/type/numeric"
 defaultLinkRole = "http://www.xbrl.org/2003/role/link"
@@ -90,11 +89,15 @@ iso4217 = "http://www.xbrl.org/2003/iso4217"
 standardLabel = "http://www.xbrl.org/2003/role/label"
 genStandardLabel = "http://www.xbrl.org/2008/role/label"
 documentationLabel = "http://www.xbrl.org/2003/role/documentation"
+genDocumentationLabel = "http://www.xbrl.org/2008/role/documentation"
 standardReference = "http://www.xbrl.org/2003/role/reference"
+genStandardReference = "http://www.xbrl.org/2010/role/reference"
 periodStartLabel = "http://www.xbrl.org/2003/role/periodStartLabel"
 periodEndLabel = "http://www.xbrl.org/2003/role/periodEndLabel"
 conceptNameLabelRole = "XBRL-concept-name" # fake label role to show concept QName instead of label
 xlinkLinkbase = "http://www.w3.org/1999/xlink/properties/linkbase"
+
+utr = "http://www.xbrl.org/2009/utr"
 
 ver = "http://xbrl.org/2010/versioning-base"
 vercb = "http://xbrl.org/2010/versioning-concept-basic"
@@ -232,6 +235,7 @@ vf = "http://xbrl.org/2008/filter/value"
 qnNilFilter = qname("{http://xbrl.org/2008/filter/value}vf:nil")
 qnPrecisionFilter = qname("{http://xbrl.org/2008/filter/value}vf:precision")
 xpath2err = "http://www.w3.org/2005/xqt-errors"
+variablesScope = "http://xbrl.org/arcrole/2010/variables-scope"
 
 # 2010 table linkbase
 euRend = "http://www.eurofiling.info/2010/rendering"
@@ -289,6 +293,18 @@ def labelroleLabel(role): # with sort char in first position
 
 def isStandardNamespace(namespaceURI):
     return namespaceURI in {xsd, xbrli, link, gen, xbrldt, xbrldi}
+
+standardNamespaceSchemaLocations = {
+    xbrli: "http://www.xbrl.org/2003/xbrl-instance-2003-12-31.xsd",
+    link: "http://www.xbrl.org/2003/xbrl-linkbase-2003-12-31.xsd",
+    xl: "http://www.xbrl.org/2003/xl-2003-12-31.xsd",
+    xlink: "http://www.w3.org/1999/xlink",
+    xbrldt: "http://www.xbrl.org/2005/xbrldt-2005.xsd",
+    xbrldi: "http://www.xbrl.org/2006/xbrldi-2006.xsd",
+    gen: "http://www.xbrl.org/2008/generic-link.xsd",
+    genLabel: "http://www.xbrl.org/2008/generic-label.xsd",
+    genReference: "http://www.xbrl.org/2008/generic-reference.xsd"
+    }
 
 def isNumericXsdType(xsdType):
     return xsdType in {"integer", "positiveInteger", "negativeInteger", "nonNegativeInteger", "nonPositiveInteger",
@@ -436,4 +452,5 @@ def isFormulaArcrole(arcrole):
                        "http://xbrl.org/arcrole/2010/assertion-unsatisfied-message",
                        "http://xbrl.org/arcrole/2010/instance-variable",
                        "http://xbrl.org/arcrole/2010/formula-instance",
-                       "http://xbrl.org/arcrole/2010/function-implementation"}
+                       "http://xbrl.org/arcrole/2010/function-implementation",
+                       "http://xbrl.org/arcrole/2010/variables-scope"}

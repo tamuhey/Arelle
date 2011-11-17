@@ -14,20 +14,20 @@ from arelle.ModelObject import ModelObject
 from arelle.ModelInstanceObject import ModelFact
 
 datePattern = None
-GFMcontextDatePattern = None
-signOrCurrencyPattern = None
-
 
 class ValidateFiling(ValidateXbrl.ValidateXbrl):
     def __init__(self, modelXbrl):
         super().__init__(modelXbrl)
         
-        global datePattern, GFMcontextDatePattern, signOrCurrencyPattern
+        global datePattern, GFMcontextDatePattern, signOrCurrencyPattern, usTypesPattern, usRolesPattern, usDeiPattern
         
         if datePattern is None:
             datePattern = re.compile(r"([12][0-9]{3})-([01][0-9])-([0-3][0-9])")
             GFMcontextDatePattern = re.compile(r"^[12][0-9]{3}-[01][0-9]-[0-3][0-9]$")
             signOrCurrencyPattern = re.compile("^(-)[0-9]+|[^eE](-)[0-9]+|(\\()[0-9].*(\\))|([$\u20ac£¥])")
+            usTypesPattern = re.compile(r"^http://(xbrl.us|fasb.org)/us-types/")
+            usRolesPattern = re.compile(r"^http://(xbrl.us|fasb.org)/us-roles/")
+            usDeiPattern = re.compile(r"http://(xbrl.us|xbrl.sec.gov)/dei/")
 
         
     def validate(self, modelXbrl, parameters=None):
@@ -49,12 +49,25 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
         super(ValidateFiling,self).validate(modelXbrl, parameters)
         xbrlInstDoc = modelXbrl.modelDocument.xmlDocument.getroot()
         disclosureSystem = self.disclosureSystem
-        self.modelXbrl = modelXbrl
+        _isStandardUri = {}
+        
+        def isStandardUri(uri):
+            try:
+                return _isStandardUri[uri]
+            except KeyError:
+                isStd = (uri in disclosureSystem.standardTaxonomiesDict or
+                         (not uri.startswith("http://") and 
+                          any(u.endswith(e) for u in (uri.replace("\\","/"),) for e in disclosureSystem.standardLocalHrefs)))
+                _isStandardUri[uri] = isStd
+                return isStd
+
         modelXbrl.modelManager.showStatus(_("validating {0}").format(disclosureSystem.name))
         
         self.modelXbrl.profileActivity()
         conceptsUsed = {} # key=concept object value=True if has presentation label
         labelsRelationshipSet = modelXbrl.relationshipSet(XbrlConst.conceptLabel)
+        if self.validateSBRNL:  # include generic labels in a (new) set
+            genLabelsRelationshipSet = modelXbrl.relationshipSet(XbrlConst.elementLabel)
         presentationRelationshipSet = modelXbrl.relationshipSet(XbrlConst.parentChild)
         referencesRelationshipSetWithProhibits = modelXbrl.relationshipSet(XbrlConst.conceptReference, includeProhibits=True)
         self.modelXbrl.profileActivity("... cache lbl, pre, ref relationships", minTimeToShow=1.0)
@@ -391,12 +404,12 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                 else:
                     uniqueUnitHashes[h] = unit
                 if self.validateEFM:  # 6.5.38
-                    for measureElt in unit.iterdescendants(tag="{http://www.xbrl.org/2003/instance}unit"):
-                        text = measureElt.text
-                        if text and len(text) > 100 and len(text.encode("utf-8")) > 200:
-                            modelXbrl.error("EFM.6.05.38",
-                                _("Units %(unitID)s has a measure over 200 bytes long in utf-8, %{measure)s."),
-                                modelObject=measureElt, unitID=unit.id, measure=text)
+                    for measureElt in unit.iterdescendants(tag="{http://www.xbrl.org/2003/instance}measure"):
+                        if (isinstance(measureElt.xValue, ModelValue.QName) and 
+                            len(measureElt.xValue.localName) > 65 and len(measureElt.xValue.localName.encode("utf-8")) > 200):
+                            modelXbrl.error("EFM.6.05.36",
+                                _("Unit has a measure over 200 bytes long in utf-8, %(measure)s."),
+                                modelObject=measureElt, measure=measureElt.xValue.localName)
             del uniqueUnitHashes
             self.modelXbrl.profileActivity("... filer unit checks", minTimeToShow=1.0)
    
@@ -472,44 +485,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                     modelXbrl=modelXbrl)
             else:
                 for concept in conceptsUsed.keys():
-                    hasDefaultLangStandardLabel = False
-                    dupLabels = set()
-                    for modelLabelRel in labelsRelationshipSet.fromModelObject(concept):
-                        modelLabel = modelLabelRel.toModelObject
-                        if modelLabel.xmlLang.startswith(disclosureSystem.defaultXmlLang) and \
-                           modelLabel.role == XbrlConst.standardLabel:
-                            hasDefaultLangStandardLabel = True
-                        dupDetectKey = (modelLabel.role,modelLabel.xmlLang)
-                        if dupDetectKey in dupLabels:
-                            modelXbrl.error(("EFM.6.10.02", "GFM.1.5.2"),
-                                _("Concept %(concept)s has duplicated labels for role %(role)s lang %(lang)s."),
-                                modelObject=concept, concept=concept.qname, 
-                                role=dupDetectKey[0], lang=dupDetectKey[1])
-                        else:
-                            dupLabels.add(dupDetectKey)
-                            
-                    #6 10.1 en-US standard label
-                    if not hasDefaultLangStandardLabel:
-                        modelXbrl.error(("EFM.6.10.01", "GFM.1.05.01"),
-                            _("Concept %(concept)s is missing an %(lang)s standard label."),
-                            modelObject=concept, concept=concept.qname, 
-                            lang=disclosureSystem.defaultLanguage)
-                        
-                    #6 10.3 default lang label for every role
-                    dupLabels.add(("zzzz",disclosureSystem.defaultXmlLang)) #to allow following loop
-                    priorRole = None
-                    hasDefaultLang = True
-                    for role, lang in sorted(dupLabels):
-                        if role != priorRole:
-                            if not hasDefaultLang:
-                                modelXbrl.error(("EFM.6.10.03", "GFM.1.5.3"),
-                                    _("Concept %(concept)s is missing an %(lang)s label for role %(role)s."),
-                                    modelObject=concept, concept=concept.qname, 
-                                    lang=disclosureSystem.defaultLanguage, role=priorRole)
-                            hasDefaultLang = False
-                            priorRole = role
-                        if lang is not None and lang.startswith(disclosureSystem.defaultXmlLang):
-                            hasDefaultLang = True
+                    self.checkConceptLabels(modelXbrl, labelsRelationshipSet, disclosureSystem, concept)
                         
     
             #6.5.15 facts with xml in text blocks
@@ -792,23 +768,27 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                     modelXbrl.error(("EFM.6.18.01", "GFM.1.9.1"),
                         _("References for extension concept %(concept)s are not allowed: %(text)s"),
                         modelObject=modelReference, concept=concept.qname, text=text)
-                elif (self.validateEFM or self.validateSBRNL) and \
-                     modelRefRel.modelDocument.uri not in disclosureSystem.standardTaxonomiesDict: 
+                elif (self.validateEFM or self.validateSBRNL) and not isStandardUri(modelRefRel.modelDocument.uri): 
                     #6.18.2 no extension to add or remove references to standard concepts
                     modelXbrl.error(("EFM.6.18.02", "SBR.NL.2.1.0.08"),
                         _("References for standard taxonomy concept %(concept)s are not allowed in an extension linkbase: %(text)s"),
                         modelObject=modelReference, concept=concept.qname, text=text)
-            if self.validateSBRNL:
-                if not conceptHasDefaultLangStandardLabel and (concept.isItem or concept.isTuple):
+            if (self.validateSBRNL and (concept.isItem or concept.isTuple) and
+                concept.modelDocument.targetNamespace not in disclosureSystem.standardTaxonomiesDict):
+                if not conceptHasDefaultLangStandardLabel:
                     modelXbrl.error("SBR.NL.2.2.2.26",
                         _("Concept %(concept)s missing standard label in local language."),
                         modelObject=concept, concept=concept.qname)
-                if concept.modelDocument.targetNamespace not in disclosureSystem.standardTaxonomiesDict:
-                    if (concept not in presentationRelationshipSet.toModelObject(concept) and
-                        concept not in presentationRelationshipSet.fromModelObject(concept)):
-                        modelXbrl.error("SBR.NL.2.2.0.21",
-                            _("Concept %(concept)s not referred to by presentation relationship."),
-                            modelObject=concept, concept=concept.qname)
+                if (concept.isItem or concept.isTuple) and not (
+                        presentationRelationshipSet.toModelObject(concept) or
+                        presentationRelationshipSet.fromModelObject(concept)):
+                    modelXbrl.error("SBR.NL.2.2.2.04",
+                        _("Concept %(concept)s not referred to by presentation relationship."),
+                        modelObject=concept, concept=concept.qname)
+                        
+                self.checkConceptLabels(modelXbrl, labelsRelationshipSet, disclosureSystem, concept)
+                self.checkConceptLabels(modelXbrl, genLabelsRelationshipSet, disclosureSystem, concept)
+
         self.modelXbrl.profileActivity("... filer concepts checks", minTimeToShow=1.0)
 
         defaultLangStandardLabels = None #dereference
@@ -817,7 +797,16 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
         ValidateFilingDTS.checkDTS(self, modelXbrl.modelDocument, [])
         self.modelXbrl.profileActivity("... filer DTS checks", minTimeToShow=1.0)
 
-        
+        # checks for namespace clashes
+        if self.validateEFM:
+            # check number of us-roles taxonomies referenced
+            for nsPattern in (usTypesPattern, usRolesPattern, usDeiPattern):
+                usTypesURIs = set(ns for ns in modelXbrl.namespaceDocs.keys() if nsPattern.match(ns))
+                if len(usTypesURIs) > 1:
+                    modelXbrl.error("EFM.6.22.03",
+                        _("References for conflicting standard taxonomies %(namespaceConflicts)s are not allowed in same DTS"),
+                        modelObject=modelXbrl, namespaceConflicts=usTypesURIs)
+            
         conceptsUsedWithPreferredLabels = defaultdict(list)
         usedCalcsPresented = defaultdict(set) # pairs of concepts objectIds used in calc
         drsELRs = set()
@@ -831,12 +820,12 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                     if not (arcroleFilter == arcrole or
                             arcroleFilter == "*" and arcrole not in (XbrlConst.summationItem, XbrlConst.parentChild)):
                         continue
-                    if self.validateEFMorGFM or (self.validateSBRNL and arcrole in (XbrlConst.conceptLabel, XbrlConst.elementLabel)):
+                    if self.validateEFMorGFM:
                         ineffectiveArcs = ModelRelationshipSet.ineffectiveArcs(baseSetModelLinks, arcrole)
                         #validate ineffective arcs
                         for modelRel in ineffectiveArcs:
                             if modelRel.fromModelObject is not None and modelRel.toModelObject is not None:
-                                self.modelXbrl.error(("EFM.6.09.03", "GFM.1.04.03", "SBR.NL.2.2.1.05"),
+                                self.modelXbrl.error(("EFM.6.09.03", "GFM.1.04.03"),
                                     _("Ineffective arc %(arc)s in \nlink role %(linkrole)s \narcrole %(arcrole)s \nfrom %(conceptFrom)s \nto %(conceptTo)s \n%(ineffectivity)s"),
                                     modelObject=modelRel, arc=modelRel.qname, linkrole=modelRel.linkrole, arcrole=modelRel.arcrole,
                                     conceptFrom=modelRel.fromModelObject.qname, conceptTo=modelRel.toModelObject.qname, 
@@ -940,8 +929,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                             for rel in rels:
                                 relTo = rel.toModelObject
     
-                                if not (relTo.type is not None and relTo.type.isDomainItemType) and \
-                                   rel.modelDocument.uri not in disclosureSystem.standardTaxonomiesDict:
+                                if not (relTo.type is not None and relTo.type.isDomainItemType) and not isStandardUri(rel.modelDocument.uri):
                                     self.modelXbrl.error(("EFM.6.16.03", "GFM.1.08.03"),
                                         _("Definition relationship from %(conceptFrom)s to %(conceptTo)s in role %(linkrole)s requires domain item target"),
                                         modelObject=rel, conceptFrom=relFrom.qname, conceptTo=relTo.qname, linkrole=rel.linkrole)
@@ -1042,3 +1030,42 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                 visited.discard(relTo)
         return (members,hasDefinedRelationship)   
 
+    def checkConceptLabels(self, modelXbrl, labelsRelationshipSet, disclosureSystem, concept):
+        hasDefaultLangStandardLabel = False
+        dupLabels = set()
+        for modelLabelRel in labelsRelationshipSet.fromModelObject(concept):
+            modelLabel = modelLabelRel.toModelObject
+            if modelLabel.xmlLang.startswith(disclosureSystem.defaultXmlLang) and \
+               modelLabel.role == XbrlConst.standardLabel:
+                hasDefaultLangStandardLabel = True
+            dupDetectKey = (modelLabel.role,modelLabel.xmlLang)
+            if dupDetectKey in dupLabels:
+                modelXbrl.error(("EFM.6.10.02", "GFM.1.5.2", "SBR.NL.2.2.1.05"),
+                    _("Concept %(concept)s has duplicated labels for role %(role)s lang %(lang)s."),
+                    modelObject=concept, concept=concept.qname, 
+                    role=dupDetectKey[0], lang=dupDetectKey[1])
+            else:
+                dupLabels.add(dupDetectKey)
+                
+        #6 10.1 en-US standard label
+        if not hasDefaultLangStandardLabel:
+            modelXbrl.error(("EFM.6.10.01", "GFM.1.05.01"),
+                _("Concept %(concept)s is missing an %(lang)s standard label."),
+                modelObject=concept, concept=concept.qname, 
+                lang=disclosureSystem.defaultLanguage)
+            
+        #6 10.3 default lang label for every role
+        dupLabels.add(("zzzz",disclosureSystem.defaultXmlLang)) #to allow following loop
+        priorRole = None
+        hasDefaultLang = True
+        for role, lang in sorted(dupLabels):
+            if role != priorRole:
+                if not hasDefaultLang:
+                    modelXbrl.error(("EFM.6.10.03", "GFM.1.5.3"),
+                        _("Concept %(concept)s is missing an %(lang)s label for role %(role)s."),
+                        modelObject=concept, concept=concept.qname, 
+                        lang=disclosureSystem.defaultLanguage, role=priorRole)
+                hasDefaultLang = False
+                priorRole = role
+            if lang is not None and lang.startswith(disclosureSystem.defaultXmlLang):
+                hasDefaultLang = True
