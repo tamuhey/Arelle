@@ -139,7 +139,10 @@ class ModelConcept(ModelSchemaObject):
             else:
                 # check if anonymous type exists (clark qname tag + suffix)
                 qn = self.qname
-                typeQname = ModelValue.QName(qn.prefix, qn.namespaceURI, qn.localName + anonymousTypeSuffix)
+                if qn is not None:
+                    typeQname = ModelValue.QName(qn.prefix, qn.namespaceURI, qn.localName + anonymousTypeSuffix)
+                else:
+                    typeQname = None
                 if typeQname in self.modelXbrl.qnameTypes:
                     self._typeQname = typeQname
                 else:
@@ -196,7 +199,7 @@ class ModelConcept(ModelSchemaObject):
             return self._baseXbrliType
         except AttributeError:
             typeqname = self.typeQname
-            if typeqname.namespaceURI == XbrlConst.xbrli:
+            if typeqname is not None and typeqname.namespaceURI == XbrlConst.xbrli:
                 return typeqname.localName
             self._baseXbrliType = self.type.baseXbrliType if self.type is not None else None
             return self._baseXbrliType
@@ -326,7 +329,7 @@ class ModelConcept(ModelSchemaObject):
             label = labelsRelationshipSet.label(self, preferredLabel, lang)
             if label is not None:
                 if strip: return label.strip()
-                return label
+                return Locale.rtlString(label, lang=lang)
         return str(self.qname) if fallbackToQname else None
     
     def relationshipToResource(self, resourceObject, arcrole):    
@@ -432,6 +435,12 @@ class ModelConcept(ModelSchemaObject):
             subs = subNext
             subNext = subs.substitutionGroup
         return subs.qname
+
+    def dereference(self):
+        ref = self.get("ref")
+        if ref:
+            return self.modelXbrl.qnameConcepts.get(ModelValue.qname(self, ref))
+        return self
 
     @property
     def propertyView(self):
@@ -658,7 +667,7 @@ class ModelType(ModelSchemaObject):
     
     @property
     def isTextBlock(self):
-        if self.name == "textBlockItemType" and self.modelDocument.targetNamespace.startswith(XbrlConst.usTypesStartsWith):
+        if self.name == "textBlockItemType" and "/us-types/" in self.modelDocument.targetNamespace:
             return True
         if self.name == "escapedItemType" and self.modelDocument.targetNamespace.startswith(XbrlConst.dtrTypesStartsWith):
             return True
@@ -671,7 +680,7 @@ class ModelType(ModelSchemaObject):
     @property
     def isDomainItemType(self):
         if self.name == "domainItemType" and \
-           (self.modelDocument.targetNamespace.startswith(XbrlConst.usTypesStartsWith) or
+           ("/us-types/" in self.modelDocument.targetNamespace or
             self.modelDocument.targetNamespace.startswith(XbrlConst.dtrTypesStartsWith)):
             return True
         qnameDerivedFrom = self.qnameDerivedFrom
@@ -1072,7 +1081,7 @@ class ModelRelationship(ModelObject):
                 self.linkQname,
                 self.linkrole,  # needed when linkrole=None merges multiple links
                 self.fromModelObject.objectIndex if self.fromModelObject is not None else -1, 
-                self.toModelObject.objectIndex if self.toModelObject is not None else -1,
+                self.toModelObject.objectIndex if self.toModelObject is not None else -1, 
                 self.order, 
                 self.weight, 
                 self.preferredLabel) + \
