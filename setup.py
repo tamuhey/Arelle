@@ -76,7 +76,7 @@ elif sys.platform == 'win32':
 setup(name='Arelle',
       version='0.9.0',
       description='An open source XBRL platform',
-      long_description=open('README.txt').read(),
+      long_description=open('README.md').read(),
       author='arelle.org',
       author_email='support@arelle.org',
       url='http://www.arelle.org',
