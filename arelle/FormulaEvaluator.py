@@ -118,7 +118,7 @@ def evaluateVar(xpCtx, varSet, varIndex):
                         msg.evaluate(xpCtx),
                         modelObject=varSet)
                 else:
-                    xpCtx.modelXbrl.info("assertion:value:" (varSet.id or varSet.xlinkLabel or _("unlabeled variableSet")),
+                    xpCtx.modelXbrl.info("assertion:value:" +  (varSet.id or varSet.xlinkLabel or _("unlabeled variableSet")),
                                          "Assertion Result: %s" % result,
                                          modelObject=varSet)
                 traceOf = "Value Assertion"
