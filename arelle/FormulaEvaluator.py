@@ -122,7 +122,7 @@ def evaluateVar(xpCtx, varSet, varIndex):
                     xpCtx.modelXbrl.info("assertion:value:" +  (varSet.id or varSet.xlinkLabel or _("unlabeled variableSet")),
                                          "Assertion Result: %s" % result,
                                          modelObject=list(xpCtx.inScopeVars.values()), 
-                                         results=result))
+                                         results=result)
                 traceOf = "Value Assertion"
             if xpCtx.formulaOptions.traceVariableSetExpressionResult:
                 xpCtx.modelXbrl.info("formula:trace",
