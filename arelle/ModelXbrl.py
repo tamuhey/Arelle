@@ -418,6 +418,8 @@ class ModelXbrl:
                             ref["href"] = file
                         refs.append(ref)
                 extras["refs"] = refs
+            elif argName == "results":
+                extras["results"] = argValue
             elif argName == "sourceLine":
                 extras["sourceLine"] = argValue
             elif argName != "exc_info":
