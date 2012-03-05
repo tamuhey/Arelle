@@ -324,6 +324,7 @@ or label linkbases.  Multiple file names are separated by a '|' character.</td><
 <tr><td style="text-indent: 1em;">hmrc</td><td>Specify HMRC validation.</td></tr>
 <tr><td style="text-indent: 1em;">sbr-nl</td><td>Specify SBR-NL taxonomy validation.</td></tr>
 <tr><td style="text-indent: 1em;">utr</td><td>Select validation with respect to Unit Type Registry.</td></tr> 
+<tr><td style="text-indent: 1em;">parameters</td><td>Specify parameters for validation or formula (comma separated name=value[,name2=value2]).</td></tr> 
 <tr><td style="text-indent: 1em;">formulaAsserResultCounts</td><td>Report formula assertion counts.</td></tr> 
 <tr><td style="text-indent: 1em;">formulaVarSetExprResult</td><td>Trace variable set formula value, assertion test results.</td></tr> 
 <tr><td style="text-indent: 1em;">formulaVarFilterWinnowing</td><td>Trace variable set filter winnowing.</td></tr> 
@@ -421,7 +422,7 @@ as follows:</td></tr>
 def about():
     return htmlBody(_('''<table width="700p">
 <tr><th colspan="2">About arelle</th></tr>
-<tr><td rowspan="12" style="vertical-align:top;"><img src="/images/arelle32.gif"/></td><td>arelle&reg; version: %s. An open source XBRL platform</td></tr>
+<tr><td rowspan="12" style="vertical-align:top;"><img src="/images/arelle32.gif"/></td><td>arelle&reg; version: %s %s. An open source XBRL platform</td></tr>
 <tr><td>&copy; 2010-2011 Mark V Systems Limited.  All rights reserved.</td></tr>
 <tr><td>Web site: <a href="http://www.arelle.org">http://www.arelle.org</a>.  
 E-mail support: <a href="mailto:support@arelle.org">support@arelle.org</a>.</td></tr>
@@ -438,7 +439,7 @@ See the License for the specific language governing permissions and limitations 
 <tr><td style="text-indent: 2.0em;">xlrd &copy; 2005-2009 Stephen J. Machin, Lingfo Pty Ltd, \u00a9 2001 D. Giffin, &copy; 2000 A. Khan</td></tr>
 <tr><td style="text-indent: 2.0em;">xlwt &copy; 2007 Stephen J. Machin, Lingfo Pty Ltd, &copy; 2005 R. V. Kiseliov</td></tr>
 <tr><td style="text-indent: 2.0em;">Bottle &copy; 2011 Marcel Hellkamp</td></tr>
-</table>''') % Version.version)
+</table>''') % (cntlr.__version__, Version.version) )
 
 @route('/')
 def indexPage():

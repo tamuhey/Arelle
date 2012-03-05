@@ -131,6 +131,10 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
             type = Type.REGISTRY
         elif ln == "rss":
             type = Type.RSSFEED
+        elif ln == "ptvl":
+            type = Type.ARCSINFOSET
+        elif ln == "facts":
+            type = Type.FACTDIMSINFOSET
         else:
             type = Type.Unknown
             nestedInline = None
@@ -275,6 +279,8 @@ class Type:
     REGISTRY=9
     REGISTRYTESTCASE=10
     RSSFEED=11
+    ARCSINFOSET=12
+    FACTDIMSINFOSET=13
 
     typeName = ("unknown", 
                 "schema", 
@@ -283,11 +289,13 @@ class Type:
                 "inline XBRL instance",
                 "entry point set",
                 "versioning report",
-                "testcasesindex", 
+                "testcases index", 
                 "testcase",
                 "registry",
                 "registry testcase",
-                "RSS feed")
+                "RSS feed",
+                "arcs infoset",
+                "fact dimensions infoset")
     
 # schema elements which end the include/import scah
 schemaBottom = {"element", "attribute", "notation", "simpleType", "complexType", "group", "attributeGroup"}
@@ -688,6 +696,7 @@ class ModelDocument:
         self.schemaLinkbaseRefsDiscover(htmlElement)
         for inlineElement in htmlElement.iterdescendants(tag="{http://www.xbrl.org/2008/inlineXBRL}resources"):
             self.instanceContentsDiscover(inlineElement)
+            XmlValidate.validate(self.modelXbrl, inlineElement) # validate instance elements
             
         tupleElements = []
         tuplesByTupleID = {}
@@ -714,12 +723,10 @@ class ModelDocument:
                 
     def inlineXbrlLocateFactInTuple(self, modelFact, tuplesByTupleID):
         tupleRef = modelFact.tupleRef
-        if modelFact.text == "37":
-            pass
         tuple = None
         if tupleRef:
             if tupleRef not in tuplesByTupleID:
-                self.modelXbrl.error("ixerr:tupleRefMissing",
+                self.modelXbrl.error("ix.13.1.2:tupleRefMissing",
                         _("Inline XBRL tupleRef %(tupleRef)s not found"),
                         modelObject=modelFact, tupleRef=tupleRef)
             else:
@@ -732,6 +739,7 @@ class ModelDocument:
             tuple.unorderedTupleFacts.append((modelFact.order, modelFact.objectIndex))
         else:
             self.modelXbrl.facts.append(modelFact)
+        XmlValidate.validate(self.modelXbrl, modelFact, recurse=False) # validate transformed fact (but not xhtml elements)
                 
     def factDiscover(self, modelFact, parentModelFacts=None, parentElement=None):
         if parentModelFacts is None: # may be called with parentElement instead of parentModelFacts list
@@ -770,6 +778,7 @@ class ModelDocument:
         isTransformTestcase = testcaseElement.namespaceURI == "http://xbrl.org/2011/conformance-rendering/transforms"
         if XmlUtil.xmlnsprefix(testcaseElement, XbrlConst.cfcn) or isTransformTestcase:
             self.type = Type.REGISTRYTESTCASE
+        self.outpath = self.xmlRootElement.get("outpath") 
         self.testcaseVariations = []
         priorTransformName = None
         for modelVariation in XmlUtil.descendants(testcaseElement, testcaseElement.namespaceURI, "variation"):

@@ -14,22 +14,22 @@ edgrFile = "{http://www.sec.gov/Archives/edgar}file"
 edgrType = "{http://www.sec.gov/Archives/edgar}type"
 edgrUrl = "{http://www.sec.gov/Archives/edgar}url"
 
-class RssWatchOptions():
-    def __init__(self):
-        self.feedSource = ""
-        self.feedSourceUri = None
-        self.matchTextExpr = ""
-        self.formulaFileUri = ""
-        self.logFileUri = ""
-        self.emailAddress = ""
-        self.validateXbrlRules = False
-        self.validateDisclosureSystemRules = False
-        self.validateCalcLinkbase = False
-        self.validateFormulaAssertions = False
-        self.alertMatchedFactText = False
-        self.alertAssertionUnsuccessful = False
-        self.alertValiditionError = False
-        self.latestPubDate = None
+newRssWatchOptions = {
+    "feedSource": "",
+    "feedSourceUri": None,
+    "matchTextExpr": "",
+    "formulaFileUri": "",
+    "logFileUri": "",
+    "emailAddress": "",
+    "validateXbrlRules": False,
+    "validateDisclosureSystemRules": False,
+    "validateCalcLinkbase": False,
+    "validateFormulaAssertions": False,
+    "alertMatchedFactText": False,
+    "alertAssertionUnsuccessful": False,
+    "alertValiditionError": False,
+    "latestPubDate": None,
+}
         
         # Note: if adding to this list keep DialogRssWatch in sync
 class ModelRssItem(ModelObject):
@@ -80,7 +80,7 @@ class ModelRssItem(ModelObject):
             date = XmlUtil.text(XmlUtil.descendant(self, edgr, "filingDate"))
             d = date.split("/") 
             if d and len(d) == 3:
-                self._filingDate = datetime.date(int(d[2]),int(d[0]),int(d[1]))
+                self._filingDate = datetime.date(_INT(d[2]),_INT(d[0]),_INT(d[1]))
             return self._filingDate
     
     @property

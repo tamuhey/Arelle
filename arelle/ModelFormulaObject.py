@@ -137,6 +137,10 @@ class FormulaOptions():
         self.traceVariableExpressionResult = True
         if isinstance(savedValues, dict):
             self.__dict__.update(savedValues)
+            
+    def typedParameters(self):
+        return dict((qname(paramName), paramValue)
+                    for paramName, paramValue in self.parameterValues.items())
         
         # Note: if adding to this list keep DialogFormulaParameters in sync
     def traceSource(self, traceType):
@@ -257,6 +261,7 @@ class ModelFormula(ModelVariableSet):
             self.hasDecimals = False
             self.aspectValues = defaultdict(list)
             self.aspectProgs = defaultdict(list)
+            self.typedDimProgAspects = set()
             exprs = []
             for ruleElt in self.iterdescendants():
                 if isinstance(ruleElt,ModelObject):
@@ -276,6 +281,10 @@ class ModelFormula(ModelVariableSet):
                         self.aspectValues[Aspect.OMIT_DIMENSIONS].append(qname(ruleElt.getparent(), ruleElt.getparent().get("dimension")))
                     elif name == "value" and ruleElt.getparent().get("dimension") is not None:
                         self.aspectValues[qname(ruleElt.getparent(), ruleElt.getparent().get("dimension"))] = XmlUtil.child(ruleElt,'*','*')
+                    elif name == "xpath" and ruleElt.getparent().get("dimension") is not None:
+                        typedDimQname = qname(ruleElt.getparent(), ruleElt.getparent().get("dimension"))
+                        self.typedDimProgAspects.add(typedDimQname)
+                        exprs = [(typedDimQname, XmlUtil.text(ruleElt))]
                     elif name == "entityIdentifier":
                         if ruleElt.get("scheme") is not None:
                             exprs.append((Aspect.SCHEME, ruleElt.get("scheme")))
@@ -322,7 +331,7 @@ class ModelFormula(ModelVariableSet):
                     elif name in ("explicitDimension", "typedDimension") and ruleElt.get("dimension") is not None:
                         qnDim = qname(ruleElt, ruleElt.get("dimension"))
                         self.aspectValues[Aspect.DIMENSIONS].append(qnDim)
-                        if not XmlUtil.hasChild(ruleElt, XbrlConst.formula, ("omit","member","value")):
+                        if not XmlUtil.hasChild(ruleElt, XbrlConst.formula, ("omit","member","value","xpath")):
                             self.aspectValues[qnDim] = XbrlConst.qnFormulaDimensionSAV
                     elif name == "precision":
                         exprs = [(Aspect.PRECISION, XmlUtil.text(ruleElt))]
@@ -369,7 +378,10 @@ class ModelFormula(ModelVariableSet):
             return [xpCtx.evaluateAtomicValue(prog, type) for prog in self.aspectProgs[aspect]]
         elif xpCtx: # return single result
             for prog in self.aspectProgs[aspect]:
-                return xpCtx.evaluateAtomicValue(prog, type)
+                if aspect in self.typedDimProgAspects:  # typed dim xpath (only), returns a node
+                    return xpCtx.flattenSequence(xpCtx.evaluate(prog, xpCtx.inputXbrlInstance.xmlRootElement))
+                else:  # atomic results
+                    return xpCtx.evaluateAtomicValue(prog, type, xpCtx.inputXbrlInstance.xmlRootElement)
         return None
                 
     def hasRule(self, aspect):
@@ -402,9 +414,9 @@ class ModelFormula(ModelVariableSet):
             eltName, ns, attrName, attrValue = aspectElementNameAttrValue[aspect]
             return XmlUtil.descendants(self, ns, eltName, attrName, attrValue)
         elif isinstance(aspect,QName):
-            return XmlUtil.descendants(self, XbrlConst.formula, 
-                                      ("explicitDimension", "typedDimension"), 
-                                      "dimension", aspect)
+            return [d 
+                    for d in XmlUtil.descendants(self, XbrlConst.formula, ("explicitDimension", "typedDimension"))
+                    if aspect == qname(d, d.get("dimension"))]
         return []
         
     @property
@@ -1214,7 +1226,7 @@ class ModelConceptRelation(ModelFilter):
     @property
     def generations(self):
         try:
-            return int( XmlUtil.childText(self, XbrlConst.crf, "generations") )
+            return _INT( XmlUtil.childText(self, XbrlConst.crf, "generations") )
         except (TypeError, ValueError):
             if self.axis in ('sibling', 'child', 'parent'): 
                 return 1
@@ -1998,7 +2010,7 @@ class ModelRelativeFilter(ModelFilter):
     
     @property
     def viewExpression(self):
-        return self.variable
+        return "${0}".format(self.variable)
 
 class ModelSegmentFilter(ModelTestFilter):
     def init(self, modelDocument):
@@ -2185,7 +2197,7 @@ class ModelLocationFilter(ModelFilter):
     
     @property
     def viewExpression(self):
-        return "{0} {1}".format(self.location, self.variable)
+        return "{0} ${1}".format(self.location, self.variable)
 
 class ModelSiblingFilter(ModelFilter):
     def init(self, modelDocument):
@@ -2206,9 +2218,9 @@ class ModelSiblingFilter(ModelFilter):
 
     def filter(self, xpCtx, varBinding, facts, cmplmt):
         otherFact = xpCtx.inScopeVars.get(self.variable)
-        if isinstance(otherFact,(list,tuple)) and len(otherFact) > 0:
-            otherFactParent = otherFact[0].parentElement
-        elif isinstance(otherFact,ModelFact):
+        while isinstance(otherFact,(list,tuple)) and len(otherFact) > 0:
+            otherFact = otherFact[0]  # dereference if in a list
+        if isinstance(otherFact,ModelFact):
             otherFactParent = otherFact.parentElement
         else:
             otherFactParent = None
@@ -2225,7 +2237,7 @@ class ModelSiblingFilter(ModelFilter):
     
     @property
     def viewExpression(self):
-        return self.variable
+        return "${0}".format(self.variable)
 
 class ModelGeneralMeasures(ModelTestFilter):
     def init(self, modelDocument):
@@ -2312,7 +2324,7 @@ class ModelPrecisionFilter(ModelFilter):
     def filter(self, xpCtx, varBinding, facts, cmplmt):
         from arelle.ValidateXbrlCalcs import inferredPrecision
         minimum = self.minimum
-        numMinimum = float('INF') if minimum == 'INF' else int(minimum)
+        numMinimum = float('INF') if minimum == 'INF' else _INT(minimum)
         return [fact for fact in facts 
                 if cmplmt ^ (self.minimum != 'INF' and
                              not fact.isNil and
@@ -2470,7 +2482,7 @@ class ModelCustomFunctionImplementation(ModelFormulaResource):
             return self._outputExpression
         except AttributeError:
             outputElt = XmlUtil.child(self, XbrlConst.cfi, "output")
-            self._outputExpression = XmlUtil.text(outputElt) if outputElt else None
+            self._outputExpression = XmlUtil.text(outputElt) if outputElt is not None else None
             return self._outputExpression
     
     def compile(self):

@@ -207,7 +207,7 @@ class ModelFact(ModelObject):
                 if dec is None or dec == "INF":
                     dec = len(val.partition(".")[2])
                 else:
-                    dec = int(dec)
+                    dec = int(dec) # 2.7 wants short int, 3.2 takes regular int, don't use _INT here
                 return Locale.format(self.modelXbrl.locale, "%.*f", (dec, num), True)
             except ValueError: 
                 return "(error)"
@@ -219,7 +219,7 @@ class ModelFact(ModelObject):
             return float(self.value)
         return self.value
     
-    def isVEqualTo(self, other):  # facts may be in different instances
+    def isVEqualTo(self, other, deemP0Equal=False):  # facts may be in different instances
         if self.isTuple or other.isTuple:
             return False
         if self.isNil:
@@ -236,7 +236,9 @@ class ModelFact(ModelObject):
                     d = min((inferredDecimals(self), inferredDecimals(other))); p = None
                 else:
                     d = None; p = min((inferredPrecision(self), inferredPrecision(other)))
-                return roundValue(float(self.value),precision=p,decimals=d) == roundValue(float(other.value),precision=p,decimals=d)
+                if p == 0 and deemP0Equal:
+                    return True
+                return roundValue(self.value,precision=p,decimals=d) == roundValue(other.value,precision=p,decimals=d)
             else:
                 return False
         selfValue = self.value
@@ -246,7 +248,7 @@ class ModelFact(ModelObject):
         else:
             return selfValue == otherValue
         
-    def isDuplicateOf(self, other, topLevel=True):  # facts may be in different instances
+    def isDuplicateOf(self, other, topLevel=True, deemP0Equal=False):  # facts may be in different instances
         if self.isItem:
             if (self == other or
                 self.qname != other or
@@ -266,10 +268,10 @@ class ModelFact(ModelObject):
                 if len(self.modelTupleFacts) == len(other.modelTupleFacts):
                     for child1 in self.modelTupleFacts:
                         if child1.isItem:
-                            if not any(child1.isVEqualTo(child2) for child2 in other.modelTupleFacts):
+                            if not any(child1.isVEqualTo(child2, deemP0Equal) for child2 in other.modelTupleFacts):
                                 return False
                         elif child1.isTuple:
-                            if not any(child1.isDuplicateOf( child2, topLevel=False) 
+                            if not any(child1.isDuplicateOf( child2, topLevel=False, deemP0Equal=deemP0Equal) 
                                        for child2 in other.modelTupleFacts):
                                 return False
                     return True
@@ -309,7 +311,11 @@ class ModelInlineFact(ModelFact):
         
     @property
     def qname(self):
-        return self.prefixedNameQname(self.get("name")) if self.get("name") else None
+        try:
+            return self._factQname
+        except AttributeError:
+            self._factQname = self.prefixedNameQname(self.get("name")) if self.get("name") else None
+            return self._factQname
 
     @property
     def sign(self):
@@ -339,7 +345,7 @@ class ModelInlineFact(ModelFact):
             try:
                 orderAttr = self.get("order")
                 self._order = float(orderAttr)
-            except ValueError:
+            except (ValueError, TypeError):
                 self._order = None
             return self._order
 
@@ -362,24 +368,32 @@ class ModelInlineFact(ModelFact):
             num = float(value)
             scale = self.scale
             if scale is not None:
-                num *= 10 ** int(self.scale)
+                num *= 10 ** _INT(self.scale)
         except ValueError:
             pass
         return "{0}".format(num * negate)
     
     @property
     def value(self):
-        v = XmlUtil.innerText(self, ixExclude=True)
-        f = self.format
-        if f is not None:
-            if (f.namespaceURI.startswith("http://www.xbrl.org/inlineXBRL/transformation") and
-                f.localName in FunctionIxt.ixtFunctions):
-                v = FunctionIxt.ixtFunctions[f.localName](v)
-        if self.localName == "nonNumeric" or self.localName == "tuple":
-            return v
-        else:
-            return self.transformedValue(v)
+        try:
+            return self._value
+        except AttributeError:
+            v = XmlUtil.innerText(self, ixExclude=True)
+            f = self.format
+            if f is not None:
+                if (f.namespaceURI in FunctionIxt.ixtNamespaceURIs and
+                    f.localName in FunctionIxt.ixtFunctions):
+                    v = FunctionIxt.ixtFunctions[f.localName](v)
+            if self.localName == "nonNumeric" or self.localName == "tuple":
+                self._value = v
+            else:
+                self._value = self.transformedValue(v)
+            return self._value
 
+    @property
+    def elementText(self):    # override xml-level elementText for transformed value text
+        return self.value
+    
     @property
     def propertyView(self):
         if self.localName == "nonFraction" or self.localName == "fraction":
@@ -542,7 +556,7 @@ class ModelContext(ModelObject):
         return None
     
     def dimAspects(self, defaultDimensionAspects):
-        return set(self.qnameDims.keys() | defaultDimensionAspects)
+        return _DICT_SET(self.qnameDims.keys()) | defaultDimensionAspects
     
     @property
     def dimsHash(self):
@@ -644,7 +658,7 @@ class ModelContext(ModelObject):
         if self.periodHash != cntx2.periodHash or not self.isPeriodEqualTo(cntx2) or not self.isEntityIdentifierEqualTo(cntx2):
             return False
         if dimensionalAspectModel:
-            if self.qnameDims.keys() != cntx2.qnameDims.keys():
+            if _DICT_SET(self.qnameDims.keys()) != _DICT_SET(cntx2.qnameDims.keys()):
                 return False
             for dimQname, ctx1Dim in self.qnameDims.items():
                 if not ctx1Dim.isEqualTo(cntx2.qnameDims[dimQname]):
@@ -728,7 +742,7 @@ class ModelDimensionValue(ModelObject):
 
     @property
     def memberQname(self):
-        return self.prefixedNameQname(self.elementText)
+        return self.prefixedNameQname(self.elementText) if self.isExplicit else None
         
     @property
     def member(self):

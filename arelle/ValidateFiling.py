@@ -451,7 +451,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                         f1.decimals and f1.decimals != "INF" and not f1.isNil:
                         try:
                             vf = float(f1.value)
-                            vround = round(vf, int(f1.decimals))
+                            vround = round(vf, _INT(f1.decimals))
                             if vf != vround: 
                                 modelXbrl.error("GFM.1.02.26",
                                     _("Fact %(fact)s of context %(contextID)s decimals %(decimals)s value %(value)s has insignificant digits %(value2)s."),
@@ -618,7 +618,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                             modelXbrl.error("EFM.6.05.26",
                                 _("dei:EntityCommonStockSharesOutstanding is required for DocumentType '%(documentType)s' but but a default-context because only one class of stock"),
                                 modelObject=documentTypeFact, documentType=documentType)
-                        missingClasses = commonSharesClassMembers - commonSharesItemsByStockClass.keys()
+                        missingClasses = commonSharesClassMembers - _DICT_SET(commonSharesItemsByStockClass.keys())
                         if missingClasses:
                             modelXbrl.error("EFM.6.05.26",
                                 _("dei:EntityCommonStockSharesOutstanding is required for DocumentType '%(documentType)s' but missing in these stock classes: %(stockClasses)s"),
@@ -631,7 +631,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                             elif facts[0].context.instantDatetime != commonStockMeasurementDatetime:
                                 modelXbrl.error("EFM.6.05.26",
                                     _("dei:EntityCommonStockSharesOutstanding is required for DocumentType '%(documentType)s' in stock class %(stockClass)s with measurement date %(date)s"),
-                                    modelObject=documentTypeFact, documentType=documentType, stockClasse=mem, date=commonStockMeasurementDatetime)
+                                    modelObject=documentTypeFact, documentType=documentType, stockClass=mem, date=commonStockMeasurementDatetime)
                     elif hasUndefinedDefaultStockMember and not defaultSharesOutstanding:
                             modelXbrl.error("EFM.6.05.26",
                                 _("dei:EntityCommonStockSharesOutstanding is required for DocumentType '%(documentType)s' but missing for a non-default-context fact"),
@@ -837,7 +837,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                 if qname.namespaceURI not in disclosureSystem.baseTaxonomyNamespaces:
                     facets = modelType.facets
                     if facets:
-                        lengthFacets = facets.keys() & {"minLength", "maxLength", "length"}
+                        lengthFacets = _DICT_SET(facets.keys()) & {"minLength", "maxLength", "length"}
                         if lengthFacets:
                             modelXbrl.error("SBR.NL.2.2.7.02",
                                 _("Type %(typename)s has length restriction facets %(facets)s"),

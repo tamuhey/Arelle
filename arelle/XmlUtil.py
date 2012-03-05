@@ -147,8 +147,8 @@ def innerTextNodes(element, ixExclude):
            (child.localName != "exclude" and child.namespaceURI != "http://www.xbrl.org/2008/inlineXBRL")):
             for nestedText in innerTextNodes(child, ixExclude):
                 yield nestedText
-    if element.tail:
-        yield element.tail
+        if child.tail:
+            yield child.tail
 
 def parentId(element, parentNamespaceURI, parentLocalName):
     while element is not None:
@@ -471,10 +471,14 @@ def setXmlns(modelDocument, prefix, namespaceURI):
     if prefix == "":
         prefix = None  # default xmlns prefix stores as None
     if prefix not in root.nsmap:
-        newmap = root.nsmap
-        newmap[prefix] = namespaceURI
-        newroot = etree.Element(root.tag, nsmap=newmap)
-        newroot.extend(root)
+        if root.tag == 'nsmap': # already have an xmlns-extension root element
+            newmap = root.nsmap
+            newmap[prefix] = namespaceURI
+            newroot = etree.Element('nsmap', nsmap=newmap)
+            newroot.extend(root)
+        else:  # new xmlns-extension root
+            newroot = etree.Element('nsmap', nsmap={prefix: namespaceURI})
+            newroot.append(root)
         elementTree._setroot(newroot)
 
 def sortKey(parentElement, childNamespaceUri, childLocalNames, childAttributeName=None, qnames=False):
@@ -499,7 +503,7 @@ def datetimeValue(element, addOneDay=False, none=None):
         elif none == "maxyear":
             return datetime.datetime(datetime.MAXYEAR,12,31)
         return None
-    match = datetimePattern.match(element if isinstance(element,str) else text(element).strip())
+    match = datetimePattern.match(element if isinstance(element,_STR_BASE) else text(element).strip())
     if match is None:
         return None
     hour24 = False
@@ -645,7 +649,8 @@ def writexml(writer, node, encoding=None, indent='', parentNsmap=None):
         writer.write(indent+"<" + tag)
         attrs = {}
         for prefix, ns in sorted((k if k is not None else '', v) 
-                                 for k, v in (node.nsmap.items() - parentNsmap.items())):
+                                 # items wrapped in set for 2.7 compatibility
+                                 for k, v in (_DICT_SET(node.nsmap.items()) - _DICT_SET(parentNsmap.items()))):
             if prefix:
                 attrs["xmlns:" + prefix] = ns
             else:
@@ -688,7 +693,7 @@ def writexml(writer, node, encoding=None, indent='', parentNsmap=None):
         firstChild = True
         text = node.text
         if text is not None:
-            text = text.replace("\u00A0","&nbsp;").strip().replace("&","&amp;").replace("<","&lt;").replace("\u00AD","&shy;")
+            text = text.replace("&","&amp;").replace("\u00A0","&nbsp;").strip().replace("<","&lt;").replace("\u00AD","&shy;")
         for child in node.iterchildren():
             hasChildNodes = True
             if firstChild:

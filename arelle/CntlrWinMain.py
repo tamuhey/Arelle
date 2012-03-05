@@ -6,6 +6,7 @@ This module is Arelle's controller in windowing interactive UI mode
 @author: Mark V Systems Limited
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
+from arelle import PythonUtil # define 2.x or 3.x string types
 import os, subprocess, pickle, time, locale, re
 from tkinter import *
 import tkinter.tix
@@ -32,7 +33,6 @@ from arelle import (DialogURL,
                 Updater
                )
 from arelle.ModelFormulaObject import FormulaOptions
-from arelle.ModelRssItem import RssWatchOptions
 from arelle.FileSource import openFileSource
 
 restartMain = True
@@ -129,7 +129,7 @@ class CntlrWinMain (Cntlr.Cntlr):
         rssWatchMenu.add_command(label=_("Stop"), underline=0, command=lambda: self.rssWatchControl(stop=True))
 
         toolsMenu.add_cascade(label=_("RSS Watch"), menu=rssWatchMenu, underline=0)
-        self.modelManager.rssWatchOptions = self.config.setdefault("rssWatchOptions",RssWatchOptions())
+        self.modelManager.rssWatchOptions = self.config.setdefault("rssWatchOptions", {})
 
         toolsMenu.add_cascade(label=_("Internet"), menu=cacheMenu, underline=0)
         self.webCache.workOffline  = self.config.setdefault("workOffline",False)
@@ -750,6 +750,7 @@ class CntlrWinMain (Cntlr.Cntlr):
                             
     def quit(self, event=None, restartAfterQuit=False):
         if self.okayToContinue():
+            self.modelManager.close()
             logging.shutdown()
             global restartMain
             restartMain = restartAfterQuit
@@ -829,7 +830,7 @@ class CntlrWinMain (Cntlr.Cntlr):
     def rssWatchControl(self, start=False, stop=False, close=False):
         from arelle.ModelDocument import Type
         from arelle import WatchRss
-        if not self.modelManager.rssWatchOptions.feedSourceUri:
+        if not self.modelManager.rssWatchOptions.get("feedSourceUri"):
             tkinter.messagebox.showwarning(_("RSS Watch Control Error"),
                                 _("RSS Feed is not set up, please select options and select feed"),
                                 parent=self.parent)
@@ -837,13 +838,13 @@ class CntlrWinMain (Cntlr.Cntlr):
         rssModelXbrl = None
         for loadedModelXbrl in self.modelManager.loadedModelXbrls:
             if (loadedModelXbrl.modelDocument.type == Type.RSSFEED and
-                loadedModelXbrl.modelDocument.uri == self.modelManager.rssWatchOptions.feedSourceUri):
+                loadedModelXbrl.modelDocument.uri == self.modelManager.rssWatchOptions.get("feedSourceUri")):
                 rssModelXbrl = loadedModelXbrl
                 break                
         #not loaded
         if start:
             if not rssModelXbrl:
-                rssModelXbrl = self.modelManager.create(Type.RSSFEED, self.modelManager.rssWatchOptions.feedSourceUri)
+                rssModelXbrl = self.modelManager.create(Type.RSSFEED, self.modelManager.rssWatchOptions.get("feedSourceUri"))
                 self.showLoadedXbrl(rssModelXbrl, False)
             if not hasattr(rssModelXbrl,"watchRss"):
                 WatchRss.initializeWatcher(rssModelXbrl)
@@ -859,7 +860,7 @@ class CntlrWinMain (Cntlr.Cntlr):
     # ui thread addToLog
     def uiRssWatchUpdateOption(self, latestPubDate): 
         if latestPubDate:
-            self.modelManager.rssWatchOptions.latestPubDate = latestPubDate
+            self.modelManager.rssWatchOptions["latestPubDate"] = latestPubDate
         self.config["rssWatchOptions"] = self.modelManager.rssWatchOptions
         self.saveConfig()
     
@@ -940,7 +941,7 @@ class CntlrWinMain (Cntlr.Cntlr):
         DialogAbout.about(self.parent,
                           _("About arelle"),
                           os.path.join(self.imagesDir, "arelle32.gif"),
-                          _("arelle\u00ae {0}\n"
+                          _("arelle\u00ae {0} {1}\n"
                               "An open source XBRL platform\n"
                               "\u00a9 2010-2011 Mark V Systems Limited\n"
                               "All rights reserved\nhttp://www.arelle.org\nsupport@arelle.org\n\n"
@@ -959,9 +960,9 @@ class CntlrWinMain (Cntlr.Cntlr):
                               "\n   lxml \u00a9 2004 Infrae, ElementTree \u00a9 1999-2004 by Fredrik Lundh"
                               "\n   xlrd \u00a9 2005-2009 Stephen J. Machin, Lingfo Pty Ltd, \u00a9 2001 D. Giffin, \u00a9 2000 A. Khan"
                               "\n   xlwt \u00a9 2007 Stephen J. Machin, Lingfo Pty Ltd, \u00a9 2005 R. V. Kiseliov"                              
-                              "{1}"
+                              "{2}"
                               )
-                            .format(Version.version,
+                            .format(self.__version__, Version.version,
                                     _("\n   Bottle \u00a9 2011 Marcel Hellkamp") if self.hasWebServer else ""))
 
     # worker threads addToLog        

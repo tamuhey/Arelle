@@ -8,8 +8,9 @@ import math, re
 from arelle.ModelObject import ModelObject, ModelAttribute
 from arelle.ModelValue import (qname, dateTime, DateTime, DATE, DATETIME, dayTimeDuration,
                          YearMonthDuration, DayTimeDuration, time, Time)
-from arelle.FunctionUtil import anytypeArg, stringArg, numericArg, qnameArg, nodeArg
+from arelle.FunctionUtil import anytypeArg, atomicArg, stringArg, numericArg, qnameArg, nodeArg
 from arelle import FunctionXs, XPathContext, XbrlUtil, XmlUtil, UrlUtil, ModelDocument, XmlValidate
+from arelle.Locale import format_picture
 from lxml import etree
     
 class fnFunctionNotAvailable(Exception):
@@ -39,8 +40,8 @@ def nilled(xc, p, contextItem, args):
 
 def string(xc, p, contextItem, args):
     if len(args) > 1: raise XPathContext.FunctionNumArgs()
-    x = stringArg(xc, args, 0, "item()?", missingArgFallback=contextItem, emptyFallback='')
-    return str( x )
+    x = atomicArg(xc, p, args, 0, "item()?", missingArgFallback=contextItem, emptyFallback='')
+    return FunctionXs.xsString( xc, p, x ) 
 
 def data(xc, p, contextItem, args):
     if len(args) != 1: raise XPathContext.FunctionNumArgs()
@@ -54,7 +55,10 @@ def document_uri(xc, p, contextItem, args):
     return xc.modelXbrl.modelDocument.uri
 
 def error(xc, p, contextItem, args):
-    raise fnFunctionNotAvailable()
+    if len(args) > 2: raise XPathContext.FunctionNumArgs()
+    qn = qnameArg(xc, p, args, 0, 'QName?', emptyFallback=None)
+    msg = stringArg(xc, args, 1, "xs:string", emptyFallback='')
+    raise XPathContext.XPathException(p, (qn or "err:FOER0000"), msg)
 
 def trace(xc, p, contextItem, args):
     raise fnFunctionNotAvailable()
@@ -89,14 +93,14 @@ def fn_round(xc, p, contextItem, args):
     x = numericArg(xc, p, args)
     if math.isinf(x) or math.isnan(x): 
         return x
-    return int(x + .5)  # round towards +inf
+    return _INT(x + .5)  # round towards +inf
 
 def fn_round_half_to_even(xc, p, contextItem, args):
     if len(args) > 2 or len(args) == 0: raise XPathContext.FunctionNumArgs()
     x = numericArg(xc, p, args)
     if len(args) == 2:
         precision = args[1]
-        if len(precision) != 1 or not isinstance(precision[0],int): raise XPathContext.FunctionArgType(2,"integer")
+        if len(precision) != 1 or not isinstance(precision[0],_INT_TYPES): raise XPathContext.FunctionArgType(2,"integer")
         precision = precision[0]
         return round(x, precision)
     return round(x)
@@ -151,9 +155,9 @@ def substring(xc, p, contextItem, args):
     l = len(args)
     if l < 2 or l > 3: raise XPathContext.FunctionNumArgs()
     string = stringArg(xc, args, 0, "xs:string?")
-    start = round( numericArg(xc, p, args, 1) ) - 1
+    start = _INT(round( numericArg(xc, p, args, 1) )) - 1
     if l == 3:
-        length = round( numericArg(xc, p, args, 2) )
+        length = _INT(round( numericArg(xc, p, args, 2) ))
         if start < 0:
             length += start
             if length < 0: length = 0
@@ -527,7 +531,7 @@ def boolean(xc, p, contextItem, args):
             return item
         if isinstance(item, str):
             return len(item) > 0
-        if isinstance(item, int) or isinstance(item, float):
+        if isinstance(item, _NUM_TYPES):
             return not math.isnan(item) and item != 0
     raise XPathContext.XPathException(p, 'err:FORG0006', _('Effective boolean value indeterminate'))
 
@@ -589,9 +593,9 @@ def subsequence(xc, p, contextItem, args):
     l = len(args)
     if l < 2 or l > 3: raise XPathContext.FunctionNumArgs()
     sequence = args[0]
-    start = round( numericArg(xc, p, args, 1) ) - 1
+    start = _INT(round( numericArg(xc, p, args, 1) )) - 1
     if l == 3:
-        length = round( numericArg(xc, p, args, 2) )
+        length = _INT(round( numericArg(xc, p, args, 2) ))
         if start < 0:
             length += start
             if length < 0: length = 0
@@ -702,6 +706,16 @@ def default_collation(xc, p, contextItem, args):
 def static_base_uri(xc, p, contextItem, args):
     raise fnFunctionNotAvailable()
 
+# added in XPATH 3
+def  format_number(xc, p, args):
+    if len(args) != 2: raise XPathContext.FunctionNumArgs()
+    value = numericArg(xc, p, args, 0, missingArgFallback='NaN', emptyFallback='NaN')
+    picture = stringArg(xc, args, 1, "xs:string", missingArgFallback='', emptyFallback='')
+    try:
+        return format_picture(xc.modelXbrl.locale, value, picture)
+    except ValueError as err:
+        raise XPathContext.XPathException(p, 'err:FODF1310', str(err) )
+    
 fnFunctions = {
     'node-name': node_name,
     'nilled': nilled,
@@ -814,5 +828,6 @@ fnFunctions = {
     'implicit-timezone': implicit_timezone,
     'default-collation': default_collation,
     'static-base-uri': static_base_uri,
+    'format-number': format_number,
     }
 

@@ -11,7 +11,8 @@ from arelle import UrlUtil, XmlUtil, ModelValue, XbrlConst, XmlValidate
 from arelle.FileSource import FileNamedStringIO
 from arelle.ModelObject import ModelObject
 from arelle.Locale import format_string
-FactPrototype = None
+from arelle.PrototypeInstanceObject import FactPrototype
+from arelle.ValidateXbrlDimensions import isFactDimensionallyValid
 ModelRelationshipSet = None # dynamic import
 
 AUTO_LOCATE_ELEMENT = '771407c0-1d0c-11e1-be5e-028037ec0200' # singleton meaning choose best location for new element
@@ -222,7 +223,7 @@ class ModelXbrl:
                     return c
         return None
                  
-    def createContext(self, entityIdentScheme, entityIdentValue, periodType, periodStart, periodEndInstant, dims, segOCCs, scenOCCs,
+    def createContext(self, entityIdentScheme, entityIdentValue, periodType, periodStart, periodEndInstant, priItem, dims, segOCCs, scenOCCs,
                       afterSibling=None, beforeSibling=None):
         xbrlElt = self.modelDocument.xmlRootElement
         if afterSibling == AUTO_LOCATE_ELEMENT:
@@ -248,16 +249,27 @@ class ModelXbrl:
         segmentElt = None
         scenarioElt = None
         from arelle.ModelInstanceObject import ModelDimensionValue
-        if dims:
-            for dimQname in sorted(dims.keys()):
-                dimValue = dims[dimQname]
-                if isinstance(dimValue, ModelDimensionValue):
-                    if dimValue.isExplicit: 
-                        dimMemberQname = dimValue.memberQname
+        if dims: # requires primary item to determin ambiguous concepts
+            ''' in theory we have to check full set of dimensions for validity in source or any other
+                context element, but for shortcut will see if each dimension is already reported in an
+                unambiguous valid contextElement
+            '''
+            from arelle.PrototypeInstanceObject import FactPrototype, ContextPrototype, DimValuePrototype
+            fp = FactPrototype(self, priItem, dims.items())
+            # force trying a valid prototype's context Elements
+            if not isFactDimensionallyValid(self, fp, setPrototypeContextElements=True):
+                self.info("arelleLinfo",
+                    _("Create context for %(priItem)s, cannot determine valid context elements, no suitable hypercubes"), 
+                    modelObject=self, priItem=priItem)
+            fpDims = fp.context.qnameDims
+            for dimQname in sorted(fpDims.keys()):
+                dimValue = fpDims[dimQname]
+                if isinstance(dimValue, DimValuePrototype):
+                    dimMemberQname = dimValue.memberQname  # None if typed dimension
                     contextEltName = dimValue.contextElement
                 else: # qname for explicit or node for typed
-                    dimMemberQname = dimValue
-                    contextEltName = self.qnameDimensionContextElement.get(dimQname)
+                    dimMemberQname = None
+                    contextEltName = None
                 if contextEltName == "segment":
                     if segmentElt is None: 
                         segmentElt = XmlUtil.addChild(entityElt, XbrlConst.xbrli, "segment")
@@ -276,8 +288,8 @@ class ModelXbrl:
                 if dimConcept.isTypedDimension:
                     dimElt = XmlUtil.addChild(contextElt, XbrlConst.xbrldi, "xbrldi:typedMember", 
                                               attributes=dimAttr)
-                    if isinstance(dimValue, ModelDimensionValue) and dimValue.isTyped:
-                        XmlUtil.copyChildren(dimElt, dimValue)
+                    if isinstance(dimValue, (ModelDimensionValue, DimValuePrototype)) and dimValue.isTyped:
+                        XmlUtil.copyNodes(dimElt, dimValue.typedMember) 
                 elif dimMemberQname:
                     dimElt = XmlUtil.addChild(contextElt, XbrlConst.xbrldi, "xbrldi:explicitMember",
                                               attributes=dimAttr,
@@ -350,19 +362,16 @@ class ModelXbrl:
         return newFact    
         
     def modelObject(self, objectId):
-        if isinstance(objectId,int):
+        if isinstance(objectId, _INT_TYPES):  # may be long or short in 2.7
             return self.modelObjects[objectId]
         # assume it is a string with ID in a tokenized representation, like xyz_33
         try:
-            return self.modelObjects[int(objectId.rpartition("_")[2])]
+            return self.modelObjects[_INT(objectId.rpartition("_")[2])]
         except ValueError:
             return None
     
     # UI thread viewModelObject
     def viewModelObject(self, objectId):
-        global FactPrototype
-        if FactPrototype is None:
-            from arelle.ViewUtilRenderedGrid import FactPrototype
         modelObject = ""
         try:
             if isinstance(objectId, (ModelObject,FactPrototype)):
@@ -381,7 +390,8 @@ class ModelXbrl:
         # determine logCode
         messageCode = None
         for argCode in codes if isinstance(codes,tuple) else (codes,):
-            if ((self.modelManager.disclosureSystem.EFM and argCode.startswith("EFM")) or
+            if (isinstance(argCode, ModelValue.QName) or
+                (self.modelManager.disclosureSystem.EFM and argCode.startswith("EFM")) or
                 (self.modelManager.disclosureSystem.GFM and argCode.startswith("GFM")) or
                 (self.modelManager.disclosureSystem.HMRC and argCode.startswith("HMRC")) or
                 (self.modelManager.disclosureSystem.SBRNL and argCode.startswith("SBR.NL")) or
@@ -425,7 +435,7 @@ class ModelXbrl:
             elif argName != "exc_info":
                 if isinstance(argValue, (ModelValue.QName, ModelObject, bool, FileNamedStringIO)):
                     fmtArgs[argName] = str(argValue)
-                elif isinstance(argValue,int):
+                elif isinstance(argValue, _INT_TYPES):
                     # need locale-dependent formatting
                     fmtArgs[argName] = format_string(self.modelManager.locale, '%i', argValue)
                 elif isinstance(argValue,float):

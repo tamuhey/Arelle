@@ -7,8 +7,8 @@ Created on Sep 13, 2011
 from arelle import ViewFile, XbrlConst
 from lxml import etree
 from arelle.ViewUtilRenderedGrid import (setDefaults, getTblAxes, inheritedPrimaryItemQname,
-                                         inheritedExplicitDims, dimContextElement,
-                                         FactPrototype, ContextPrototype, DimValuePrototype)
+                                         inheritedExplicitDims)
+from arelle.PrototypeInstanceObject import FactPrototype, ContextPrototype, DimValuePrototype
 from itertools import repeat
 
 def viewRenderedGrid(modelXbrl, outfile, lang=None, viewTblELR=None, sourceView=None):
@@ -263,7 +263,7 @@ class ViewRenderedGrid(ViewFile.View):
                         etree.SubElement(self.rowElts[hdrRow], 
                                          "{http://www.w3.org/1999/xhtml}th",
                                          attrib={"class":"yAxisSpanLeg",
-                                                 "style":"text-align:center;max-width:16pt;{1}".format(edgeBorder),
+                                                 "style":"text-align:center;max-width:16pt;{0}".format(edgeBorder),
                                                  "rowspan": str(nestRow - hdrRow)}
                                          ).text = "\u00A0"
                     hdrClass = "yAxisHdr" if not childrenFirst else "yAxisHdrWithChildrenFirst"

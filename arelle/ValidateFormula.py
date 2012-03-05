@@ -6,11 +6,6 @@ Created on Dec 9, 2010
 '''
 import os, sys
 from collections import defaultdict
-from arelle.pyparsing.pyparsing_py3 import (ParseException) 
-if sys.version[0] >= '3':
-    from arelle.pyparsing.pyparsing_py3 import ParseException 
-else:
-    from pyparsing import ParseException 
 
 from arelle.ModelFormulaObject import (ModelParameter, ModelInstance, ModelVariableSet,
                                        ModelFormula, ModelTuple, ModelVariable, ModelFactVariable, 
@@ -459,7 +454,7 @@ def validate(val):
                 orderedInstancesSet.add(instqname)
                 orderedAnInstance = True
     # add instances with variable sets with no variables or other dependencies
-    for independentInstance in instanceProducingVariableSets.keys() - orderedInstancesList:
+    for independentInstance in _DICT_SET(instanceProducingVariableSets.keys()) - _DICT_SET(orderedInstancesList): # must be set for 2.7 compatibility
         orderedInstancesList.append(independentInstance)
         orderedInstancesSet.add(independentInstance)
     if None not in orderedInstancesList:
@@ -470,7 +465,7 @@ def validate(val):
         if instqname not in orderedInstancesSet:
             # can also be satisfied from an input DTS
             missingDependentInstances = depInsts - stdInpInst
-            if val.parameters: missingDependentInstances -= val.parameters.keys() 
+            if val.parameters: missingDependentInstances -= _DICT_SET(val.parameters.keys()) 
             if instqname:
                 if missingDependentInstances:
                     val.modelXbrl.error("xbrlvarinste:instanceVariableRecursionCycle",
@@ -484,7 +479,7 @@ def validate(val):
             else:
                 val.modelXbrl.error("xbrlvarinste:instanceVariableRecursionCycle",
                     _("Unresolved dependencies of an assertion's variables on instances %(dependencies)s"),
-                    dependencies=str(depInsts - stdInpInst) )
+                    dependencies=str(_DICT_SET(depInsts) - stdInpInst) )
             '''
 
     if formulaOptions.traceVariablesOrder and len(orderedInstancesList) > 1:
@@ -522,7 +517,7 @@ def validate(val):
             val.parameters and instanceQname in val.parameters):
             namedInstance = val.parameters[instanceQname][1][0]
             ValidateXbrlDimensions.loadDimensionDefaults(namedInstance)
-            xpathContext.defaultDimensionAspects |= namedInstance.qnameDimensionDefaults.keys()
+            xpathContext.defaultDimensionAspects |= _DICT_SET(namedInstance.qnameDimensionDefaults.keys())
 
     # check for variable set dependencies across output instances produced
     for instanceQname, modelVariableSets in instanceProducingVariableSets.items():
@@ -642,42 +637,43 @@ def checkVariablesScopeVisibleQnames(val, nameVariables, definedNamesSet, modelV
 
 def checkFilterAspectModel(val, variableSet, filterRelationships, xpathContext, uncoverableAspects=None):
     if uncoverableAspects is None:
-        oppositeAspectModel = ({'dimensional','non-dimensional'} - {variableSet.aspectModel}).pop()
+        # protect 2.7 conversion
+        oppositeAspectModel = (_DICT_SET({'dimensional','non-dimensional'}) - _DICT_SET({variableSet.aspectModel})).pop()
         try:
             uncoverableAspects = aspectModels[oppositeAspectModel] - aspectModels[variableSet.aspectModel]
         except KeyError:    # bad aspect model, not an issue for this test
             return
     acfAspectsCovering = {}
     for varFilterRel in filterRelationships:
-        filter = varFilterRel.toModelObject
+        _filter = varFilterRel.toModelObject # use _filter instead of filter to prevent 2to3 confusion
         isAllAspectCoverFilter = False
-        if isinstance(filter, ModelAspectCover):
-            for aspect in filter.aspectsCovered(None, xpathContext):
+        if isinstance(_filter, ModelAspectCover):
+            for aspect in _filter.aspectsCovered(None, xpathContext):
                 if aspect in acfAspectsCovering:
                     otherFilterCover, otherFilterLabel = acfAspectsCovering[aspect]
                     if otherFilterCover != varFilterRel.isCovered:
                         val.modelXbrl.error("xbrlacfe:inconsistentAspectCoverFilters",
                             _("Variable set %(xlinkLabel)s, aspect cover filter %(filterLabel)s, aspect %(aspect)s, conflicts with %(filterLabel2)s with inconsistent cover attribute"),
-                            modelObject=variableSet, xlinkLabel=variableSet.xlinkLabel, filterLabel=filter.xlinkLabel, 
+                            modelObject=variableSet, xlinkLabel=variableSet.xlinkLabel, filterLabel=_filter.xlinkLabel, 
                             aspect=str(aspect) if isinstance(aspect,QName) else Aspect.label[aspect],
                             filterLabel2=otherFilterLabel)
                 else:
-                    acfAspectsCovering[aspect] = (varFilterRel.isCovered, filter.xlinkLabel)
-            isAllAspectCoverFilter = filter.isAll
+                    acfAspectsCovering[aspect] = (varFilterRel.isCovered, _filter.xlinkLabel)
+            isAllAspectCoverFilter = _filter.isAll
         if True: # changed for test case 50210 v03 varFilterRel.isCovered:
             try:
-                aspectsCovered = filter.aspectsCovered(None)
+                aspectsCovered = _filter.aspectsCovered(None)
                 if (not isAllAspectCoverFilter and 
                     (any(isinstance(aspect,QName) for aspect in aspectsCovered) and Aspect.DIMENSIONS in uncoverableAspects
                      or (aspectsCovered & uncoverableAspects))):
                     val.modelXbrl.error("xbrlve:filterAspectModelMismatch",
                         _("Variable set %(xlinkLabel)s, aspect model %(aspectModel)s filter %(filterName)s %(filterLabel)s can cover aspect not in aspect model"),
                         modelObject=variableSet, xlinkLabel=variableSet.xlinkLabel, aspectModel=variableSet.aspectModel, 
-                        filterName=filter.localName, filterLabel=filter.xlinkLabel)
+                        filterName=_filter.localName, filterLabel=_filter.xlinkLabel)
             except Exception:
                 pass
-            if hasattr(filter, "filterRelationships"): # check and & or filters
-                checkFilterAspectModel(val, variableSet, filter.filterRelationships, xpathContext, uncoverableAspects)
+            if hasattr(_filter, "filterRelationships"): # check and & or filters
+                checkFilterAspectModel(val, variableSet, _filter.filterRelationships, xpathContext, uncoverableAspects)
         
 def checkFormulaRules(val, formula, nameVariables):
     if not (formula.hasRule(Aspect.CONCEPT) or formula.source(Aspect.CONCEPT)):
@@ -716,9 +712,9 @@ def checkFormulaRules(val, formula, nameVariables):
             if isinstance(sourceFactVar, ModelFactVariable):
                 for varFilterRels in (formula.groupFilterRelationships, sourceFactVar.filterRelationships):
                     for varFilterRel in varFilterRels:
-                        filter = varFilterRel.toModelObject
-                        if isinstance(filter,ModelConceptName):  # relationship not constrained to real filters
-                            for conceptQname in filter.conceptQnames:
+                        _filter = varFilterRel.toModelObject
+                        if isinstance(_filter,ModelConceptName):  # relationship not constrained to real filters
+                            for conceptQname in _filter.conceptQnames:
                                 concept = val.modelXbrl.qnameConcepts.get(conceptQname)
                                 if concept is not None and concept.isNumeric:
                                     break

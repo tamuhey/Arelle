@@ -7,6 +7,7 @@ Created on Oct 17, 2010
 import re
 from arelle import (ModelDocument, XmlUtil, XbrlUtil, XbrlConst, 
                 ValidateXbrlCalcs, ValidateXbrlDimensions, ValidateXbrlDTS, ValidateFormula, ValidateUtr)
+from arelle import FunctionIxt
 from arelle.ModelObject import ModelObject
 from arelle.ModelInstanceObject import ModelInlineFact
 from arelle.ModelValue import qname
@@ -369,7 +370,7 @@ class ValidateXbrl:
                                     self.modelXbrl.error("xbrl.5.1.1:fractionPrecisionDecimals",
                                         _("Fact %(fact)s context %(contextID)s is a fraction with invalid numerator %(numerator)s"),
                                         modelObject=f, fact=f.qname, contextID=f.contextID, numerator=numerator)
-                                if not denominator.isnumeric() or int(denominator) == 0:
+                                if not denominator.isnumeric() or _INT(denominator) == 0:
                                     self.modelXbrl.error("xbrl.5.1.1:fractionPrecisionDecimals",
                                         _("Fact %(fact)s context %(contextID)s is a fraction with invalid denominator %(denominator)")).format(
                                         modelObject=f, fact=f.qname, contextID=f.contextID, denominator=denominator)
@@ -407,6 +408,22 @@ class ValidateXbrl:
                         
                 if isinstance(f, ModelInlineFact):
                     self.footnoteRefs.update(f.footnoteRefs)
+                    fmt = f.format
+                    if fmt:
+                        if fmt.namespaceURI not in FunctionIxt.ixtNamespaceURIs:
+                            self.modelXbrl.error("ix.14.2:invalidTransformation",
+                                _("Fact %(fact)s has unrecognized transformation namespace %(namespace)s"),
+                                modelObject=f, fact=f.qname, namespace=fmt.namespaceURI)
+                        elif fmt.localName not in FunctionIxt.ixtFunctions:
+                            self.modelXbrl.error("ix.14.2:invalidTransformation",
+                                _("Fact %(fact)s has unrecognized transformation name %(name)s"),
+                                modelObject=f, fact=f.qname, name=fmt.localName)
+                    if f.order is not None: 
+                        self.modelXbrl.error("ix.13.1.2:tupleOrder",
+                            _("Fact %(fact)s must not have an order (%(order)s) unless in a tuple"),
+                            modelObject=f, fact=f.qname, name=fmt.localName, order=f.order)
+                    if f.isTuple:
+                        self.checkIxTupleContent(f, set())
             
             #instance checks
             for cntx in modelXbrl.contexts.values():
@@ -543,7 +560,7 @@ class ValidateXbrl:
         
         if self.validateCalcLB:
             modelXbrl.modelManager.showStatus(_("Validating instance calculations"))
-            ValidateXbrlCalcs.validate(modelXbrl, inferPrecision=(not self.validateInferDecimals))
+            ValidateXbrlCalcs.validate(modelXbrl, inferDecimals=self.validateInferDecimals)
             
         if (modelXbrl.modelManager.validateUtr or
             (self.parameters and self.parameters.get(qname("forceUtrValidation",noPrefixIsNoNamespace=True),(None,"false"))[1] == "true") or
@@ -558,6 +575,19 @@ class ValidateXbrl:
             
         modelXbrl.modelManager.showStatus(_("ready"), 2000)
         
+    def checkIxTupleContent(self, tf, visited):
+        visited.add(tf.qname)
+        for f in tf.modelTupleFacts:
+            if f.qname in visited:
+                self.modelXbrl.error("ix.13.1.2:tupleRecursion",
+                    _("Fact %(fact)s is recursively nested in tuple %(tuple)s"),
+                    modelObject=f, fact=f.qname, tuple=tf.qname)
+            if f.order is None: 
+                self.modelXbrl.error("ix.13.1.2:tupleOrder",
+                    _("Fact %(fact)s missing an order in tuple %(tuple)s"),
+                    modelObject=f, fact=f.qname, tuple=tf.qname)
+        visited.discard(tf.qname)
+                        
     def fwdCycle(self, relsSet, rels, noUndirected, fromConcepts, cycleType="directed", revCycleRel=None):
         for rel in rels:
             if revCycleRel is not None and rel.isIdenticalTo(revCycleRel):

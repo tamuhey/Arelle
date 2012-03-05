@@ -6,6 +6,7 @@ Created on Jan 9, 2011
 '''
 from arelle import (XPathContext, XbrlConst, XmlUtil, XbrlUtil, XmlValidate)
 from arelle.FunctionXs import xsString
+from arelle.ModelObject import ModelObject
 from arelle.ModelFormulaObject import (aspectModels, Aspect, aspectModelAspect,
                                  ModelFormula, ModelTuple, ModelExistenceAssertion,
                                  ModelValueAssertion,
@@ -180,7 +181,6 @@ def evaluateVar(xpCtx, varSet, varIndex):
                 xpCtx.modelXbrl.info("formula:trace",
                      _("Fact Variable %(variable)s filtering: start with %(factCount)s facts"), 
                      modelObject=vb.var, variable=vb.qname, factCount=len(facts))
-            coverAspectCoverFilterDims(xpCtx, vb, vb.var.filterRelationships) # filters need to know what dims are covered
             facts = filterFacts(xpCtx, vb, facts, varSet.groupFilterRelationships, "group")
             # implicit filters (relativeFilter) expect no dim aspects yet on variable binding
             facts = filterFacts(xpCtx, vb, facts, vb.var.filterRelationships, None)
@@ -188,6 +188,7 @@ def evaluateVar(xpCtx, varSet, varIndex):
             for fact in facts:
                 if fact.isItem:
                     vb.aspectsDefined |= fact.context.dimAspects(xpCtx.defaultDimensionAspects)
+            coverAspectCoverFilterDims(xpCtx, vb, vb.var.filterRelationships) # filters need to know what dims are covered
             if varSet.implicitFiltering == "true" and len(xpCtx.varBindings) > 0:
                 facts = aspectMatchFilter(xpCtx, facts, (vb.aspectsDefined - vb.aspectsCovered), xpCtx.varBindings.values(), "implicit")
             vb.facts = facts
@@ -241,20 +242,20 @@ def filterFacts(xpCtx, vb, facts, filterRelationships, filterType):
     if orFilter: 
         factSet = set()
     for varFilterRel in filterRelationships:
-        filter = varFilterRel.toModelObject
-        if isinstance(filter,ModelFilter):  # relationship not constrained to real filters
-            result = filter.filter(xpCtx, vb, facts, varFilterRel.isComplemented)
+        _filter = varFilterRel.toModelObject
+        if isinstance(_filter,ModelFilter):  # relationship not constrained to real filters
+            result = _filter.filter(xpCtx, vb, facts, varFilterRel.isComplemented)
             if xpCtx.formulaOptions.traceVariableFilterWinnowing:
                 xpCtx.modelXbrl.info("formula:trace",
                     _("Fact Variable %(variable)s %(filterType)s %(filter)s filter %(xlinkLabel)s passes %(factCount)s facts"), 
                     modelObject=vb.var, variable=vb.qname,
-                    filterType=typeLbl, filter=filter.localName, xlinkLabel=filter.xlinkLabel, factCount=len(result)),
+                    filterType=typeLbl, filter=_filter.localName, xlinkLabel=_filter.xlinkLabel, factCount=len(result)),
             if orFilter: 
                 for fact in result: factSet.add(fact)
             else: 
                 facts = result
             if varFilterRel.isCovered:
-                vb.aspectsCovered |= filter.aspectsCovered(vb)
+                vb.aspectsCovered |= _filter.aspectsCovered(vb)
     if orFilter: 
         return factSet
     else: 
@@ -262,10 +263,10 @@ def filterFacts(xpCtx, vb, facts, filterRelationships, filterType):
             
 def coverAspectCoverFilterDims(xpCtx, vb, filterRelationships):
     for varFilterRel in filterRelationships:
-        filter = varFilterRel.toModelObject
-        if isinstance(filter,ModelAspectCover):  # relationship not constrained to real filters
+        _filter = varFilterRel.toModelObject
+        if isinstance(_filter,ModelAspectCover):  # relationship not constrained to real filters
             if varFilterRel.isCovered:
-                vb.aspectsCovered |= filter.dimAspectsCovered(vb)
+                vb.aspectsCovered |= _filter.dimAspectsCovered(vb)
             
 def aspectMatchFilter(xpCtx, facts, aspects, varBindings, filterType, relBinding=None):
     for aspect in aspects:
@@ -525,10 +526,26 @@ def produceOutputFact(xpCtx, formula, result):
                            _("Formula %(xlinkLabel)s dimension %(dimension)s: %(value)s"),
                            modelObject=formula, xlinkLabel=formula.xlinkLabel, 
                            dimension=dimQname, value=dimValue.msg)
+                    elif dimConcept.isTypedDimension:
+                        if isinstance(dimValue, list): # result of flatten, always a list
+                            if len(dimValue) != 1 or not isinstance(dimValue[0], ModelObject):
+                                xpCtx.modelXbrl.error("xbrlfe:wrongXpathResultForTypedDimensionRule",
+                                   _("Formula %(xlinkLabel)s dimension %(dimension)s value is not a node: %(value)s"),
+                                   modelObject=formula, xlinkLabel=formula.xlinkLabel, 
+                                   dimension=dimQname, value=dimValue)
+                                continue
+                            dimValue = dimValue[0]
+                        dimAspects[dimQname] = dimValue
                     elif dimValue is not None and xpCtx.modelXbrl.qnameDimensionDefaults.get(dimQname) != dimValue:
                         dimAspects[dimQname] = dimValue
             segOCCs = aspectValue(xpCtx, formula, Aspect.NON_XDT_SEGMENT, None)
             scenOCCs = aspectValue(xpCtx, formula, Aspect.NON_XDT_SCENARIO, None)
+            for occElt in xpCtx.flattenSequence((segOCCs, scenOCCs)):
+                if isinstance(occElt, ModelObject) and occElt.namespaceURI == XbrlConst.xbrldi:
+                    xpCtx.modelXbrl.error("xbrlfe:badSubsequentOCCValue",
+                       _("Formula %(xlinkLabel)s OCC element %(occ)s covers a dimensional aspect"),
+                       modelObject=(formula,occElt), xlinkLabel=formula.xlinkLabel, 
+                       occ=occElt.elementQname)
         else:
             dimAspects = None   # non-dimensional
             segOCCs = aspectValue(xpCtx, formula, Aspect.COMPLETE_SEGMENT, None)
@@ -557,7 +574,7 @@ def produceOutputFact(xpCtx, formula, result):
             newCntxElt = prevCntx
         else:
             newCntxElt = outputXbrlInstance.createContext(entityIdentScheme, entityIdentValue, 
-                          periodType, periodStart, periodEndInstant, dimAspects, segOCCs, scenOCCs,
+                          periodType, periodStart, periodEndInstant, conceptQname, dimAspects, segOCCs, scenOCCs,
                           afterSibling=xpCtx.outputLastContext.get(outputInstanceQname),
                           beforeSibling=xpCtx.outputFirstFact.get(outputInstanceQname))
             cntxId = newCntxElt.id

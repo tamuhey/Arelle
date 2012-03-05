@@ -139,7 +139,7 @@ class ModelParticle():
                 if m == "unbounded":
                     self._maxOccurs = sys.maxsize
                 else:
-                    self._maxOccurs = int(m)
+                    self._maxOccurs = _INT(m)
                     if self._maxOccurs < 0: 
                         raise ValueError(_("maxOccurs must be positive".format(m)))
             else:
@@ -159,7 +159,7 @@ class ModelParticle():
         except AttributeError:
             m = self.get("minOccurs")
             if m:
-                self._minOccurs = int(m)
+                self._minOccurs = _INT(m)
                 if self._minOccurs < 0: 
                     raise ValueError(_("minOccurs must be positive".format(m)))
             else:
@@ -390,10 +390,10 @@ class ModelConcept(ModelNamableTerm, ModelParticle):
     def isRoot(self):
         return self.getparent().localName == "schema"
     
-    def label(self,preferredLabel=None,fallbackToQname=True,lang=None,strip=False):
+    def label(self,preferredLabel=None,fallbackToQname=True,lang=None,strip=False,linkrole=None):
         if preferredLabel is None: preferredLabel = XbrlConst.standardLabel
         if preferredLabel == XbrlConst.conceptNameLabelRole: return str(self.qname)
-        labelsRelationshipSet = self.modelXbrl.relationshipSet(XbrlConst.conceptLabel)
+        labelsRelationshipSet = self.modelXbrl.relationshipSet(XbrlConst.conceptLabel,linkrole)
         if labelsRelationshipSet:
             label = labelsRelationshipSet.label(self, preferredLabel, lang)
             if label is not None:
@@ -1085,7 +1085,7 @@ class ModelRelationship(ModelObject):
                 priority = 0
             else:
                 try:
-                    priority = int(p)
+                    priority = _INT(p)
                 except (TypeError,ValueError) :
                     # XBRL validation error needed
                     priority = 0
