@@ -96,10 +96,6 @@ elif sys.platform == 'win32':
                 script="arelleCmdLine.py",
                 )                            
         ]
-else:  
-    print("Your platform {0} isn't supported".format(sys.platform)) 
-    sys.exit(1) 
-
 else: #Ensure setuptools works if not on above platforms
     from setuptools import os, setup, find_packages
     packages = find_packages('.')
