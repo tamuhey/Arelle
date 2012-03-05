@@ -43,28 +43,37 @@ if sys.platform == 'darwin':
     cx_FreezeExecutables = None
 elif sys.platform == 'linux2': # works on ubuntu with hand-built cx_Freeze
     from setuptools import find_packages 
-    from cx_Freeze import setup, Executable  
-    packages = find_packages('.') 
-    dataFiles = None 
-    options = dict( build_exe =  { 
-        "include_files": [('arelle/config','config'), 
-                          ('arelle/images','images'), 
-                          ('arelle/locale','locale'), 
-                          ('arelle/examples','examples'), 
-                          ('arelle/scripts-unix','scripts'),
-                          ],
-        "includes": ['lxml', 'lxml.etree', 'lxml._elementpath'], 
-        "packages": packages, 
-        } ) 
+    try:
+        from cx_Freeze import setup, Executable  
     
-    cx_FreezeExecutables = [ 
-        Executable( 
+        packages = find_packages('.') 
+        dataFiles = None 
+        options = dict( build_exe =  { 
+                "include_files": [('arelle/config','config'), 
+                                  ('arelle/images','images'), 
+                                  ('arelle/locale','locale'), 
+                                  ('arelle/examples','examples'), 
+                                  ('arelle/scripts-unix','scripts'),
+                                  ],
+                "includes": ['lxml', 'lxml.etree', 'lxml._elementpath'], 
+                "packages": packages, 
+                } ) 
+        
+        cx_FreezeExecutables = [ 
+            Executable( 
                 script="arelleGUI.pyw", 
                 ), 
-        Executable( 
+            Executable( 
                 script="arelleCmdLine.py", 
                 )                             
-        ] 
+            ] 
+    except ImportError:
+        from setuptools import os, setup
+        packages = find_packages('.')
+        dataFiles = [        
+            ('config',['arelle/config/' + f for f in os.listdir('arelle/config')]),
+            ]
+        cx_FreezeExecutables = None
 elif sys.platform == 'win32':
     from setuptools import find_packages
     from cx_Freeze import setup, Executable 
