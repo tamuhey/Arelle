@@ -7,31 +7,34 @@ This module is Arelle's controller in windowing interactive UI mode
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
 from arelle import PythonUtil # define 2.x or 3.x string types
-import os, subprocess, pickle, time, locale, re
-from tkinter import *
+import os, sys, subprocess, pickle, time, locale, re
+from tkinter import (Tk, TclError, Toplevel, Menu, PhotoImage, StringVar, BooleanVar, N, S, E, W, EW, 
+                     HORIZONTAL, VERTICAL, END)
+from tkinter.ttk import Frame, Button, Label, Combobox, Separator, PanedWindow, Notebook
 import tkinter.tix
-from tkinter.ttk import *
 import tkinter.filedialog
 import tkinter.messagebox, traceback
 from arelle.Locale import format_string
 from arelle.CntlrWinTooltip import ToolTip
 from arelle import XbrlConst
+from arelle.PluginManager import pluginClassMethods
 import logging
 
 import threading, queue
 
 from arelle import Cntlr
 from arelle import (DialogURL, 
-                ModelDocument,
-                ModelManager,
-                ViewWinDTS,
-                ViewWinProperties, ViewWinConcepts, ViewWinRelationshipSet, ViewWinFormulae,
-                ViewWinFactList, ViewWinFactTable, ViewWinRenderedGrid, ViewWinXml,
-                ViewWinTests, ViewWinVersReport, ViewWinRssFeed,
-                ViewFileTests,
-                ViewFileRenderedGrid,
-                Updater
-               )
+                    DialogAddonManager,
+                    ModelDocument,
+                    ModelManager,
+                    ViewWinDTS,
+                    ViewWinProperties, ViewWinConcepts, ViewWinRelationshipSet, ViewWinFormulae,
+                    ViewWinFactList, ViewWinFactTable, ViewWinRenderedGrid, ViewWinXml,
+                    ViewWinTests, ViewWinVersReport, ViewWinRssFeed,
+                    ViewFileTests,
+                    ViewFileRenderedGrid,
+                    Updater
+                   )
 from arelle.ModelFormulaObject import FormulaOptions
 from arelle.FileSource import openFileSource
 
@@ -146,12 +149,15 @@ class CntlrWinMain (Cntlr.Cntlr):
         logmsgMenu.add_command(label=_("Save to file"), underline=0, command=self.logSaveToFile)
 
         toolsMenu.add_cascade(label=_("Language..."), underline=0, command=self.languagesDialog)
-
+        
+        for pluginMenuExtender in pluginClassMethods("CntlrWinMain.Menu.Tools"):
+            pluginMenuExtender(self, toolsMenu)
         self.menubar.add_cascade(label=_("Tools"), menu=toolsMenu, underline=0)
 
         helpMenu = Menu(self.menubar, tearoff=0)
         for label, command, shortcut_text, shortcut in (
                 (_("Check for updates"), lambda: Updater.checkForUpdates(self), None, None),
+                (_("Manage add-ons"), lambda: DialogAddonManager.dialogAddonManager(self), None, None),
                 (None, None, None, None),
                 (_("About..."), self.helpAbout, None, None),
                 ):
@@ -159,7 +165,9 @@ class CntlrWinMain (Cntlr.Cntlr):
                 helpMenu.add_separator()
             else:
                 helpMenu.add_command(label=label, underline=0, command=command, accelerator=shortcut_text)
-                self.parent.bind(shortcut, command)
+                self.parent.bind(shortcut, command)        
+        for pluginMenuExtender in pluginClassMethods("CntlrWinMain.Menu.Helo"):
+            pluginMenuExtender(self, toolsMenu)
         self.menubar.add_cascade(label=_("Help"), menu=helpMenu, underline=0)
 
         windowFrame = Frame(self.parent)
@@ -209,6 +217,8 @@ class CntlrWinMain (Cntlr.Cntlr):
             else:
                 ToolTip(tbControl, text=toolTip)
             menubarColumn += 1
+        for toolbarExtender in pluginClassMethods("CntlrWinMain.Toolbar"):
+            toolbarExtender(self, toolbar)
         toolbar.grid(row=0, column=0, sticky=(N, W))
 
         paneWinTopBtm = PanedWindow(windowFrame, orient=VERTICAL)
@@ -523,7 +533,7 @@ class CntlrWinMain (Cntlr.Cntlr):
     def webOpen(self, *ignore):
         if not self.okayToContinue():
             return
-        url = DialogURL.askURL(self.parent)
+        url = DialogURL.askURL(self.parent, buttonSEC=True, buttonRSS=True)
         if url:
             self.updateFileHistory(url, False)
             filesource = openFileSource(url,self)
@@ -759,8 +769,11 @@ class CntlrWinMain (Cntlr.Cntlr):
                 self.config["windowGeometry"] = self.parent.geometry()
             if state in ("normal", "zoomed"):
                 self.config["windowState"] = state
-            self.config["tabWinTopLeftSize"] = (self.tabWinTopLeft.winfo_width() - 4,   # remove border growth
-                                                self.tabWinTopLeft.winfo_height() - 6)
+            if self.isMSW: adjustW = 4; adjustH = 6  # tweak to prevent splitter regions from growing on reloading
+            elif self.isMac: adjustW = 54; adjustH = 39
+            else: adjustW = 2; adjustH = 2  # linux (tested on ubuntu)
+            self.config["tabWinTopLeftSize"] = (self.tabWinTopLeft.winfo_width() - adjustW,
+                                                self.tabWinTopLeft.winfo_height() - adjustH)
             super(CntlrWinMain, self).close(saveConfig=True)
             self.parent.unbind_all(())
             self.parent.destroy()
@@ -909,7 +922,7 @@ class CntlrWinMain (Cntlr.Cntlr):
                     v = _("Validate {0}\nCheck disclosure system rules\n{1}{2}{3}").format(
                            valName, self.modelManager.disclosureSystem.selection,c,u)
                 else:
-                    v = _("Validate {0}{0}{1}").format(valName, c,u)
+                    v = _("Validate {0}{1}{2}").format(valName, c, u)
         else:
             v = _("Validate")
         self.validateTooltipText.set(v)
@@ -1060,13 +1073,13 @@ class CntlrWinMain (Cntlr.Cntlr):
                 callback(*args)
         widget.after(delayMsecs, lambda: self.uiThreadChecker(widget))
         
-    def uiFileDialog(self, action, title=None, initialdir=None, filetypes=[], defaultextension=None):
+    def uiFileDialog(self, action, title=None, initialdir=None, filetypes=[], defaultextension=None, owner=None):
         if self.hasWin32gui:
             import win32gui
             try:
                 filename, filter, flags = {"open":win32gui.GetOpenFileNameW,
                                            "save":win32gui.GetSaveFileNameW}[action](
-                            hwndOwner=self.parent.winfo_id(), 
+                            hwndOwner=(owner if owner else self.parent).winfo_id(), 
                             hInstance=win32gui.GetModuleHandle(None),
                             Filter='\0'.join(e for t in filetypes+['\0'] for e in t),
                             MaxFile=4096,

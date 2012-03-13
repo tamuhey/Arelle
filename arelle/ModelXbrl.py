@@ -408,16 +408,16 @@ class ModelXbrl:
                     entryUrl = self.modelDocument.uri
                 except AttributeError:
                     entryUrl = self.entryLoadingUrl
-                try:
-                    objectUrl = argValue.modelDocument.uri
-                except AttributeError:
-                    try:
-                        objectUrl = self.modelDocument.uri
-                    except AttributeError:
-                        objectUrl = self.entryLoadingUrl
                 refs = []
                 for arg in (argValue if isinstance(argValue, (tuple,list)) else (argValue,)):
                     if arg is not None:
+                        try:
+                            objectUrl = arg.modelDocument.uri
+                        except AttributeError:
+                            try:
+                                objectUrl = self.modelDocument.uri
+                            except AttributeError:
+                                objectUrl = self.entryLoadingUrl
                         file = UrlUtil.relativeUri(entryUrl, objectUrl)
                         ref = {}
                         if isinstance(arg,ModelObject):
@@ -431,7 +431,8 @@ class ModelXbrl:
             elif argName == "results":
                 extras["results"] = argValue
             elif argName == "sourceLine":
-                extras["sourceLine"] = argValue
+                if isinstance(argValue, _INT_TYPES):    # must be sortable with int's in logger
+                    extras["sourceLine"] = argValue
             elif argName != "exc_info":
                 if isinstance(argValue, (ModelValue.QName, ModelObject, bool, FileNamedStringIO)):
                     fmtArgs[argName] = str(argValue)

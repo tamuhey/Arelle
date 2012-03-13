@@ -15,6 +15,8 @@ else: # python 2.7.2
     from urllib import ContentTooShortError
     from urllib2 import URLError, HTTPError
     import urllib2 as proxyhandlers
+    
+DIRECTORY_INDEX_FILE = "!~DirectoryIndex~!"
 
 def proxyDirFmt(httpProxyTuple):
     if isinstance(httpProxyTuple,tuple) and len(httpProxyTuple) == 5:
@@ -153,6 +155,8 @@ class WebCache:
         if user:
             filepath.append("^user" + self.encodeForFilename(user) ) # user may have : or other illegal chars
         filepath.extend(self.encodeForFilename(pathpart) for pathpart in pathparts[1:])
+        if url.endswith("/"):  # default index file
+            filepath.append(DIRECTORY_INDEX_FILE)
         return os.sep.join(filepath)
     
     def cacheFilepathToUrl(self, cacheFilepath):
@@ -164,21 +168,23 @@ class WebCache:
         if urlparts[2].startswith("^user"):
             urlparts[1] = urlparts[2][5:] + "@" + urlparts[1]  # the user part
             del urlparts[2]
+        if urlparts[-1] == DIRECTORY_INDEX_FILE:
+            urlparts[-1] = ""  # restore default index file syntax
         return '/'.join(self.decodeFileChars  # remove cacheDir part
                         .sub(lambda c: chr( int(c.group(0)[1:]) ), # remove ^nnn encoding
                          urlpart) for urlpart in urlparts)
             
-    def getfilename(self, url, base=None, reload=False):
+    def getfilename(self, url, base=None, reload=False, checkModifiedTime=False, normalize=False):
         if url is None:
             return url
-        if base is not None:
+        if base is not None or normalize:
             url = self.normalizeUrl(url, base)
         if url.startswith('http://'):
             # form cache file name (substituting _ for any illegal file characters)
             filepath = self.urlToCacheFilepath(url)
             # handle default directory requests
             if filepath.endswith("/"):
-                filepath += "default.unknown"
+                filepath += DIRECTORY_INDEX_FILE
             if os.sep == '\\':
                 filepath = filepath.replace('/', '\\')
             if self.workOffline:
@@ -187,7 +193,7 @@ class WebCache:
             timeNow = time.time()
             timeNowStr = time.strftime('%Y-%m-%dT%H:%M:%S UTC', time.gmtime(timeNow))
             if not reload and os.path.exists(filepath):
-                if url in self.cachedUrlCheckTimes:
+                if url in self.cachedUrlCheckTimes and not checkModifiedTime:
                     cachedTime = calendar.timegm(time.strptime(self.cachedUrlCheckTimes[url], '%Y-%m-%dT%H:%M:%S UTC'))
                 else:
                     cachedTime = 0

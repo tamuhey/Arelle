@@ -126,9 +126,12 @@ def textNotStripped(element):
         return ""
     return element.elementText  # allows embedded comment nodes, returns '' if None
 
-def innerText(element, ixExclude=False):   
+def innerText(element, ixExclude=False, strip=True):   
     try:
-        return "".join(text for text in innerTextNodes(element, ixExclude)).strip()
+        text = "".join(text for text in innerTextNodes(element, ixExclude))
+        if strip:
+            return text.strip()
+        return text
     except TypeError:
         return ""
 
@@ -604,6 +607,41 @@ def elementFragmentIdentifier(element):
             element = element.getparent()
         location = "/".join(childSequence)
         return "element({0})".format(location)
+    
+def ixToXhtml(fromRoot):
+    toRoot = etree.Element(fromRoot.localName)
+    copyNonIxChildren(fromRoot, toRoot)
+    for attrTag, attrValue in fromRoot.items():
+        toRoot.set(attrTag, attrValue)
+    return toRoot
+
+def copyNonIxChildren(fromElt, toElt):
+    for fromChild in fromElt:
+        if isinstance(fromChild, ModelObject):
+            fromTag = fromChild.tag
+            if fromTag not in {"{http://www.xbrl.org/2008/inlineXBRL}references",
+                               "{http://www.xbrl.org/2008/inlineXBRL}resources"}:
+                if fromTag in {"{http://www.xbrl.org/2008/inlineXBRL}footnote",
+                               "{http://www.xbrl.org/2008/inlineXBRL}nonNumeric"}:
+                    toChild = etree.Element("ixNestedContent")
+                    toElt.append(toChild)
+                    copyNonIxChildren(fromChild, toChild)
+                    if fromChild.text is not None:
+                        toChild.text = fromChild.text
+                    if fromChild.tail is not None:
+                        toChild.tail = fromChild.tail
+                elif fromTag.startswith("{http://www.xbrl.org/2008/inlineXBRL}"):
+                    copyNonIxChildren(fromChild, toElt)
+                else:
+                    toChild = etree.Element(fromChild.localName)
+                    toElt.append(toChild)
+                    copyNonIxChildren(fromChild, toChild)
+                    for attrTag, attrValue in fromChild.items():
+                        toChild.set(attrTag, attrValue)
+                    if fromChild.text is not None:
+                        toChild.text = fromChild.text
+                    if fromChild.tail is not None:
+                        toChild.tail = fromChild.tail
     
 def writexml(writer, node, encoding=None, indent='', parentNsmap=None):
     # customized from xml.minidom to provide correct indentation for data items

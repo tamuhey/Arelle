@@ -8,10 +8,12 @@
    :license: Apache-2.
    :synopsis: Common controller class to initialize for platform and setup common logger functions
 """
+from __future__ import print_function
 from arelle import PythonUtil # define 2.x or 3.x string types
 import tempfile, os, io, sys, logging, gettext, json
 from arelle import ModelManager
 from arelle.Locale import getLanguageCodes
+from arelle import PluginManager
 from collections import defaultdict
 isPy3 = (sys.version[0] >= '3')
 
@@ -135,11 +137,17 @@ class Cntlr:
             gettext.translation("arelle", self.localeDir, getLanguageCodes()).install()
         except Exception as msg:
             gettext.install("arelle", self.localeDir)
-
+            
         from arelle.WebCache import WebCache
         self.webCache = WebCache(self, self.config.get("proxySettings"))
         self.modelManager = ModelManager.initialize(self)
         
+        # start plug in server (requres web cache initialized
+        PluginManager.init(self)
+ 
+        self.startLogging(logFileName, logFileMode, logFileEncoding, logFormat)
+        
+    def startLogging(self, logFileName=None, logFileMode=None, logFileEncoding=None, logFormat=None):
         if logFileName: # use default logging
             self.logger = logging.getLogger("arelle")
             if logFileName == "logToPrint":
@@ -176,6 +184,7 @@ class Cntlr:
         """.. method:: close(saveConfig=False)
            Close controller and its logger, optionally saaving the user preferences configuration
            :param saveConfig: save the user preferences configuration"""
+        PluginManager.save(self)
         if saveConfig:
             self.saveConfig()
         if self.logger is not None:
@@ -267,8 +276,10 @@ class LogFormatter(logging.Formatter):
         # provide a file parameter made up from refs entries
         fileLines = defaultdict(set)
         for ref in record.refs:
-            fileLines[ref["href"].partition("#")[0]].add(ref.get("sourceLine"))
-        record.file = ", ".join(file + " " + ', '.join(str(line) for line in lines if line)
+            fileLines[ref["href"].partition("#")[0]].add(ref.get("sourceLine", 0))
+        record.file = ", ".join(file + " " + ', '.join(str(line) 
+                                                       for line in sorted(lines, key=lambda l: l)
+                                                       if line)
                                 for file, lines in sorted(fileLines.items()))
         formattedMessage = super(LogFormatter, self).format(record)
         del record.file
@@ -295,18 +306,19 @@ class LogHandlerWithXml(logging.Handler):
     def recordToXml(self, logRec):
         msg = self.format(logRec)
         if logRec.args:
-            args = "".join([' {0}="{1}"'.format(n, v.replace('"','&quot;')) for n, v in logRec.args.items()])
+            args = "".join([' {0}="{1}"'.format(n, str(v).replace('"','&quot;')) for n, v in logRec.args.items()])
         else:
             args = ""
-        refs = "".join('<ref href="{0}"{1}/>'.format(
+        refs = "\n".join('<ref href="{0}"{1}/>'.format(
                         ref["href"], 
                         ' sourceLine="{0}"'.format(ref["sourceLine"]) if "sourceLine" in ref else '')
                        for ref in logRec.refs)
-        return ('<entry code="{0}" level="{1}" file="{2}" sourceLine="{3}">'
-                '<message{4}>{5}</message>{6}'
+        return ('<entry code="{0}" level="{1}">'
+                '<message{2}>{3}</message>{4}'
                 '</entry>\n'.format(logRec.messageCode, 
                                     logRec.levelname.lower(), 
-                                    args, msg.replace("&","&amp;").replace("<","&lt;"), 
+                                    args, 
+                                    msg.replace("&","&amp;").replace("<","&lt;"), 
                                     refs))
 
 class LogToXmlHandler(LogHandlerWithXml):

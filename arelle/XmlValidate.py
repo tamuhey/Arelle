@@ -142,15 +142,32 @@ predefinedAttributeTypes = {
     qname("{http://www.w3.org/XML/1998/namespace}xml:lang"):("language",None),
     qname("{http://www.w3.org/XML/1998/namespace}xml:space"):("NCName",{"enumeration":{"default","preserve"}})}
 
+def xhtmlValidate(modelXbrl, elt):
+    from lxml.etree import DTD, XMLSyntaxError
+    # copy xhtml elements to fresh tree
+    with open(os.path.join(modelXbrl.modelManager.cntlr.configDir, "xhtml1-strict-ix.dtd")) as fh:
+        dtd = DTD(fh)
+    try:
+        if not dtd.validate( XmlUtil.ixToXhtml(elt) ):
+            modelXbrl.error("xmlDTD:error",
+                _("%(element)s error %(error)s"),
+                modelObject=elt, element=elt.localName.title(),
+                error=', '.join(e.message for e in dtd.error_log.filter_from_errors()))
+    except XMLSyntaxError as err:
+        modelXbrl.error("xmlDTD:error",
+            _("%(element)s error %(error)s"),
+            modelObject=elt, element=elt.localName.title(), error=dtd.error_log.filter_from_errors())
 
-def validate(modelXbrl, elt, recurse=True, attrQname=None):
+def validate(modelXbrl, elt, recurse=True, attrQname=None, ixFacts=False):
+    global ModelInlineFact
+    if ModelInlineFact is None:
+        from arelle.ModelInstanceObject import ModelInlineFact
+    isIxFact = isinstance(elt, ModelInlineFact)
+
     # attrQname can be provided for attributes that are global and LAX
-    if not hasattr(elt,"xValid"):
+    if not hasattr(elt,"xValid") and (not isIxFact or ixFacts):
         text = elt.elementText
-        global ModelInlineFact
-        if ModelInlineFact is None:
-            from arelle.ModelInstanceObject import ModelInlineFact
-        qnElt = elt.qname if isinstance(elt, ModelInlineFact) else qname(elt)
+        qnElt = elt.qname if ixFacts and isIxFact else qname(elt)
         modelConcept = modelXbrl.qnameConcepts.get(qnElt)
         facets = None
         if modelConcept is not None:
@@ -231,7 +248,7 @@ def validate(modelXbrl, elt, recurse=True, attrQname=None):
                     modelXbrl.error("xmlSchema:attributesRequired",
                         _("Element %(element)s type %(typeName)s missing required attributes: %(attributes)s"),
                         modelObject=elt,
-                        element=elt.elementQname,
+                        element=qnElt,
                         typeName=baseXsdType,
                         attributes=','.join(str(a) for a in missingAttributes))
                 # add default attribute values
@@ -243,13 +260,13 @@ def validate(modelXbrl, elt, recurse=True, attrQname=None):
                 if validateElementSequence is None:
                     from arelle.XmlValidateParticles import validateElementSequence, modelGroupCompositorTitle
                 try:
-                    childElts = list(elt)
+                    childElts = elt.modelTupleFacts if ixFacts and isIxFact else list(elt)
                     if isNil:
                         if childElts and any(True for e in childElts if isinstance(e, ModelObject)) or elt.text:
                             modelXbrl.error("xmlSchema:nilElementHasContent",
                                 _("Element %(element)s is nil but has contents"),
                                 modelObject=elt,
-                                element=elt.elementQname)
+                                element=qnElt)
                     else:
                         errResult = validateElementSequence(modelXbrl, type, childElts)
                         if errResult is not None and errResult[2]:
@@ -265,9 +282,9 @@ def validate(modelXbrl, elt, recurse=True, attrQname=None):
                 except AttributeError as ex:
                     pass
     if recurse: # if there is no complex or simple type (such as xbrli:measure) then this code is used
-        for child in elt:
+        for child in (elt.modelTupleFacts if ixFacts and isIxFact else elt):
             if isinstance(child, ModelObject):
-                validate(modelXbrl, child)
+                validate(modelXbrl, child, recurse, attrQname, ixFacts)
 
 def validateValue(modelXbrl, elt, attrTag, baseXsdType, value, isNillable=False, facets=None):
     if baseXsdType:
@@ -297,11 +314,11 @@ def validateValue(modelXbrl, elt, attrTag, baseXsdType, value, isNillable=False,
                 if "enumeration" in facets and value not in facets["enumeration"]:
                     raise ValueError("is not in {1}".format(value, facets["enumeration"]))
                 if "length" in facets and len(value) != facets["length"]:
-                    raise ValueError("length facet {0}".format(facets["length"]))
+                    raise ValueError("length {0}, expected {1}".format(len(value), facets["length"]))
                 if "minLength" in facets and len(value) < facets["minLength"]:
-                    raise ValueError("minLength facet {0}".format(facets["minLength"]))
+                    raise ValueError("length {0}, minLength {1}".format(len(value), facets["minLength"]))
                 if "maxLength" in facets and len(value) > facets["maxLength"]:
-                    raise ValueError("maxLength facet {0}".format(facets["maxLength"]))
+                    raise ValueError("length {0}, maxLength {1}".format(len(value), facets["maxLength"]))
             if baseXsdType == "noContent":
                 if len(value) > 0 and not value.isspace():
                     raise ValueError("value content not permitted")
@@ -379,11 +396,15 @@ def validateValue(modelXbrl, elt, attrTag, baseXsdType, value, isNillable=False,
                 xValue = value
                 sValue = value
         except ValueError as err:
+            if ModelInlineFact is not None and isinstance(elt, ModelInlineFact):
+                errElt = "{0} fact {1}".format(elt.elementQname, elt.qname)
+            else:
+                errElt = elt.elementQname
             if attrTag:
                 modelXbrl.error("xmlSchema:valueError",
                     _("Element %(element)s attribute %(attribute)s type %(typeName)s value error: %(value)s, %(error)s"),
                     modelObject=elt,
-                    element=elt.elementQname,
+                    element=errElt,
                     attribute=XmlUtil.clarkNotationToPrefixedName(elt,attrTag,isAttribute=True),
                     typeName=baseXsdType,
                     value=value,
@@ -392,7 +413,7 @@ def validateValue(modelXbrl, elt, attrTag, baseXsdType, value, isNillable=False,
                 modelXbrl.error("xmlSchema:valueError",
                     _("Element %(element)s type %(typeName)s value error: %(value)s, %(error)s"),
                     modelObject=elt,
-                    element=elt.elementQname,
+                    element=errElt,
                     typeName=baseXsdType,
                     value=value,
                     error=err)
