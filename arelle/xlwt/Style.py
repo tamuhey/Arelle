@@ -1,7 +1,7 @@
 # -*- coding: windows-1252 -*-
 
 from __future__ import print_function
-from arelle import Formatting
+from arelle.xlwt import Formatting
 from arelle.xlwt.BIFFRecords import *
 import collections
 
