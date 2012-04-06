@@ -14,7 +14,7 @@ from arelle import PluginManager, DialogURL
 from arelle.CntlrWinTooltip import ToolTip
 import re, os, time
 
-def dialogAddonManager(mainWin):
+def dialogPluginManager(mainWin):
     # check for updates in background
     import threading
     thread = threading.Thread(target=lambda cntlr=mainWin: backgroundCheckForUpdates(cntlr))
@@ -25,16 +25,16 @@ def backgroundCheckForUpdates(cntlr):
     cntlr.showStatus(_("Checking for updates to plug-ins")) # clear web loading status
     modulesWithNewerFileDates = PluginManager.modulesWithNewerFileDates()
     if modulesWithNewerFileDates:
-        cntlr.showStatus(_("Updates are available for these plugins: {0}")
+        cntlr.showStatus(_("Updates are available for these plug-ins: {0}")
                               .format(', '.join(modulesWithNewerFileDates)), clearAfter=5000)
     else:
-        cntlr.showStatus(_("No updates found for plugins."), clearAfter=5000)
+        cntlr.showStatus(_("No updates found for plug-ins."), clearAfter=5000)
     time.sleep(0.1) # Mac locks up without this, may be needed for empty ui queue? 
-    cntlr.uiThreadQueue.put((DialogAddonManager, [cntlr, modulesWithNewerFileDates]))
+    cntlr.uiThreadQueue.put((DialogPluginManager, [cntlr, modulesWithNewerFileDates]))
 
-class DialogAddonManager(Toplevel):
+class DialogPluginManager(Toplevel):
     def __init__(self, mainWin, modulesWithNewerFileDates):
-        super(DialogAddonManager, self).__init__(mainWin.parent)
+        super(DialogPluginManager, self).__init__(mainWin.parent)
         
         self.ENABLE = _("Enable")
         self.DISABLE = _("Disable")
@@ -51,17 +51,17 @@ class DialogAddonManager(Toplevel):
         dialogX = int(parentGeometry.group(3))
         dialogY = int(parentGeometry.group(4))
 
-        self.title(_("Add on Manager"))
+        self.title(_("Plug-in Manager"))
         frame = Frame(self)
         
         # left button frame
         buttonFrame = Frame(frame, width=40)
         buttonFrame.columnconfigure(0, weight=1)
-        addLabel = Label(buttonFrame, text=_("Find plugin modules:"), wraplength=60, justify="center")
+        addLabel = Label(buttonFrame, text=_("Find plug-in modules:"), wraplength=60, justify="center")
         addLocalButton = Button(buttonFrame, text=_("Locally"), command=self.findLocally)
-        ToolTip(addLocalButton, text=_("File chooser allows selecting python module files to add (or reload) plug ins, from the local file system."), wraplength=240)
+        ToolTip(addLocalButton, text=_("File chooser allows selecting python module files to add (or reload) plug-ins, from the local file system."), wraplength=240)
         addWebButton = Button(buttonFrame, text=_("On Web"), command=self.findOnWeb)
-        ToolTip(addWebButton, text=_("Dialog to enter URL full path to load (or reload) plug ins, from the web or local file system."), wraplength=240)
+        ToolTip(addWebButton, text=_("Dialog to enter URL full path to load (or reload) plug-ins, from the web or local file system."), wraplength=240)
         addLabel.grid(row=0, column=0, pady=4)
         addLocalButton.grid(row=1, column=0, pady=4)
         addWebButton.grid(row=2, column=0, pady=4)
@@ -151,15 +151,19 @@ class DialogAddonManager(Toplevel):
         self.moduleDateLabel = Label(moduleInfoFrame, wraplength=600, justify="left")
         self.moduleDateLabel.grid(row=5, column=1, columnspan=3, sticky=W)
         ToolTip(self.moduleDateLabel, text=_("Date of currently loaded module file (with parenthetical node when an update is available)."), wraplength=240)
+        self.moduleLicenseHdr = Label(moduleInfoFrame, text=_("license:"), state=DISABLED)
+        self.moduleLicenseHdr.grid(row=6, column=0, sticky=W)
+        self.moduleLicenseLabel = Label(moduleInfoFrame, wraplength=600, justify="left")
+        self.moduleLicenseLabel.grid(row=6, column=1, columnspan=3, sticky=W)
         self.moduleEnableButton = Button(moduleInfoFrame, text=self.ENABLE, state=DISABLED, command=self.moduleEnable)
         ToolTip(self.moduleEnableButton, text=_("Enable/disable plug in."), wraplength=240)
-        self.moduleEnableButton.grid(row=6, column=1, sticky=E)
+        self.moduleEnableButton.grid(row=7, column=1, sticky=E)
         self.moduleReloadButton = Button(moduleInfoFrame, text=_("Reload"), state=DISABLED, command=self.moduleReload)
         ToolTip(self.moduleReloadButton, text=_("Reload/update plug in."), wraplength=240)
-        self.moduleReloadButton.grid(row=6, column=2, sticky=E)
+        self.moduleReloadButton.grid(row=7, column=2, sticky=E)
         self.moduleRemoveButton = Button(moduleInfoFrame, text=_("Remove"), state=DISABLED, command=self.moduleRemove)
         ToolTip(self.moduleRemoveButton, text=_("Remove plug in from plug in table (does not erase the plug in's file)."), wraplength=240)
-        self.moduleRemoveButton.grid(row=6, column=3, sticky=E)
+        self.moduleRemoveButton.grid(row=7, column=3, sticky=E)
         moduleInfoFrame.grid(row=2, column=0, columnspan=5, sticky=(N, S, E, W), padx=3, pady=3)
         moduleInfoFrame.config(borderwidth=4, relief="groove")
         
@@ -252,6 +256,8 @@ class DialogAddonManager(Toplevel):
             self.moduleDateHdr.config(state=ACTIVE)
             self.moduleDateLabel.config(text=moduleInfo["fileDate"] + " " +
                     (_("(an update is available)") if name in self.modulesWithNewerFileDates else ""))
+            self.moduleLicenseHdr.config(state=ACTIVE)
+            self.moduleLicenseLabel.config(text=moduleInfo["license"])
             self.moduleEnableButton.config(state=ACTIVE,
                                            text={"enabled":self.DISABLE,
                                                  "disabled":self.ENABLE}[moduleInfo["status"]])
@@ -270,6 +276,8 @@ class DialogAddonManager(Toplevel):
             self.moduleUrlLabel.config(text="")
             self.moduleDateHdr.config(state=DISABLED)
             self.moduleDateLabel.config(text="")
+            self.moduleLicenseHdr.config(state=DISABLED)
+            self.moduleLicenseLabel.config(text="")
             self.moduleEnableButton.config(state=DISABLED, text=self.ENABLE)
             self.moduleReloadButton.config(state=DISABLED)
             self.moduleRemoveButton.config(state=DISABLED)
@@ -277,7 +285,7 @@ class DialogAddonManager(Toplevel):
     def findLocally(self):
         filename = self.cntlr.uiFileDialog("open",
                                            owner=self,
-                                           title=_("Choose plug in module file"),
+                                           title=_("Choose plug-in module file"),
                                            initialdir=self.cntlr.config.setdefault("pluginOpenDir","."),
                                            filetypes=[(_("Python files"), "*.py")],
                                            defaultextension=".py")

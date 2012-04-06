@@ -60,8 +60,11 @@ class ModelFact(ModelObject):
 
     @property
     def context(self):
-        context = self.modelXbrl.contexts.get(self.contextID)
-        return context
+        try:
+            return self._context
+        except AttributeError:
+            self._context = self.modelXbrl.contexts.get(self.contextID)
+            return self._context
     
     @property
     def unit(self):
@@ -79,7 +82,7 @@ class ModelFact(ModelObject):
             context = self.context
             unit = self.unit
             self._conceptContextUnitLangHash = hash( 
-                (self.concept.qname,
+                (self.qname,
                  context.contextDimAwareHash if context is not None else None,
                  unit.hash if unit is not None else None,
                  self.xmlLang) )
@@ -501,8 +504,9 @@ class ModelContext(ModelObject):
 
     @property
     def entityIdentifier(self):
-        return (self.entityIdentifierElement.get("scheme"),
-                XmlUtil.text(self.entityIdentifierElement))
+        eiElt = self.entityIdentifierElement
+        return (eiElt.get("scheme"), eiElt.xValue)
+
     @property
     def entityIdentifierHash(self):
         try:
@@ -539,11 +543,13 @@ class ModelContext(ModelObject):
     
     # returns ModelDimensionValue for instance dimensions, else QName for defaults
     def dimValue(self, dimQname):
-        if dimQname in self.qnameDims:
+        try:
             return self.qnameDims[dimQname]
-        elif dimQname in self.modelXbrl.qnameDimensionDefaults:
-            return self.modelXbrl.qnameDimensionDefaults[dimQname]
-        return None
+        except KeyError:
+            try:
+                return self.modelXbrl.qnameDimensionDefaults[dimQname]
+            except KeyError:
+                return None
     
     def dimMemberQname(self, dimQname, includeDefaults=False):
         dimValue = self.dimValue(dimQname)
@@ -586,14 +592,29 @@ class ModelContext(ModelObject):
     def scenarioHash(self):
         # s-equality hash
         return XbrlUtil.equalityHash( self.scenario ) # self-caching
+    
+    @property
+    def nonDimSegmentHash(self):
+        try:
+            return self._nonDimSegmentHash
+        except AttributeError:
+            self._nonDimSegmentHash = XbrlUtil.equalityHash(self.nonDimValues("segment"))
+            return self._nonDimSegmentHash
+        
+    @property
+    def nonDimScenarioHash(self):
+        try:
+            return self._nonDimScenarioHash
+        except AttributeError:
+            self._nonDimScenarioHash = XbrlUtil.equalityHash(self.nonDimValues("scenario"))
+            return self._nonDimScenarioHash
         
     @property
     def nonDimHash(self):
         try:
             return self._nonDimsHash
         except AttributeError:
-            self._nonDimsHash = hash( (XbrlUtil.equalityHash(self.nonDimValues("segment")), 
-                                       XbrlUtil.equalityHash(self.nonDimValues("scenario"))) )
+            self._nonDimsHash = hash( (self.nonDimSegmentHash, self.nonDimScenarioHash) ) 
             return self._nonDimsHash
         
     @property
@@ -628,7 +649,7 @@ class ModelContext(ModelObject):
             return False
         
     def isEntityIdentifierEqualTo(self, cntx2):
-        return self.entityIdentifier == cntx2.entityIdentifier
+        return self.entityIdentifierHash == cntx2.entityIdentifierHash
     
     def isEqualTo(self, cntx2, dimensionalAspectModel=None):
         if dimensionalAspectModel is None: dimensionalAspectModel = self.modelXbrl.hasXDT
@@ -742,7 +763,11 @@ class ModelDimensionValue(ModelObject):
 
     @property
     def memberQname(self):
-        return self.prefixedNameQname(self.elementText) if self.isExplicit else None
+        try:
+            return self._memberQname
+        except AttributeError:
+            self._memberQname = self.prefixedNameQname(self.elementText) if self.isExplicit else None
+            return self._memberQname
         
     @property
     def member(self):
@@ -815,8 +840,9 @@ class ModelUnit(ModelObject):
         return len(measures[0]) == 1 and len(measures[1]) == 0
     
     def isEqualTo(self, unit2):
-        if unit2 is None: return False
-        return self.measures == unit2.measures
+        if unit2 is None or unit2.hash != self.hash: 
+            return False
+        return unit2 is self or self.measures == unit2.measures
     
     @property
     def value(self):

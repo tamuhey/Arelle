@@ -11,23 +11,24 @@ from arelle.ModelFormulaObject import (aspectModels, Aspect, aspectModelAspect,
                                  ModelFormula, ModelTuple, ModelExistenceAssertion,
                                  ModelValueAssertion,
                                  ModelFactVariable, ModelGeneralVariable, ModelVariable,
-                                 ModelParameter, ModelFilter, ModelAspectCover)
+                                 ModelParameter, ModelFilter, ModelAspectCover, ModelBooleanFilter)
 from arelle.ModelValue import (QName)
 import datetime
 
-def evaluate(xpCtx, varSet, variablesInScope=False):
+def evaluate(xpCtx, varSet, variablesInScope=False, uncoveredAspectFacts=None):
     # for each dependent variable, find bindings
     if variablesInScope:
         stackedEvaluations = xpCtx.evaluations
     else:
         xpCtx.varBindings = {}
+        uncoveredAspectFacts = {}
     xpCtx.evaluations = []
     try:
         xpCtx.variableSet = varSet
         if isinstance(varSet, ModelExistenceAssertion):
             varSet.evaluationsCount = 0
         initialTraceCount = xpCtx.modelXbrl.logCountInfo
-        evaluateVar(xpCtx, varSet, 0)
+        evaluateVar(xpCtx, varSet, 0, {}, uncoveredAspectFacts)
         if isinstance(varSet, ModelExistenceAssertion):
             prog = varSet.testProg
             if prog:
@@ -65,7 +66,7 @@ def evaluate(xpCtx, varSet, variablesInScope=False):
     if variablesInScope:
         xpCtx.evaluations = stackedEvaluations
     
-def evaluateVar(xpCtx, varSet, varIndex):
+def evaluateVar(xpCtx, varSet, varIndex, cachedFilteredFacts, uncoveredAspectFacts):
     if varIndex == len(varSet.orderedVariableRelationships):
         # check if all fact vars are fallen back
         anyFactVar = False; anyBoundFactVar = False
@@ -143,7 +144,7 @@ def evaluateVar(xpCtx, varSet, varIndex):
                         vb.yieldedFact = newFact
                         overriddenVarBinding = xpCtx.varBindings.get(resultQname)            
                         xpCtx.varBindings[resultQname] = vb
-                    evaluate(xpCtx, varScopeRel.toModelObject, variablesInScope=True)
+                    evaluate(xpCtx, varScopeRel.toModelObject, True, uncoveredAspectFacts)
                     xpCtx.inScopeVars.pop(resultQname)
                     if resultQname and overriddenInScopeVar is not None:  # restore overridden value if there was one
                         xpCtx.inScopeVars[resultQname] = overriddenInScopeVar
@@ -159,73 +160,114 @@ def evaluateVar(xpCtx, varSet, varIndex):
         # produce variable bindings
         varRel = varSet.orderedVariableRelationships[varIndex]
         vb = VariableBinding(xpCtx, varRel)
+        var = vb.var
         if vb.isFactVar:
             vb.aspectsDefined = set(aspectModels[varSet.aspectModel])  # has to be a mutable set
             vb.values = None
-            if vb.var.fromInstanceQnames:
-                facts = [f for qn in vb.var.fromInstanceQnames 
-                         for instSeq in (xpCtx.inScopeVars[qn],)
-                         for inst in (instSeq if isinstance(instSeq,(list,tuple)) else (instSeq,)) 
-                         for f in inst.factsInInstance] 
+            varHasNoVariableDependencies = var.hasNoVariableDependencies
+            varHasNilFacts = var.nils == "true"
+            if varHasNoVariableDependencies and vb.qname in cachedFilteredFacts:
+                facts, vb.aspectsDefined, vb.aspectsCovered = cachedFilteredFacts[vb.qname]
+                if xpCtx.formulaOptions.traceVariableFilterWinnowing:
+                    xpCtx.modelXbrl.info("formula:trace",
+                         _("Fact Variable %(variable)s: start with %(factCount)s facts previously cached after explicit filters"), 
+                         modelObject=var, variable=vb.qname, factCount=len(facts))
             else:
-                facts = xpCtx.modelXbrl.factsInInstance
-            if vb.var.nils == "false":
-                facts = [fact for fact in facts if not fact.isNil]
-            if xpCtx.formulaOptions.traceVariableFilterWinnowing:
-                xpCtx.modelXbrl.info("formula:trace",
-                     _("Fact Variable %(variable)s filtering: start with %(factCount)s facts"), 
-                     modelObject=vb.var, variable=vb.qname, factCount=len(facts))
-            facts = filterFacts(xpCtx, vb, facts, varSet.groupFilterRelationships, "group")
-            # implicit filters (relativeFilter) expect no dim aspects yet on variable binding
-            facts = filterFacts(xpCtx, vb, facts, vb.var.filterRelationships, None)
-            # adding dim aspects must be done after explicit filterin
-            for fact in facts:
-                if fact.isItem:
-                    vb.aspectsDefined |= fact.context.dimAspects(xpCtx.defaultDimensionAspects)
-            coverAspectCoverFilterDims(xpCtx, vb, vb.var.filterRelationships) # filters need to know what dims are covered
-            if varSet.implicitFiltering == "true" and len(xpCtx.varBindings) > 0:
-                facts = aspectMatchFilter(xpCtx, facts, (vb.aspectsDefined - vb.aspectsCovered), xpCtx.varBindings.values(), "implicit")
+                if var.fromInstanceQnames:
+                    groupFilteredFactsKey = "grp:" + str(vb.qname) # multi instance vars or  non-var-dependent variables
+                elif varHasNilFacts:
+                    groupFilteredFactsKey = "grp:stdInstWithNils"
+                else:
+                    groupFilteredFactsKey = "grp:stdInstNonNil"
+                if groupFilteredFactsKey in cachedFilteredFacts:
+                    facts = cachedFilteredFacts[groupFilteredFactsKey]
+                    if xpCtx.formulaOptions.traceVariableFilterWinnowing:
+                        xpCtx.modelXbrl.info("formula:trace",
+                             _("Fact Variable %(variable)s: start with %(factCount)s facts previously cached before variable filters"), 
+                             modelObject=var, variable=vb.qname, factCount=len(facts))
+                else:
+                    if var.fromInstanceQnames:
+                        facts = [f for qn in var.fromInstanceQnames 
+                                 for instSeq in (xpCtx.inScopeVars[qn],)
+                                 for inst in (instSeq if isinstance(instSeq,(list,tuple)) else (instSeq,)) 
+                                 for f in inst.factsInInstance
+                                 if varHasNilFacts or not f.isNil] 
+                    elif varHasNilFacts:
+                        facts = xpCtx.modelXbrl.factsInInstance
+                    else:
+                        facts = xpCtx.modelXbrl.nonNilFactsInInstance
+                    if xpCtx.formulaOptions.traceVariableFilterWinnowing:
+                        xpCtx.modelXbrl.info("formula:trace",
+                             _("Fact Variable %(variable)s filtering: start with %(factCount)s facts"), 
+                             modelObject=var, variable=vb.qname, factCount=len(facts))
+                    facts = filterFacts(xpCtx, vb, facts, varSet.groupFilterRelationships, "group")
+                    vb.aspectsCovered.clear()  # group boolean sub-filters may have covered aspects
+                    cachedFilteredFacts[groupFilteredFactsKey] = facts
+                facts = filterFacts(xpCtx, vb, facts, var.filterRelationships, None) # also finds covered aspects (except aspect cover filter dims, not known until after this complete pass)
+                # adding dim aspects must be done after explicit filterin
+                for fact in facts:
+                    if fact.isItem:
+                        vb.aspectsDefined |= fact.context.dimAspects(xpCtx.defaultDimensionAspects)
+                coverAspectCoverFilterDims(xpCtx, vb, var.filterRelationships) # filters need to know what dims are covered
+                if varHasNoVariableDependencies:
+                    cachedFilteredFacts[vb.qname] = (facts, vb.aspectsDefined, vb.aspectsCovered)
+            if varSet.implicitFiltering == "true":
+                uncoveredAspects = vb.aspectsDefined - vb.aspectsCovered - {Aspect.DIMENSIONS}
+                if any((_vb.isFactVar and not _vb.isFallback) for _vb in xpCtx.varBindings.values()):
+                    facts = implicitFilter(xpCtx, vb, facts, uncoveredAspects, uncoveredAspectFacts)
             vb.facts = facts
             if xpCtx.formulaOptions.traceVariableFiltersResult:
                 xpCtx.modelXbrl.info("formula:trace",
                      _("Fact Variable %(variable)s: filters result %(result)s"), 
-                     modelObject=vb.var, variable=vb.qname, result=str(vb.facts))
-            if vb.var.fallbackValueProg:
-                vb.values = xpCtx.evaluate(vb.var.fallbackValueProg)
+                     modelObject=var, variable=vb.qname, result=str(vb.facts))
+            if var.fallbackValueProg:
+                vb.values = xpCtx.evaluate(var.fallbackValueProg)
                 if xpCtx.formulaOptions.traceVariableExpressionResult:
                     xpCtx.modelXbrl.info("formula:trace",
                          _("Fact Variable %(variable)s: fallbackValue result %(result)s"), 
-                         modelObject=vb.var, variable=vb.qname, result=str(vb.values))
+                         modelObject=var, variable=vb.qname, result=str(vb.values))
         elif vb.isGeneralVar: # general variable
-            if vb.var.fromInstanceQnames:
+            if var.fromInstanceQnames:
                 contextItem = [inst.modelDocument.xmlRootElement 
-                               for qn in vb.var.fromInstanceQnames 
+                               for qn in var.fromInstanceQnames 
                                for instSeq in (xpCtx.inScopeVars[qn],)
                                for inst in (instSeq if isinstance(instSeq,(list,tuple)) else (instSeq,)) 
                                ] 
             else:
                 contextItem = xpCtx.modelXbrl.modelDocument.xmlRootElement  # default is standard input instance
-            vb.values = xpCtx.flattenSequence( xpCtx.evaluate(vb.var.selectProg, contextItem=contextItem) )
+            vb.values = xpCtx.flattenSequence( xpCtx.evaluate(var.selectProg, contextItem=contextItem) )
             if xpCtx.formulaOptions.traceVariableExpressionResult:
                 xpCtx.modelXbrl.info("formula:trace",
                      _("General Variable %(variable)s: select result %(result)s"),
-                     modelObject=vb.var, variable=vb.qname, result=str(vb.values))
+                     modelObject=var, variable=vb.qname, result=str(vb.values))
         elif vb.isParameter:
-            vb.parameterValue = xpCtx.inScopeVars.get(vb.var.qname)
+            vb.parameterValue = xpCtx.inScopeVars.get(var.qname)
         # recurse partitions, preserve overlaid var bindings and inScopeVars
         overriddenVarBinding = xpCtx.varBindings.get(vb.qname)            
         xpCtx.varBindings[vb.qname] = vb
         for evaluationResult in vb.evaluationResults:
             overriddenInScopeVar = xpCtx.inScopeVars.get(vb.qname)
             xpCtx.inScopeVars[vb.qname] = evaluationResult
+            evaluationContributedUncoveredAspects = {}
+            if vb.isFactVar and not vb.isFallback:
+                # cache uncoveredAspect facts for nested evaluations
+                for aspect in vb.aspectsDefined | vb.aspectsCovered:  # covered aspects may not be defined e.g., test 12062 v11, undefined aspect is a complemented aspect
+                    if uncoveredAspectFacts.get(aspect) is None:
+                        evaluationContributedUncoveredAspects[aspect] = uncoveredAspectFacts.get(aspect,"none")
+                        uncoveredAspectFacts[aspect] = None if vb.hasAspectValueCovered(aspect) else vb.yieldedFact
             if xpCtx.formulaOptions.traceVariableFiltersResult:
                 xpCtx.modelXbrl.info("formula:trace",
                      _("%(variableType)s %(variable)s: bound value %(result)s"), 
-                     modelObject=vb.var, variableType=vb.resourceElementName, variable=vb.qname, result=str(evaluationResult))
-            evaluateVar(xpCtx, varSet, varIndex + 1)
+                     modelObject=var, variableType=vb.resourceElementName, variable=vb.qname, result=str(evaluationResult))
+            evaluateVar(xpCtx, varSet, varIndex + 1, cachedFilteredFacts, uncoveredAspectFacts)
             xpCtx.inScopeVars.pop(vb.qname)
             if overriddenInScopeVar is not None:  # restore overridden value if there was one
                 xpCtx.inScopeVars[vb.qname] = overriddenInScopeVar
+            for aspect, priorFact in evaluationContributedUncoveredAspects.items():
+                if priorFact == "none":
+                    del uncoveredAspectFacts[aspect]
+                else:
+                    uncoveredAspectFacts[aspect] = priorFact
         xpCtx.varBindings.pop(vb.qname)
         if overriddenVarBinding is not None:
             xpCtx.varBindings[vb.qname] = overriddenVarBinding
@@ -233,6 +275,7 @@ def evaluateVar(xpCtx, varSet, varIndex):
 def filterFacts(xpCtx, vb, facts, filterRelationships, filterType):
     typeLbl = filterType + " " if filterType else ""
     orFilter = filterType == "or"
+    groupFilter = filterType == "group"
     if orFilter: 
         factSet = set()
     for varFilterRel in filterRelationships:
@@ -248,7 +291,7 @@ def filterFacts(xpCtx, vb, facts, filterRelationships, filterType):
                 for fact in result: factSet.add(fact)
             else: 
                 facts = result
-            if varFilterRel.isCovered:
+            if not groupFilter and varFilterRel.isCovered:  # block boolean group filters that have cover in subnetworks
                 vb.aspectsCovered |= _filter.aspectsCovered(vb)
     if orFilter: 
         return factSet
@@ -261,80 +304,80 @@ def coverAspectCoverFilterDims(xpCtx, vb, filterRelationships):
         if isinstance(_filter,ModelAspectCover):  # relationship not constrained to real filters
             if varFilterRel.isCovered:
                 vb.aspectsCovered |= _filter.dimAspectsCovered(vb)
+        elif isinstance(_filter,ModelBooleanFilter) and varFilterRel.isCovered:
+            coverAspectCoverFilterDims(xpCtx, vb, _filter.filterRelationships)
             
-def aspectMatchFilter(xpCtx, facts, aspects, varBindings, filterType, relBinding=None):
-    for aspect in aspects:
-        for vb in (varBindings if hasattr(varBindings, '__iter__') else (varBindings,)):
-            if (vb.isFactVar and not vb.isFallback and not vb.hasAspectValueCovered(aspect) and
-                (relBinding is None or (relBinding.isFactVar and not relBinding.isFallback and not relBinding.hasAspectValueCovered(aspect)))):
-            #if not vb.isFallback and vb.hasAspectValueUncovered(aspect):
-                facts = [fact for fact in facts if aspectMatches(xpCtx, vb.yieldedFact, fact, aspect)]
-                if xpCtx.formulaOptions.traceVariableFilterWinnowing:
-                    a = str(aspect) if isinstance(aspect,QName) else Aspect.label[aspect]
-                    xpCtx.modelXbrl.info("formula:trace",
-                        _("Fact Variable %(variable)s %(filter)s filter %(aspect)s passes %(factCount)s facts"), 
-                        modelObject=vb.var, variable=vb.qname, filter=filterType, aspect=a, factCount=len(facts)),
+def implicitFilter(xpCtx, vb, facts, aspects, uncoveredAspectFacts):
+    if xpCtx.formulaOptions.traceVariableFilterWinnowing:  # trace shows by aspect by bound variable match    
+        for aspect in aspects:
+            if uncoveredAspectFacts.get(aspect, "none") is not None:
+                facts = [fact for fact in facts if aspectMatches(xpCtx, uncoveredAspectFacts.get(aspect), fact, aspect)]
+                a = str(aspect) if isinstance(aspect,QName) else Aspect.label[aspect]
+                xpCtx.modelXbrl.info("formula:trace",
+                    _("Fact Variable %(variable)s implicit filter %(aspect)s passes %(factCount)s facts"), 
+                    modelObject=vb.var, variable=vb.qname, aspect=a, factCount=len(facts))
                 if len(facts) == 0: break
-    if relBinding is not None and vb.isFactVar and not vb.isFallback and relBinding.isFactVar and not relBinding.isFallback:    
-        # check each dimension aspect of candidate fact (no dim aspect in aspects, only fact's apply)
-        matchedFacts = []
-        for fact in facts:
-            matches = True
-            if vb.isFactVar and not vb.isFallback:
-                for dimAspect in fact.context.dimAspects(xpCtx.defaultDimensionAspects):
-                    if (not vb.hasAspectValueCovered(dimAspect) and
-                        not relBinding.hasAspectValueCovered(dimAspect) and 
-                        not aspectMatches(xpCtx, vb.yieldedFact, fact, dimAspect)):
-                        matches = False
-            if matches:
-                matchedFacts.append(fact)
-        facts = matchedFacts
-        if xpCtx.formulaOptions.traceVariableFilterWinnowing:
-            xpCtx.modelXbrl.info("formula:trace",
-                _("Fact Variable %(variable)s %(filter)s filter dimension matching passes %(factCount)s facts"), 
-                modelObject=vb.var, variable=vb.qname, filter=filterType, factCount=len(facts)),
+    else: 
+        testableAspectFacts = [(aspect, uncoveredAspectFacts.get(aspect)) 
+                               for aspect in aspects 
+                               if uncoveredAspectFacts.get(aspect, "none") is not None]
+        #testableAspectFacts = [(aspect, fact) 
+        #                       for aspect, fact in uncoveredAspectFacts.items()
+        #                       if not vb.hasAspectValueCovered(aspect)]
+        if testableAspectFacts:
+            # not tracing, do bulk aspect filtering
+            facts = [fact
+                     for fact in facts
+                     if all(aspectMatches(xpCtx, uncoveredAspectFact, fact, aspect)
+                            for (aspect, uncoveredAspectFact) in testableAspectFacts)]
     return facts
     
-def aspectMatches(xpCtx, fact1, fact2, aspects):
+def aspectsMatch(xpCtx, fact1, fact2, aspects):
+    return all(aspectMatches(xpCtx, fact1, fact2, aspect) for aspect in aspects)
+
+def aspectMatches(xpCtx, fact1, fact2, aspect):
     if fact1 is None or fact2 is None:  # fallback (atomic) never matches any aspect
         return False
-    matches = True
-    for aspect in (aspects if hasattr(aspects,'__iter__') else (aspects,)):
-        if aspect == Aspect.LOCATION:
-            if (fact1.modelXbrl == fact2.modelXbrl and # test deemed true for multi-instance comparisons
-                fact1.getparent() != fact2.getparent()): matches = False
-        elif aspect == Aspect.CONCEPT:
-            if fact1.concept.qname != fact2.concept.qname: matches = False
-        elif fact1.isTuple or fact2.isTuple:
-            return True # only match the aspects both facts have 
-        elif aspect == Aspect.PERIOD:
-            if not fact1.context.isPeriodEqualTo(fact2.context): matches = False
-        elif aspect == Aspect.ENTITY_IDENTIFIER:
-            if not fact1.context.isEntityIdentifierEqualTo(fact2.context): matches = False
-        elif aspect == Aspect.COMPLETE_SEGMENT:
-            if not XbrlUtil.nodesCorrespond(fact1.modelXbrl, fact1.context.segment, fact2.context.segment, dts2=fact2.modelXbrl): 
-                matches = False
-        elif aspect == Aspect.COMPLETE_SCENARIO:
-            if not XbrlUtil.nodesCorrespond(fact1.modelXbrl, fact1.context.scenario, fact2.context.scenario, dts2=fact2.modelXbrl): 
-                matches = False
-        elif aspect in (Aspect.NON_XDT_SEGMENT, Aspect.NON_XDT_SCENARIO):
-            nXs1 = fact1.context.nonDimValues(aspect)
-            nXs2 = fact2.context.nonDimValues(aspect)
-            if len(nXs1) != len(nXs2):
-                matches = False
-            else:
-                for i in range(len(nXs1)):
+    if aspect == 1: # Aspect.LOCATION:
+        return (fact1.modelXbrl != fact2.modelXbrl or # test deemed true for multi-instance comparisons
+                fact1.getparent() == fact2.getparent())
+    elif aspect == 2: # Aspect.CONCEPT:
+        return fact1.qname == fact2.qname
+    elif fact1.isTuple or fact2.isTuple:
+        return True # only match the aspects both facts have 
+    elif aspect == 5: # Aspect.UNIT:
+        u1 = fact1.unit
+        u2 = fact2.unit
+        if u1 is not None:
+            return u1.isEqualTo(u2)
+        return u2 is None
+    else:
+        # rest of comparisons are for context
+        c1 = fact1.context
+        c2 = fact2.context
+        if c1 is c2:
+            return True # same context
+        if aspect == 4: # Aspect.PERIOD:
+            return c1.isPeriodEqualTo(c2)
+        if aspect == 3: # Aspect.ENTITY_IDENTIFIER:
+            return c1.isEntityIdentifierEqualTo(c2)
+        if aspect == 6: # Aspect.COMPLETE_SEGMENT:
+            return XbrlUtil.nodesCorrespond(fact1.modelXbrl, c1.segment, c2.segment, dts2=fact2.modelXbrl) 
+        elif aspect == 7: # Aspect.COMPLETE_SCENARIO:
+            return XbrlUtil.nodesCorrespond(fact1.modelXbrl, c1.scenario, c2.scenario, dts2=fact2.modelXbrl) 
+        elif aspect == 8 or aspect == 9: # aspect in (Aspect.NON_XDT_SEGMENT, Aspect.NON_XDT_SCENARIO):
+            nXs1 = c1.nonDimValues(aspect)
+            nXs2 = c2.nonDimValues(aspect)
+            lXs1 = len(nXs1)
+            lXs2 = len(nXs2)
+            if lXs1 != lXs2:
+                return False
+            elif lXs1 > 0:
+                for i in range(lXs1):
                     if not XbrlUtil.nodesCorrespond(fact1.modelXbrl, nXs1[i], nXs2[i], dts2=fact2.modelXbrl): 
-                        matches = False
-                        break
-        elif aspect == Aspect.UNIT:
-            u1 = fact1.unit
-            u2 = fact2.unit
-            if (u1 is None) != (u2 is None):
-                matches = False
-            elif u1 is not None and u2 is not None and u1.measures != u2.measures:
-                matches = False
-        elif aspect == Aspect.DIMENSIONS:
+                        return False
+            return True
+        elif aspect == 10: # Aspect.DIMENSIONS:
             ''' (no implicit filtering on ALL dimensions for now)
             dimQnames1 = fact1.context.dimAspects
             dimQnames2 = fact2.context.dimAspects
@@ -349,58 +392,56 @@ def aspectMatches(xpCtx, fact1, fact2, aspects):
             '''
         elif isinstance(aspect, QName):
             from arelle.ModelInstanceObject import ModelDimensionValue
-            dimValue1 = fact1.context.dimValue(aspect)
-            dimValue2 = fact2.context.dimValue(aspect)
+            dimValue1 = c1.dimValue(aspect)
+            dimValue2 = c2.dimValue(aspect)
             if isinstance(dimValue1, ModelDimensionValue):
                 if dimValue1.isExplicit: 
                     if isinstance(dimValue2, QName):
                         if dimValue1.memberQname != dimValue2:
-                            matches = False
+                            return False
                     elif isinstance(dimValue2, ModelDimensionValue):
                         if dimValue2.isTyped:
-                            matches = False
+                            return False
                         elif dimValue1.memberQname != dimValue2.memberQname:
-                            matches = False 
+                            return False 
                     elif dimValue2 is None:
-                        matches = False
+                        return False
                 elif dimValue1.isTyped:
                     if isinstance(dimValue2, QName):
-                        matches = False
+                        return False
                     elif isinstance(dimValue2, ModelDimensionValue):
                         if dimValue2.isExplicit:
-                            matches = False
+                            return False
                         elif dimValue1.dimension.typedDomainElement in xpCtx.modelXbrl.modelFormulaEqualityDefinitions:
                             equalityDefinition = xpCtx.modelXbrl.modelFormulaEqualityDefinitions[dimValue1.dimension.typedDomainElement]
-                            matches = equalityDefinition.evalTest(xpCtx, fact1, fact2)
+                            return equalityDefinition.evalTest(xpCtx, fact1, fact2)
                         elif not XbrlUtil.nodesCorrespond(fact1.modelXbrl, dimValue1.typedMember, dimValue2.typedMember, dts2=fact2.modelXbrl):
-                            matches = False
+                            return False
                     elif dimValue2 is None:
-                        matches = False
+                        return False
             elif isinstance(dimValue1,QName): # first dim is default value of an explicit dim
                 if isinstance(dimValue2, QName): # second dim is default value of an explicit dim
                     # multi-instance does not consider member's qname here where it is a default
                     # only check if qnames match if the facts are from same instance
                     if fact1.modelXbrl == fact2.modelXbrl and dimValue1 != dimValue2:
-                        matches = False
+                        return False
                 elif isinstance(dimValue2, ModelDimensionValue):
                     if dimValue2.isTyped:
-                        matches = False
+                        return False
                     elif dimValue1 != dimValue2.memberQname:
-                        matches = False 
+                        return False 
                 elif dimValue2 is None: # no dim aspect for fact 2
                     if fact1.modelXbrl == fact2.modelXbrl: # only allowed for multi-instance
-                        matches = False
+                        return False
             elif dimValue1 is None:
                 # absent dim member from fact1 allowed if fact2 is default in different instance
                 if isinstance(dimValue2,QName):
                     if fact1.modelXbrl == fact2.modelXbrl:
-                        matches = False
+                        return False
                 elif dimValue2 is not None:
-                    matches = False
+                    return False
                 # else if both are None, matches True for single and multiple instance
-        if not matches: 
-            break
-    return matches
+    return True
 
 def evaluationIsUnnecessary(thisEval, otherEvals):
     # detects evaluations which are not different (duplicate) and extra fallback evaluations
@@ -796,7 +837,7 @@ class VariableBinding:
         for fact in self.facts:
             matched = False
             for partition in factsPartitions:
-                if aspectMatches(self.xpCtx, fact, partition[0], aspects):
+                if aspectsMatch(self.xpCtx, fact, partition[0], aspects):
                     partition.append(fact)
                     matched = True
                     break
@@ -813,7 +854,7 @@ class VariableBinding:
             for subPartition in subPartitions:
                 matchedInSubPartition = False
                 for fact2 in subPartition:
-                    if aspectMatches(self.xpCtx, fact, fact2, aspects):
+                    if aspectsMatch(self.xpCtx, fact, fact2, aspects):
                         matchedInSubPartition = True
                         break
                 if not matchedInSubPartition:
@@ -893,6 +934,9 @@ class VariableBinding:
         if aspect in aspectModelAspect: aspect = aspectModelAspect[aspect]
         return aspect in self.aspectsCovered
     
+    def aspectsNotCovered(self, aspects):
+        return set(a for a in aspects if not self.hasAspectValueCovered(a))
+    
     def hasAspectValueDefined(self, aspect):
         if aspect in aspectModelAspect: aspect = aspectModelAspect[aspect]
         return aspect in self.aspectsDefined
@@ -908,7 +952,7 @@ class VariableBinding:
         elif aspect == Aspect.LOCATION_RULE:
             return self.yieldedFact
         elif aspect == Aspect.CONCEPT:
-            return self.yieldedFact.concept.qname
+            return self.yieldedFact.qname
         elif self.yieldedFact.isTuple or self.yieldedFactContext is None:
             return None     #subsequent aspects don't exist for tuples
         elif aspect == Aspect.PERIOD:

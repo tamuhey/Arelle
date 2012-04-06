@@ -60,12 +60,12 @@ aspectModelAspect = {   # aspect of the model that corresponds to retrievable as
     }
 
 aspectModels = {
-     "dimensional": {
-             Aspect.LOCATION, Aspect.CONCEPT, Aspect.ENTITY_IDENTIFIER, Aspect.PERIOD, Aspect.UNIT,
+     "dimensional": {  # order by likelyhood of short circuting aspect match tests
+             Aspect.CONCEPT, Aspect.PERIOD, Aspect.UNIT, Aspect.LOCATION, Aspect.ENTITY_IDENTIFIER,
              Aspect.DIMENSIONS,
              Aspect.NON_XDT_SEGMENT, Aspect.NON_XDT_SCENARIO},
      "non-dimensional": {
-             Aspect.LOCATION, Aspect.CONCEPT, Aspect.ENTITY_IDENTIFIER, Aspect.PERIOD, Aspect.UNIT,
+             Aspect.CONCEPT, Aspect.PERIOD, Aspect.UNIT, Aspect.LOCATION, Aspect.ENTITY_IDENTIFIER,
              Aspect.COMPLETE_SEGMENT, Aspect.COMPLETE_SCENARIO},
      }
 
@@ -238,7 +238,11 @@ class ModelVariableSet(ModelFormulaResource):
 
     @property
     def groupFilterRelationships(self):
-        return self.modelXbrl.relationshipSet(XbrlConst.variableSetFilter).fromModelObject(self)
+        try:
+            return self._groupFilterRelationships
+        except AttributeError:
+            self._groupFilterRelationships = self.modelXbrl.relationshipSet(XbrlConst.variableSetFilter).fromModelObject(self)
+            return self._groupFilterRelationships
         
     @property
     def propertyView(self):
@@ -672,7 +676,17 @@ class ModelFactVariable(ModelVariable):
     
     @property
     def filterRelationships(self):
-        return self.modelXbrl.relationshipSet(XbrlConst.variableFilter).fromModelObject(self)
+        try:
+            return self._filterRelationships
+        except AttributeError:
+            rels = [] # order so conceptName filter is first (if any) (may want more sorting in future)
+            for rel in self.modelXbrl.relationshipSet(XbrlConst.variableFilter).fromModelObject(self):
+                if isinstance(rel.toModelObject,ModelConceptName):
+                    rels.insert(0, rel)  # put conceptName filters first
+                else:
+                    rels.append(rel)
+            self._filterRelationships = rels
+            return rels
     
     @property
     def propertyView(self):
@@ -874,6 +888,7 @@ class ModelAspectCover(ModelFilter):
         
     def dimAspectsCovered(self, varBinding):
         # if DIMENSIONS are provided then return all varBinding's dimensions less excluded dimensions
+        self.aspectsCovered  # must have aspectsCovered initialized before the rest of this method
         dimsCovered = set()
         if self.allDimensions:
             for varBoundAspect in varBinding.aspectsDefined:
@@ -912,12 +927,19 @@ class ModelBooleanFilter(ModelFilter):
     def filterRelationships(self):
         return self.modelXbrl.relationshipSet(XbrlConst.booleanFilter).fromModelObject(self)
     
+    def aspectsCovered(self, varBinding):
+        aspectsCovered = set()
+        for rel in self.filterRelationships:
+            if rel.isCovered:
+                _filter = rel.toModelObject
+                aspectsCovered |= _filter.aspectsCovered(varBinding)
+        return aspectsCovered
+        
 class ModelAndFilter(ModelBooleanFilter):
     def init(self, modelDocument):
         super(ModelAndFilter, self).init(modelDocument)
 
     def filter(self, xpCtx, varBinding, facts, cmplmt):
-        from arelle.FormulaEvaluator import filterFacts
         if self.filterRelationships:
             return filterFacts(xpCtx, varBinding, facts, self.filterRelationships, "and")
         else:
@@ -928,7 +950,6 @@ class ModelOrFilter(ModelBooleanFilter):
         super(ModelOrFilter, self).init(modelDocument)
 
     def filter(self, xpCtx, varBinding, facts, cmplmt):
-        from arelle.FormulaEvaluator import filterFacts
         if self.filterRelationships:
             return filterFacts(xpCtx, varBinding, facts, self.filterRelationships, "or")
         else:
@@ -976,6 +997,10 @@ class ModelConceptName(ModelFilter):
             return set()
     
     def filter(self, xpCtx, varBinding, facts, cmplmt):
+        if not cmplmt and not self.qnameExpressionProgs:
+            qnameFactsInInstance = xpCtx.modelXbrl.qnameFactsInInstance(facts) # finds either all or nonNil facts
+            if qnameFactsInInstance: # if optimizable qnamed all or nonNil facts
+                return [f for qn in self.conceptQnames for f in qnameFactsInInstance.get(qn, [])]
         return [fact for fact in facts 
                 if cmplmt ^ (fact.qname in self.conceptQnames | self.evalQnames(xpCtx,fact))] 
     
@@ -1348,7 +1373,6 @@ class ModelConceptRelation(ModelFilter):
         hasNoTest = self.test is None
         axis = self.axis
         isFromAxis = axis.startswith('parent') or axis.startswith('ancestor')
-        from arelle.FunctionXfi import concept_relationships
         relationships = concept_relationships(xpCtx, None, (sourceQname,
                                                             linkrole,
                                                             arcrole,
@@ -1548,7 +1572,6 @@ class ModelMatchFilter(ModelFilter):
         return super(ModelMatchFilter, self).variableRefs(None, varRefSet)
 
     def filter(self, xpCtx, varBinding, facts, cmplmt):
-        from arelle.FormulaEvaluator import aspectMatches
         aspect = self.aspect
         otherFact = xpCtx.inScopeVars.get(self.variable)
         # check that otherFact is a single fact or otherwise all match for indicated aspect
@@ -1749,10 +1772,12 @@ class ModelExplicitDimension(ModelFilter):
         
     @property
     def dimQname(self):
-        dimQname = XmlUtil.child(XmlUtil.child(self,XbrlConst.df,"dimension"), XbrlConst.df, "qname")
-        if dimQname is not None:
-            return qname( dimQname, XmlUtil.text(dimQname) )
-        return None
+        try:
+            return self._dimQname
+        except AttributeError:
+            dQn = XmlUtil.child(XmlUtil.child(self,XbrlConst.df,"dimension"), XbrlConst.df, "qname")
+            self._dimQname = qname( dQn, XmlUtil.text(dQn) ) if dQn is not None else None
+            return self._dimQname
     
     @property
     def dimQnameExpression(self):
@@ -1994,13 +2019,18 @@ class ModelRelativeFilter(ModelFilter):
         return varBinding.aspectsDefined
 
     def filter(self, xpCtx, varBinding, facts, cmplmt):
-        from arelle.FormulaEvaluator import aspectMatchFilter
-        return aspectMatchFilter(xpCtx, 
-                                 facts, 
-                                 (varBinding.aspectsDefined - varBinding.aspectsCovered), 
-                                 xpCtx.varBindings.get(self.variable), 
-                                 "relative",
-                                 varBinding)
+        aspectsUncovered = (varBinding.aspectsDefined - varBinding.aspectsCovered)
+        otherVarBinding = xpCtx.varBindings.get(self.variable)
+        hasOtherFactVar = otherVarBinding and otherVarBinding.isFactVar and not otherVarBinding.isFallback
+        otherFact = otherVarBinding.yieldedFact if hasOtherFactVar else None
+        return [fact for fact in facts 
+                if cmplmt ^ (hasOtherFactVar and
+                             aspectsMatch(xpCtx, otherFact, fact, aspectsUncovered) and
+                             all(aspectMatches(xpCtx, otherFact, fact, dimAspect)
+                                 for dimAspect in fact.context.dimAspects(xpCtx.defaultDimensionAspects)
+                                 if (not varBinding.hasAspectValueCovered(dimAspect) and
+                                     not otherVarBinding.hasAspectValueCovered(dimAspect)))
+                            )]
         
     @property
     def propertyView(self):
@@ -2324,7 +2354,6 @@ class ModelPrecisionFilter(ModelFilter):
         return self.get("minimum")
     
     def filter(self, xpCtx, varBinding, facts, cmplmt):
-        from arelle.ValidateXbrlCalcs import inferredPrecision
         minimum = self.minimum
         numMinimum = float('INF') if minimum == 'INF' else _INT(minimum)
         return [fact for fact in facts 
@@ -2580,3 +2609,7 @@ elementSubstitutionModelClass.update((
      (XbrlConst.qnCustomFunctionImplementation, ModelCustomFunctionImplementation),
      ))
 
+# import after other modules resolved to prevent circular references
+from arelle.FormulaEvaluator import filterFacts, aspectsMatch, aspectMatches
+from arelle.FunctionXfi import concept_relationships
+from arelle.ValidateXbrlCalcs import inferredPrecision

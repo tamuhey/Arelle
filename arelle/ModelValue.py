@@ -37,15 +37,21 @@ def qname(value, name=None, noPrefixIsNoNamespace=False, castException=None, pre
         if len(localName) == 0:
             localName = prefix
             prefix = None
+        namespaceDict = None
     else:
-        if name is not None:
+        if isinstance(name, dict):
+            namespaceURI = None
+            namespaceDict = name
+        elif name is not None:
             if name:  # len > 0
                 namespaceURI = value
             else:
                 namespaceURI = None
+            namespaceDict = None
             value = name
         else:
             namespaceURI = None
+            namespaceDict = None
         prefix,sep,localName = value.partition(":")
         if len(localName) == 0:
             #default namespace
@@ -55,6 +61,8 @@ def qname(value, name=None, noPrefixIsNoNamespace=False, castException=None, pre
                 return QName(None, None, localName)
     if namespaceURI:
         return QName(prefix, namespaceURI, localName)
+    elif namespaceDict and prefix in namespaceDict:
+        return QName(prefix, namespaceDict[prefix], localName)
     elif element is not None:
         from arelle import (XmlUtil)
         namespaceURI = XmlUtil.xmlns(element, prefix)
@@ -67,14 +75,14 @@ def qname(value, name=None, noPrefixIsNoNamespace=False, castException=None, pre
     return QName(prefix, namespaceURI, localName)
 
 class QName:
-    __slots__ = ("prefix", "namespaceURI", "localName", "hash")
+    __slots__ = ("prefix", "namespaceURI", "localName", "qnameValueHash")
     def __init__(self,prefix,namespaceURI,localName):
         self.prefix = prefix
         self.namespaceURI = namespaceURI
         self.localName = localName
-        self.hash = ((hash(namespaceURI) * 1000003) & 0xffffffff) ^ hash(localName)
+        self.qnameValueHash = ((hash(namespaceURI) * 1000003) & 0xffffffff) ^ hash(localName)
     def __hash__(self):
-        return self.hash
+        return self.qnameValueHash
     @property
     def clarkNotation(self):
         if self.namespaceURI:
@@ -93,14 +101,22 @@ class QName:
         if isinstance(other,_STR_BASE):
             # only compare nsnames {namespace}localname format, if other has same hash
             return self.__hash__() == other.__hash__() and self.clarkNotation == other
-        el
-        '''
-        if isinstance(other,QName):
-            return self.hash == other.hash and \
+        elif isinstance(other,QName):
+            return self.qnameValueHash == other.qnameValueHash and \
                     self.namespaceURI == other.namespaceURI and self.localName == other.localName
         elif isinstance(other,ModelObject):
             return self.namespaceURI == other.namespaceURI and self.localName == other.localName
+        '''
+        try:
+            return (self.qnameValueHash == other.qnameValueHash and 
+                    self.namespaceURI == other.namespaceURI and self.localName == other.localName)
+        except AttributeError:  # other may be a model object and not a QName
+            try:
+                return self.namespaceURI == other.namespaceURI and self.localName == other.localName
+            except AttributeError:
+                return False
         return False
+    
     def __ne__(self,other):
         return not self.__eq__(other)
     def __lt__(self,other):
