@@ -456,9 +456,20 @@ class ModelXbrl:
                             ref["href"] = file + "#" + XmlUtil.elementFragmentIdentifier(arg)
                             ref["sourceLine"] = arg.sourceline
                             ref["objectId"] = arg.objectId()
+                        elif isinstance(arg, (tuple,list)):
+                            name = arg[0]
+                            arg = arg[1]
+                            if isinstance(arg, ModelObject):
+                                ref["variable"] = name
+                                ref["href"] = file + "#" + XmlUtil.elementFragmentIdentifier(arg)
+                                ref["sourceLine"] = arg.sourceline
+                                ref["objectId"] = arg.objectId()
+                            else:
+                                ref = None
                         else:
                             ref["href"] = file
-                        refs.append(ref)
+                        if ref is not None:
+                            refs.append(ref)
                 extras["refs"] = refs
             elif argName == "results":
                 extras["results"] = argValue

@@ -129,12 +129,12 @@ def evaluateVar(xpCtx, varSet, varIndex, cachedFilteredFacts, uncoveredAspectFac
                 if msg is not None:
                     xpCtx.modelXbrl.info("assertion:value:" + (varSet.id or varSet.xlinkLabel or _("unlabeled variableSet")),
                                          msg.evaluate(xpCtx),
-                                         modelObject=list(xpCtx.inScopeVars.values()), 
+                                         modelObject=[(var, xpCtx.inScopeVars[var]) for var in xpCtx.inScopeVars], 
                                          results=result)
                 else:
                     xpCtx.modelXbrl.info("assertion:value:" +  (varSet.id or varSet.xlinkLabel or _("unlabeled variableSet")),
                                          "Assertion Result: %s" % result,
-                                         modelObject=list(xpCtx.inScopeVars.values()), 
+                                         modelObject=[(var, xpCtx.inScopeVars[var]) for var in xpCtx.inScopeVars], 
                                          results=result)
                 traceOf = "Value Assertion"
             if xpCtx.formulaOptions.traceVariableSetExpressionResult:
