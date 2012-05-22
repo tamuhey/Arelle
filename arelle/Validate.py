@@ -24,6 +24,12 @@ class ValidationException(Exception):
         return "{0}({1})={2}".format(self.code,self.severity,self.message)
     
 class Validate:
+    """Validation operations are separated from the objects that are validated, because the operations are 
+    complex, interwoven, and factored quite differently than the objects being validated. 
+    There are these validation modules at present: validation infrastructure, test suite and submission control, 
+    versioning report validation, XBRL base spec, dimensions, and formula linkbase validation, 
+    Edgar and Global Filer Manual validation. 
+    """
     def __init__(self, modelXbrl):
         self.modelXbrl = modelXbrl
         if modelXbrl.modelManager.validateDisclosureSystem:
@@ -174,10 +180,12 @@ class Validate:
                     modelXbrl = inputDTSes[None][0]
                     parameters = modelTestcaseVariation.parameters.copy()
                     for dtsName, inputDTS in inputDTSes.items():  # input instances are also parameters
-                        if dtsName:
-                            parameters[dtsName] = (None, inputDTS)
+                        if dtsName: # named instance
+                            parameters[dtsName] = (None, inputDTS) #inputDTS is a list of modelXbrl's (instance DTSes)
+                        elif len(inputDTS) > 1: # standard-input-instance with multiple instance documents
+                            parameters[XbrlConst.qnStandardInputInstance] = (None, inputDTS) # allow error detection in validateFormula
                     self.instValidator.validate(modelXbrl, parameters)
-                    if modelTestcaseVariation.resultIsInfoset:
+                    if modelTestcaseVariation.resultIsInfoset and self.modelXbrl.modelManager.validateInfoset:
                         infoset = ModelXbrl.load(self.modelXbrl.modelManager, 
                                                  modelTestcaseVariation.resultInfosetUri,
                                                    _("loading result infoset"), 
@@ -206,6 +214,7 @@ class Validate:
                     for inputDTSlist in inputDTSes.values():
                         for inputDTS in inputDTSlist:
                             inputDTS.close()
+                    del inputDTSes # dereference
                     if resultIsXbrlInstance and formulaOutputInstance and formulaOutputInstance.modelDocument:
                         expectedInstance = ModelXbrl.load(self.modelXbrl.modelManager, 
                                                    modelTestcaseVariation.resultXbrlInstanceUri,
@@ -218,7 +227,6 @@ class Validate:
                                 modelXbrl=testcase, id=modelTestcaseVariation.id, name=modelTestcaseVariation.name, 
                                 file=os.path.basename(modelTestcaseVariation.resultXbrlInstance))
                             modelTestcaseVariation.status = "result not loadable"
-                            expectedInstance.close()
                         else:   # compare facts
                             if len(expectedInstance.facts) != len(formulaOutputInstance.facts):
                                 formulaOutputInstance.error("formula:resultFactCounts",
@@ -227,13 +235,22 @@ class Validate:
                                          expectedFacts=len(expectedInstance.facts))
                             else:
                                 for fact in expectedInstance.facts:
-                                    if formulaOutputInstance.matchFact(fact) is None:
+                                    unmatchedFactsStack = []
+                                    if formulaOutputInstance.matchFact(fact, unmatchedFactsStack) is None:
+                                        if unmatchedFactsStack: # get missing nested tuple fact, if possible
+                                            missingFact = unmatchedFactsStack[-1]
+                                        else:
+                                            missingFact = fact
                                         formulaOutputInstance.error("formula:expectedFactMissing",
                                             _("Formula output missing expected fact %(fact)s"),
-                                            modelXbrl=fact, fact=fact.qname)
+                                            modelXbrl=missingFact, fact=missingFact.qname)
+                            # for debugging uncomment next line to save generated instance document
+                            # formulaOutputInstance.saveInstance(r"c:\temp\test-out-inst.xml")
+                        expectedInstance.close()
+                        del expectedInstance # dereference
                         self.determineTestStatus(modelTestcaseVariation, formulaOutputInstance)
                         formulaOutputInstance.close()
-                        formulaOutputInstance = None
+                        del formulaOutputInstance
                 # update ui thread via modelManager (running in background here)
                 self.modelXbrl.modelManager.viewModelObject(self.modelXbrl, modelTestcaseVariation.objectId())
                     

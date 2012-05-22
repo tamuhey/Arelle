@@ -8,7 +8,6 @@
    :license: Apache-2.
    :synopsis: Common controller class to initialize for platform and setup common logger functions
 """
-from __future__ import print_function
 from arelle import PythonUtil # define 2.x or 3.x string types
 import tempfile, os, io, sys, logging, gettext, json
 from arelle import ModelManager
@@ -27,9 +26,60 @@ class Cntlr:
     - Context menu click event (TKinter)
     - Clipboard presence
     - Update URL
-    - Reloads proir config (pickled) user preferences
+    - Reloads prior config user preferences (saved in json file)
     - Sets up proxy and web cache
     - Sets up logging
+    
+    A controller subclass object is instantiated, CntlrWinMain for the GUI and CntlrCmdLine for command 
+    line batch operation.  (Other controller modules and/or objects may be subordinate to a CntlrCmdLine,
+    such as CntlrWebMain, and CntlrQuickBooks).
+    
+    This controller base class initialization sets up specifics such as directory paths, 
+    for its environment (Mac, Windows, or Unix), sets up a web file cache, and retrieves a 
+    configuration dictionary of prior user choices (such as window arrangement, validation choices, 
+    and proxy settings).
+    
+    The controller sub-classes (such as CntlrWinMain, CntlrCmdLine, and CntlrWebMain) most likely will 
+    load an XBRL related object, such as an XBRL instance, taxonomy, 
+    testcase file, versioning report, or RSS feed, by requesting the model manager to load and 
+    return a reference to its modelXbrl object.  The modelXbrl object loads the entry modelDocument 
+    object(s), which in turn load documents they discover (for the case of instance, taxonomies, and 
+    versioning reports), but defer loading instances for test case and RSS feeds.  The model manager 
+    may be requested to validate the modelXbrl object, or views may be requested as below.  
+    (Validating a testcase or RSS feed will validate the test case variations or RSS feed items, one by one.)
+    
+        .. attribute:: isMac
+        
+        True if system is MacOS
+        
+        .. attribute:: isMSW
+        
+        True if system is Microsoft Windows
+        
+        .. attribute:: userAppDir
+        
+        Full pathname to application directory (for persistent json files, cache, etc).
+        
+        .. attribute:: configDir
+        
+        Full pathname to config directory as installed (validation options, redirection URLs, common xsds).
+        
+        .. attribute:: imagesDir
+        
+        Full pathname to images directory as installed (images for GUI and web server).
+        
+        .. attribute:: localeDir
+        
+        Full pathname to locale directory as installed (for support of gettext localization feature).
+        
+        ... attribute:: hasClipboard
+        
+        True if a system platform clipboard is implemented on current platform
+        
+        ... attribute:: updateURL
+        
+        URL string of application download file (on arelle.org server).  Usually redirected to latest released application installable module.
+        
     """
     __version__ = "1.0.0"
     
@@ -133,13 +183,7 @@ class Cntlr:
             }
             
         # start language translation for domain
-        try:
-            gettext.translation("arelle", 
-                                self.localeDir, 
-                                getLanguageCodes(self.config.get("userInterfaceLangOverride",None))).install()
-        except Exception as msg:
-            gettext.install("arelle", 
-                            self.localeDir)
+        self.setUiLanguage(self.config.get("userInterfaceLangOverride",None), fallbackToDefault=True)
             
         from arelle.WebCache import WebCache
         self.webCache = WebCache(self, self.config.get("proxySettings"))
@@ -150,11 +194,23 @@ class Cntlr:
  
         self.startLogging(logFileName, logFileMode, logFileEncoding, logFormat)
         
-    def startLogging(self, logFileName=None, logFileMode=None, logFileEncoding=None, logFormat=None):
-        if logFileName: # use default logging
+    def setUiLanguage(self, lang, fallbackToDefault=False):
+        try:
+            gettext.translation("arelle", 
+                                self.localeDir, 
+                                getLanguageCodes(lang)).install()
+        except Exception:
+            if fallbackToDefault:
+                gettext.install("arelle", 
+                                self.localeDir)
+        
+    def startLogging(self, logFileName=None, logFileMode=None, logFileEncoding=None, logFormat=None, logger=None):
+        if logger is not None:
+            self.logger = logger # custom logger
+        elif logFileName: # use default logging
             self.logger = logging.getLogger("arelle")
-            if logFileName == "logToPrint":
-                self.logHandler = LogToPrintHandler()
+            if logFileName in ("logToPrint", "logToStdErr"):
+                self.logHandler = LogToPrintHandler(logFileName)
             elif logFileName == "logToBuffer":
                 self.logHandler = LogToBufferHandler()
             elif logFileName.endswith(".xml"):
@@ -164,29 +220,44 @@ class Cntlr:
                 self.logHandler = logging.FileHandler(filename=logFileName, 
                                                       mode=logFileMode if logFileMode else "w", 
                                                       encoding=logFileEncoding if logFileEncoding else "utf-8")
-            self.logHandler.level = logging.DEBUG
             self.logHandler.setFormatter(LogFormatter(logFormat if logFormat else "%(asctime)s [%(messageCode)s] %(message)s - %(file)s\n"))
             self.logger.addHandler(self.logHandler)
+            self.logger.setLevel(logging.DEBUG)
         else:
             self.logger = None
                         
     def addToLog(self, message, messageCode="", file=""):
-        """.. method:: addToLog(message, messageCode="", file="")
-           Add a simple info message to the default logger"""
+        """Add a simple info message to the default logger
+           
+        :param message: Text of message to add to log.
+        :type message: str
+        :param messageCode: Message code (e.g., a prefix:id of a standard error)
+        :param messageCode: str
+        :param file: File name (and optional line numbers) pertaining to message
+        :type file: str
+        """
         if self.logger is not None:
             self.logger.info(message, extra={"messageCode":messageCode,"refs":[{"href": file}]})
         else:
             print(message) # allows printing on standard out
             
     def showStatus(self, message, clearAfter=None):
-        """.. method:: addToLog(message, clearAfter=None)
-           Dummy for subclasses to specialize, provides user feedback on status line of GUI or web page"""
+        """Dummy method for specialized controller classes to specialize, 
+        provides user feedback on status line of GUI or web page
+        
+        :param message: Message to display on status widget.
+        :type message: str
+        :param clearAfter: Time, in ms., after which to clear the message (e.g., 5000 for 5 sec.)
+        :type clearAfter: int
+        """
         pass
     
     def close(self, saveConfig=False):
-        """.. method:: close(saveConfig=False)
-           Close controller and its logger, optionally saaving the user preferences configuration
-           :param saveConfig: save the user preferences configuration"""
+        """Closes the controller and its logger, optionally saving the user preferences configuration
+           
+           :param saveConfig: save the user preferences configuration
+           :type saveConfig: bool
+        """
         PluginManager.save(self)
         if saveConfig:
             self.saveConfig()
@@ -194,48 +265,62 @@ class Cntlr:
             self.logHandler.close()
         
     def saveConfig(self):
-        """.. method:: saveConfig()
-           Save user preferences configuration (in a pickle file)."""
+        """Save user preferences configuration (in json configuration file)."""
         with io.open(self.configJsonFile, 'wt', encoding='utf-8') as f:
-            json.dump(self.config, f, indent=2)
+            jsonStr = _STR_UNICODE(json.dumps(self.config, ensure_ascii=False, indent=2)) # might not be unicode in 2.7
+            f.write(jsonStr)  # 2.7 getss unicode this way
             
     # default non-threaded viewModelObject                 
     def viewModelObject(self, modelXbrl, objectId):
-        """.. method:: viewModelObject(modelXbrl, objectId)
-           Notification to watching views to show and highlight selected object
-           :param modelXbrl: ModelXbrl whose views are to be notified
-           :param objectId: Selected object."""
+        """Notify any watching views to show and highlight selected object.  Generally used
+        to scroll list control to object and highlight it, or if tree control, to find the object
+        and open tree branches as needed for visibility, scroll to and highlight the object.
+           
+        :param modelXbrl: ModelXbrl (DTS) whose views are to be notified
+        :type modelXbrl: ModelXbrl
+        :param objectId: Selected object id (string format corresponding to ModelObject.objectId() )
+        :type objectId: str
+        """
         modelXbrl.viewModelObject(objectId)
             
     def reloadViews(self, modelXbrl):
-        """.. method:: reloadViews(modelXbrl)
-           Notification to reload views (probably due to change within modelXbrl).  Dummy
-           for subclasses to specialize when they have a GUI or web page.
-           :param modelXbrl: ModelXbrl whose views are to be reloaded"""
+        """Notification to reload views (probably due to change within modelXbrl).  Dummy
+        for subclasses to specialize when they have a GUI or web page.
+           
+        :param modelXbrl: ModelXbrl (DTS) whose views are to be notified
+        :type modelXbrl: ModelXbrl
+        """
         pass
     
     def rssWatchUpdateOption(self, **args):
-        """.. method:: rssWatchUpdateOption(**args)
-           Notification to change rssWatch options, as passed in, usually from a modal dialog."""
+        """Notification to change rssWatch options, as passed in, usually from a modal dialog."""
         pass
         
     # default web authentication password
     def internet_user_password(self, host, realm):
-        """.. method:: internet_user_password(self, host, realm)
-           Request (for an interactive UI or web page) to obtain user ID and password (usually for a proxy 
-           or when getting a web page that requires entry of a password).
-           :param host: The host that is requesting the password
-           :param realm: The domain on the host that is requesting the password
-           :rtype string: xzzzzzz"""
+        """Request (for an interactive UI or web page) to obtain user ID and password (usually for a proxy 
+        or when getting a web page that requires entry of a password).  This function must be overridden
+        in a subclass that provides interactive user interface, as the superclass provides only a dummy
+        method. 
+           
+        :param host: The host that is requesting the password
+        :type host: str
+        :param realm: The domain on the host that is requesting the password
+        :type realm: str
+        :returns: tuple -- ('myusername','mypassword')
+        """
         return ('myusername','mypassword')
     
     # if no text, then return what is on the clipboard, otherwise place text onto clipboard
     def clipboardData(self, text=None):
-        """.. method:: clipboardData(self, text=None)
-           Places text onto the clipboard (if text is not None), otherwise retrieves and returns text from the clipboard.
-           Only supported for those platforms that have clipboard support in the current python implementation (macOS
-           or ActiveState Windows Python).
-           :param text: Text to place onto clipboard if not None, otherwise retrieval of text from clipboard."""
+        """Places text onto the clipboard (if text is not None), otherwise retrieves and returns text from the clipboard.
+        Only supported for those platforms that have clipboard support in the current python implementation (macOS
+        or ActiveState Windows Python).
+           
+        :param text: Text to place onto clipboard if not None, otherwise retrieval of text from clipboard.
+        :type text: str
+        :returns: str -- text from clipboard if parameter text is None, otherwise returns None if text is provided
+        """
         if self.hasClipboard:
             try:
                 if sys.platform == "darwin":
@@ -284,7 +369,10 @@ class LogFormatter(logging.Formatter):
                                                        for line in sorted(lines, key=lambda l: l)
                                                        if line)
                                 for file, lines in sorted(fileLines.items()))
-        formattedMessage = super(LogFormatter, self).format(record)
+        try:
+            formattedMessage = super(LogFormatter, self).format(record)
+        except KeyError as ex:
+            formattedMessage = "Message: " + record.args.get('error','') + " \nMessage log error: " + str(ex)
         del record.file
         return formattedMessage
 
@@ -295,12 +383,26 @@ class LogToPrintHandler(logging.Handler):
     A log handler that emits log entries to standard out as they are logged.
     
     CAUTION: Output is utf-8 encoded, which is fine for saving to files, but may not display correctly in terminal windows.
+
+    :param logOutput: 'logToStdErr' to cause log printint to stderr instead of stdout
+    :type logOutput: str
     """
+    def __init__(self, logOutput):
+        super(LogToPrintHandler, self).__init__()
+        if logOutput == "logToStdErr":
+            self.logFile = sys.stderr
+        else:
+            self.logFile = None
+        
     def emit(self, logRecord):
         if isPy3:
-            print(self.format(logRecord))
+            logEntry = self.format(logRecord)
         else:
-            print(self.format(logRecord).encode("utf-8"))
+            logEntry = self.format(logRecord).encode("utf-8")
+        if self.logFile:
+            print(logEntry, file=sys.stderr)
+        else:
+            print(logEntry)
 
 class LogHandlerWithXml(logging.Handler):        
     def __init__(self):
@@ -359,8 +461,10 @@ class LogToBufferHandler(LogHandlerWithXml):
         pass # do nothing
     
     def getXml(self):
-        """.. method:: getXml()
-           Returns an XML document (as a string) representing the messages in the log buffer, and clears the buffer."""
+        """Returns an XML document (as a string) representing the messages in the log buffer, and clears the buffer.
+        
+        :reeturns: str -- XML document string of messages in the log buffer.
+        """
         xml = ['<?xml version="1.0" encoding="utf-8"?>\n',
                '<log>']
         for logRec in self.logRecordBuffer:
@@ -370,8 +474,10 @@ class LogToBufferHandler(LogHandlerWithXml):
         return '\n'.join(xml)
     
     def getJson(self):
-        """.. method:: getJson()
-           Returns an JSON string representing the messages in the log buffer, and clears the buffer."""
+        """Returns an JSON string representing the messages in the log buffer, and clears the buffer.
+        
+        :returns: str -- json representation of messages in the log buffer
+        """
         entries = []
         for logRec in self.logRecordBuffer:
             message = { "text": self.format(logRec) }
@@ -387,16 +493,21 @@ class LogToBufferHandler(LogHandlerWithXml):
         return json.dumps( {"log": entries} )
     
     def getLines(self):
-        """.. method:: getLines()
-           Returns a list of the message strings in the log buffer, and clears the buffer."""
+        """Returns a list of the message strings in the log buffer, and clears the buffer.
+        
+        :returns: [str] -- list of strings representing messages corresponding to log buffer entries
+        """
         lines = [self.format(logRec) for logRec in self.logRecordBuffer]
         self.logRecordBuffer = []
         return lines
     
     def getText(self, separator='\n'):
-        """.. method:: getText()
-           :param separator: Line separator (default is platform's newline)
-           Returns a text string of the messages in the log buffer, and clears the buffer."""
+        """Returns a string of the lines in the log buffer, separated by newline or provided separator.
+        
+        :param separator: Line separator (default is platform os newline character)
+        :type separator: str
+        :returns: str -- joined lines of the log buffer.
+        """
         return separator.join(self.getLines())
     
     def emit(self, logRecord):

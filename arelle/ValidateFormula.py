@@ -106,6 +106,9 @@ def executeCallTest(val, name, callTuple, testTuple):
                     val.modelXbrl.error("cfcn:testFail",
                                         _("Test %(name)s result %(result)s"), 
                                         modelObject=testTuple[1], name=name, result=str(testResult))
+                    
+            xpathContext.close()  # dereference
+
         except XPathContext.XPathException as err:
             val.modelXbrl.error(err.code,
                 _("%(name)s evaluation error: %(error)s \n%(errorSource)s"),
@@ -198,6 +201,7 @@ def validate(val):
     # xpathContext is needed for filter setup for expressions such as aspect cover filter
     # determine parameter values
     xpathContext = XPathContext.create(val.modelXbrl)
+    xpathContext.parameterQnames = parameterQnames  # needed for formula filters to determine variable dependencies
     for paramQname in orderedParameters:
         modelParameter = val.modelXbrl.qnameParameters[paramQname]
         if not isinstance(modelParameter, ModelInstance):
@@ -224,6 +228,21 @@ def validate(val):
                 val.modelXbrl.error("xbrlve:parameterTypeMismatch" if err.code == "err:FORG0001" else err.code,
                     _("Parameter \n%(name)s \nException: \n%(error)s"), 
                     modelObject=modelParameter, name=paramQname, error=err.message)
+        else: # is a modelInstance
+            if val.parameters and paramQname in val.parameters:
+                instanceModelXbrls = val.parameters[paramQname][1]
+                instanceUris = set()
+                for instanceModelXbrl in instanceModelXbrls:
+                    if instanceModelXbrl.uri in instanceUris:
+                        val.modelXbrl.error("xbrlvarinste:inputInstanceDuplication",
+                            _("Input instance resource %(instName)s has multiple XBRL instances %(uri)s"), 
+                            modelObject=modelParameter, instName=paramQname, uri=instanceModelXbrl.uri)
+                    instanceUris.add(instanceModelXbrl.uri)
+        if val.parameters and XbrlConst.qnStandardInputInstance in val.parameters: # standard input instance has
+            if len(val.parameters[XbrlConst.qnStandardInputInstance][1]) != 1:
+                val.modelXbrl.error("xbrlvarinste:standardInputInstanceNotUnique",
+                    _("Standard input instance resource parameter has multiple XBRL instances"), 
+                    modelObject=modelParameter)
     val.modelXbrl.profileActivity("... parameter checks and select evaluation", minTimeToShow=1.0)
 
     produceOutputXbrlInstance = False
@@ -238,6 +257,7 @@ def validate(val):
                 if isinstance(instance, ModelInstance):
                     if instanceQname is None:
                         instanceQname = instance.qname
+                        modelVariableSet.fromInstanceQnames = {instanceQname} # required if referred to by variables scope chaining
                     else:
                         val.modelXbrl.info("arelle:multipleOutputInstances",
                             _("Multiple output instances for formula %(xlinkLabel)s, to names %(instanceTo)s, %(instanceTo2)s"),
@@ -246,6 +266,7 @@ def validate(val):
             if instanceQname is None: 
                 instanceQname = XbrlConst.qnStandardOutputInstance
                 instanceQnames.add(instanceQname)
+                modelVariableSet.fromInstanceQnames = None # required if referred to by variables scope chaining
             modelVariableSet.outputInstanceQname = instanceQname
             if val.validateSBRNL:
                 val.modelXbrl.error("SBR.NL.2.3.9.03",
@@ -392,6 +413,9 @@ def validate(val):
         for varqname in orderedNameList:
             if varqname in qnameRels:
                 modelVariableSet.orderedVariableRelationships.append(qnameRels[varqname])
+        
+        orderedNameSet.clear()       
+        del orderedNameList[:]  # dereference            
                 
         # check existence assertion variable dependencies
         if isinstance(modelVariableSet, ModelExistenceAssertion):
@@ -440,7 +464,8 @@ def validate(val):
                 val.modelXbrl.warning("arelle:variableSetFilterCovered",
                     _("Variable set %(xlinkLabel)s, filter %(filterLabel)s, cannot be covered"),
                      modelObject=varSetFilter, xlinkLabel=modelVariableSet.xlinkLabel, filterLabel=varSetFilter.xlinkLabel)
-                modelRel._isCovered = False # block group filter from being able to covere
+                modelRel._isCovered = False # block group filter from being able to covered
+                
             for depVar in varSetFilter.variableRefs():
                 if depVar in qnameRels and isinstance(qnameRels[depVar].toModelObject,ModelVariable):
                     val.modelXbrl.error("xbrlve:factVariableReferenceNotAllowed",
@@ -450,6 +475,13 @@ def validate(val):
         # check aspects of formula
         if isinstance(modelVariableSet, ModelFormula):
             checkFormulaRules(val, modelVariableSet, nameVariables)
+
+        nameVariables.clear() # dereference
+        qnameRels.clear()
+        definedNamesSet.clear()
+        variableDependencies.clear()
+        varSetInstanceDependencies.clear()
+
     val.modelXbrl.profileActivity("... assertion and formula checks and compilation", minTimeToShow=1.0)
             
     # determine instance dependency order
@@ -492,6 +524,10 @@ def validate(val):
                     _("Unresolved dependencies of an assertion's variables on instances %(dependencies)s"),
                     dependencies=str(_DICT_SET(depInsts) - stdInpInst) )
             '''
+        elif instqname in depInsts: # check for direct cycle
+            val.modelXbrl.error("xbrlvarinste:instanceVariableRecursionCycle",
+                _("Cyclic dependencies of instance %(name)s produced by its own variables"),
+                modelObject=val.modelXbrl, name=instqname )
 
     if formulaOptions.traceVariablesOrder and len(orderedInstancesList) > 1:
         val.modelXbrl.info("formula:trace",
@@ -527,9 +563,9 @@ def validate(val):
     for instanceQname in instanceQnames:
         if (instanceQname not in (XbrlConst.qnStandardInputInstance,XbrlConst.qnStandardOutputInstance) and
             val.parameters and instanceQname in val.parameters):
-            namedInstance = val.parameters[instanceQname][1][0]
-            ValidateXbrlDimensions.loadDimensionDefaults(namedInstance)
-            xpathContext.defaultDimensionAspects |= _DICT_SET(namedInstance.qnameDimensionDefaults.keys())
+            for namedInstance in val.parameters[instanceQname][1]:
+                ValidateXbrlDimensions.loadDimensionDefaults(namedInstance)
+                xpathContext.defaultDimensionAspects |= _DICT_SET(namedInstance.qnameDimensionDefaults.keys())
 
     # check for variable set dependencies across output instances produced
     for instanceQname, modelVariableSets in instanceProducingVariableSets.items():
@@ -566,7 +602,7 @@ def validate(val):
         if instanceQname == XbrlConst.qnStandardInputInstance:
             continue    # always present the standard way
         if val.parameters and instanceQname in val.parameters:
-            namedInstance = val.parameters[instanceQname][1]
+            namedInstance = val.parameters[instanceQname][1] # this is a sequence
         else:   # empty intermediate instance 
             uri = val.modelXbrl.modelDocument.filepath[:-4] + "-output-XBRL-instance"
             if instanceQname != XbrlConst.qnStandardOutputInstance:
@@ -584,6 +620,12 @@ def validate(val):
     val.modelXbrl.profileActivity("... output instances setup", minTimeToShow=1.0)
         
     val.modelXbrl.modelManager.showStatus(_("running formulae"))
+    
+    runIDs = (formulaOptions.runIDs or '').split()
+    if runIDs:
+        val.modelXbrl.info("formula:trace",
+                           _("Formua/assertion IDs restriction: %(ids)s"), 
+                           modelXbrl=val.modelXbrl, ids=', '.join(runIDs))
     # evaluate consistency assertions
     
     # evaluate variable sets not in consistency assertions
@@ -591,13 +633,19 @@ def validate(val):
         for modelVariableSet in instanceProducingVariableSets[instanceQname]:
             # produce variable evaluations if no dependent variables-scope relationships
             if not val.modelXbrl.relationshipSet(XbrlConst.variablesScope).toModelObject(modelVariableSet):
-                from arelle.FormulaEvaluator import evaluate
-                try:
-                    evaluate(xpathContext, modelVariableSet)
-                except XPathContext.XPathException as err:
-                    val.modelXbrl.error(err.code,
-                        _("Variable set \n%(variableSet)s \nException: \n%(error)s"), 
-                        modelObject=modelVariableSet, variableSet=str(modelVariableSet), error=err.message)
+                if (not runIDs or 
+                    modelVariableSet.id in runIDs or
+                    (modelVariableSet.hasConsistencyAssertion and 
+                     any(modelRel.fromModelObject.id in runIDs
+                         for modelRel in val.modelXbrl.relationshipSet(XbrlConst.consistencyAssertionFormula).toModelObject(modelVariableSet)
+                         if isinstance(modelRel.fromModelObject, ModelConsistencyAssertion)))):
+                    from arelle.FormulaEvaluator import evaluate
+                    try:
+                        evaluate(xpathContext, modelVariableSet)
+                    except XPathContext.XPathException as err:
+                        val.modelXbrl.error(err.code,
+                            _("Variable set \n%(variableSet)s \nException: \n%(error)s"), 
+                            modelObject=modelVariableSet, variableSet=str(modelVariableSet), error=err.message)
             
     # log assertion result counts
     asserTests = {}
@@ -634,6 +682,15 @@ def validate(val):
         
     val.modelXbrl.modelManager.showStatus(_("formulae finished"), 2000)
         
+    instanceProducingVariableSets.clear() # dereference
+    parameterQnames.clear()
+    instanceQnames.clear()
+    parameterDependencies.clear()
+    instanceDependencies.clear()
+    dependencyResolvedParameters.clear()
+    orderedInstancesSet.clear()
+    del orderedParameters, orderedInstances, orderedInstancesList
+    xpathContext.close()  # dereference everything
 
 def checkVariablesScopeVisibleQnames(val, nameVariables, definedNamesSet, modelVariableSet):
     for visibleVarSetRel in val.modelXbrl.relationshipSet(XbrlConst.variablesScope).toModelObject(modelVariableSet):
