@@ -122,6 +122,7 @@ variable = "http://xbrl.org/2008/variable"
 qnVariableSet = qname("{http://xbrl.org/2008/variable}variable:variableSet")
 qnVariableVariable = qname("{http://xbrl.org/2008/variable}variable:variable")
 qnVariableFilter = qname("{http://xbrl.org/2008/variable}variable:filter")
+qnVariableFilterArc = qname("{http://xbrl.org/2008/variable}variable:variableFilterArc")
 qnParameter = qname("{http://xbrl.org/2008/variable}variable:parameter")
 qnFactVariable = qname("{http://xbrl.org/2008/variable}variable:factVariable")
 qnGeneralVariable = qname("{http://xbrl.org/2008/variable}variable:generalVariable")
@@ -256,12 +257,18 @@ qnEuAxisCoord = qname("{http://www.eurofiling.info/2010/rendering}rendering:axis
 table = "http://xbrl.org/2011/table"
 tableAxis = "http://xbrl.org/arcrole/2011/table-axis"
 tableFilter = "http://xbrl.org/arcrole/2011/table-filter"
+tableAxisSubtree = "http://xbrl.org/arcrole/2011/axis-subtree"
+tableAxisFilter = "http://xbrl.org/arcrole/2011/axis-filter"
+tableTupleContent = "http://xbrl.org/arcrole/2011/axis/tuple-content"
 qnTableTable = qname("{http://xbrl.org/2011/table}table:table")
-qnTableAspectRuleAxis = qname("{http://xbrl.org/2011/table}table:aspectRuleAxis")
-qnTableAspectRuleAxisMember = qname("{http://xbrl.org/2011/table}table:aspectRuleAxisMember")
+qnTableCompositionAxis = qname("{http://xbrl.org/2011/table}table:compositionAxis")
 qnTableFilterAxis = qname("{http://xbrl.org/2011/table}table:filterAxis")
-aspectRuleAxisMember = "http://xbrl.org/arcrole/2011/axis/aspectRule-axis-member"
-axisFilter = "http://xbrl.org/arcrole/2011/axis/axis-filter"
+qnTableConceptRelationshipAxis = qname("{http://xbrl.org/2011/table}table:conceptRelationshipAxis")
+qnTableDimensionRelationshipAxis = qname("{http://xbrl.org/2011/table}table:dimensionRelationshipAxis")
+qnTableRuleAxis = qname("{http://xbrl.org/2011/table}table:ruleAxis")
+qnTablePredefinedAxis = qname("{http://xbrl.org/2011/table}table:predefinedAxis")
+qnTableSelectionAxis = qname("{http://xbrl.org/2011/table}table:selectionAxis")
+qnTableTupleAxis = qname("{http://xbrl.org/2011/table}table:tupleAxis")
 
 xdtSchemaErrorNS = "http://www.xbrl.org/2005/genericXmlSchemaError"
 errMsgPrefixNS = {
@@ -448,7 +455,8 @@ def isDimensionArcrole(arcrole):
     return arcrole.startswith("http://xbrl.org/int/dim/arcrole/")
 
 def isTableRenderingArcrole(arcrole):
-    return arcrole in (euTableAxis, euAxisMember, tableAxis, tableFilter, aspectRuleAxisMember, axisFilter)
+    return arcrole in (euTableAxis, euAxisMember, 
+                       tableAxis, tableFilter, tableAxisSubtree, tableAxisFilter, tableTupleContent)
    
 def isFormulaArcrole(arcrole):
     return arcrole in {"http://xbrl.org/arcrole/2008/assertion-set",

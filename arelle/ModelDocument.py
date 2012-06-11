@@ -4,14 +4,16 @@ Created on Oct 3, 2010
 @author: Mark V Systems Limited
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
-import os
+import os, sys
 from lxml import etree
+from xml.sax import SAXParseException
 from arelle import (XbrlConst, XmlUtil, UrlUtil, ValidateFilingText, XmlValidate)
 from arelle.ModelObject import ModelObject
 from arelle.ModelValue import qname
 from arelle.ModelDtsObject import ModelLink, ModelResource, ModelRelationship
 from arelle.ModelInstanceObject import ModelFact
 from arelle.ModelObjectFactory import parser
+from arelle.PluginManager import pluginClassMethods
 
 def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDiscovered=False, isIncluded=None, namespace=None, reloadCache=False):
     """Returns a new modelDocument, performing DTS discovery for instance, inline XBRL, schema, 
@@ -86,6 +88,12 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
         else:
             file, _encoding = modelXbrl.fileSource.file(filepath)
         _parser, _parserLookupName, _parserLookupClass = parser(modelXbrl,filepath)
+        xmlDocument = None
+        isPluginParserDocument = False
+        for pluginMethod in pluginClassMethods("ModelDocument.CustomLoader"):
+            modelDocument = pluginMethod(modelXbrl, file, mappedUri, filepath)
+            if modelDocument is not None:
+                return modelDocument
         xmlDocument = etree.parse(file,parser=_parser,base_url=filepath)
         file.close()
     except (EnvironmentError, KeyError) as err:  # missing zip file raises KeyError
@@ -100,6 +108,7 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
                 modelObject=referringElement, fileName=os.path.basename(uri), error=str(err))
         return None
     except (etree.LxmlError,
+            SAXParseException,
             ValueError) as err:  # ValueError raised on bad format of qnames, xmlns'es, or parameters
         if file:
             file.close()
@@ -126,6 +135,17 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
         # type classification
         if ns == XbrlConst.xsd and ln == "schema":
             type = Type.SCHEMA
+            if not isEntry and not isIncluded:
+                # check if already loaded under a different url
+                targetNamespace = rootNode.get("targetNamespace")
+                if targetNamespace and modelXbrl.namespaceDocs.get(targetNamespace):
+                    otherModelDoc = modelXbrl.namespaceDocs[targetNamespace][0]
+                    if otherModelDoc.basename == os.path.basename(uri):
+                        modelXbrl.urlDocs[uri] = otherModelDoc
+                        modelXbrl.warning("info:duplicatedSchema",
+                                _("Schema file with same targetNamespace %(targetNamespace)s loaded from %(fileName)s and %(otherFileName)s"),
+                                modelObject=referringElement, targetNamespace=targetNamespace, fileName=uri, otherFileName=otherModelDoc.uri)
+                        return otherModelDoc 
         elif ns == XbrlConst.link:
             if ln == "linkbase":
                 type = Type.LINKBASE
@@ -365,67 +385,67 @@ class ModelDocument:
     :param xmlDocument: lxml parsed xml document tree model of lxml proxy objects
     :type xmlDocument: lxml document
 
-        ... attribute:: modelDocument
+        .. attribute:: modelDocument
         
         Self (provided for consistency with modelObjects)
 
-        ... attribute:: modelXbrl
+        .. attribute:: modelXbrl
         
         The owning modelXbrl
 
-        ... attribute:: type
+        .. attribute:: type
         
         The enumerated document type
 
-        ... attribute:: uri
+        .. attribute:: uri
 
         Uri as discovered
 
-        ... attribute:: filepath
+        .. attribute:: filepath
         
         File path as loaded (e.g., from web cache on local drive)
 
-        ... attribute:: basename
+        .. attribute:: basename
         
         Python basename (last segment of file path)
 
-        ... attribute:: xmlDocument
+        .. attribute:: xmlDocument
         
         The lxml tree model of xml proxies
 
-        ... attribute:: targetNamespace
+        .. attribute:: targetNamespace
         
         Target namespace (if a schema)
 
-        ... attribute:: objectIndex
+        .. attribute:: objectIndex
         
         Position in lxml objects table, for use as a surrogate
 
-        ... attribute:: referencesDocument
+        .. attribute:: referencesDocument
         
         Dict of referenced documents, key is the modelDocument, value is why loaded (import, include, href)
 
-        ... attribute:: idObjects
+        .. attribute:: idObjects
         
         Dict by id of modelObjects in document
 
-        ... attribute:: modelObjects
+        .. attribute:: modelObjects
         
         List of modelObjects discovered in document in document order
 
-        ... attribute:: hrefObjects
+        .. attribute:: hrefObjects
         
         List of (modelObject, modelDocument, id) for each xlink:href
 
-        ... attribute:: schemaLocationElements
+        .. attribute:: schemaLocationElements
         
         Set of modelObject elements that have xsi:schemaLocations
 
-        ... attribute:: referencedNamespaces
+        .. attribute:: referencedNamespaces
         
         Set of referenced namespaces (by import, discovery, etc)
 
-        ... attribute:: inDTS
+        .. attribute:: inDTS
         
         Qualifies as a discovered schema per XBRL 2.1
     """

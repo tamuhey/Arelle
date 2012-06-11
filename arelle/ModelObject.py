@@ -8,6 +8,8 @@ Refactored on Jun 11, 2011 to ModelDtsObject, ModelInstanceObject, ModelTestcase
 from lxml import etree
 from collections import namedtuple
 
+emptySet = set()
+
 class ModelObject(etree.ElementBase):
     """ModelObjects represent the XML elements within a document, and are implemented as custom 
     lxml proxy objects.  Each modelDocument has a parser with the parser objects in ModelObjectFactory.py, 
@@ -32,71 +34,52 @@ class ModelObject(etree.ElementBase):
     (The attributes and methods for ModelObject are in addition to those for lxml base class, _ElementBase.)
 
 
-        ... attribute:: modelDocument
-        
-        Self (provided for consistency with modelObjects)
-        ... attribute:: modelDocument
-        
+        .. attribute:: modelDocument        
         Owning ModelDocument object
         
-        ... attribute:: modelXbrl
-        
+        .. attribute:: modelXbrl
         modelDocument's owning ModelXbrl object
         
-        ... attribute:: localName
-        
+        .. attribute:: localName
         W3C DOM localName
         
-        ... attribute:: prefixedName
-        
+        .. attribute:: prefixedName
         Prefix by ancestor xmlns and localName of element
         
-        ... attribute:: namespaceURI
-        
+        .. attribute:: namespaceURI
         W3C DOM namespaceURI (overridden for schema elements)
         
-        ... attribute:: elementNamespaceURI
-        
+        .. attribute:: elementNamespaceURI
         W3C DOM namespaceURI (not overridden by subclasses)
         
-        ... attribute:: qname
-        
+        .. attribute:: qname
         QName of element (overridden for schema elements)
         
-        ... attribute:: elementQname
-        
+        .. attribute:: elementQname
         QName of element (not overridden by subclasses)
         
-        ... attribute:: parentQname
-        
+        .. attribute:: parentQname
         QName of parent element
         
-        ... attribute:: id
-        
+        .. attribute:: id
         Id attribute or None
         
-        ... attribute:: elementAttributesTuple
-        
+        .. attribute:: elementAttributesTuple
         Python tuple of (tag, value) of specified attributes of element, where tag is in Clark notation
         
-        ... attribute:: elementAttributesStr
-        
+        .. attribute:: elementAttributesStr
         String of tag=value[,tag=value...] of specified attributes of element
         
-        ... attribute:: xValid
-        
+        .. attribute:: xValid
         XmlValidation.py validation state enumeration
         
-        ... attribute:: xValue
-        
+        .. attribute:: xValue
         PSVI value (for formula processing)
         
-        ... attribute:: sValue
-        
+        .. attribute:: sValue
         s-equals value (for s-equality)
         
-        ... attribute:: xAttributes
-        
+        .. attribute:: xAttributes
         Dict by attrTag of ModelAttribute objects (see below) of specified and default attributes of this element.
     """
     def _init(self):
@@ -135,6 +118,10 @@ class ModelObject(etree.ElementBase):
         
     def attr(self, attrname):
         return self.get(attrname)
+    
+    @property
+    def slottedAttributesNames(self):
+        return emptySet
 
     def setNamespaceLocalName(self):
         ns, sep, ln = self.tag.partition("}")

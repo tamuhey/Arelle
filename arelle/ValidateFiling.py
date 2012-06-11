@@ -266,7 +266,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                                 deiItems[factElementName] = value
                                 if entityIdentifierValue != value:
                                     self.modelXbrl.error(("EFM.6.05.23", "GFM.3.02.02"),
-                                        _("dei:%(elementName)s %(value)s is must match the context entity identifier %(entityIdentifer)s"),
+                                        _("dei:%(elementName)s %(value)s must match the context entity identifier %(entityIdentifer)s"),
                                         modelObject=f, elementName=disclosureSystem.deiFilerIdentifierElement,
                                         value=value, entityIdentifer=entityIdentifierValue)
                                 if paramFilerIdentifier and value != paramFilerIdentifier:
@@ -832,10 +832,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                             modelObject=concept, concept=concept.qname)
                             
                     if concept.isTuple: # verify same presentation linkbase nesting
-                        pLinkedQnames = set(rel.toModelObject.qname
-                                            for rel in modelXbrl.relationshipSet(XbrlConst.parentChild).fromModelObject(concept)
-                                            if rel.toModelObject is not None)
-                        for missingQname in set(concept.type.elements) ^ pLinkedQnames:
+                        for missingQname in set(concept.type.elements) ^ pLinkedNonAbstractDescendantQnames(modelXbrl, concept):
                             modelXbrl.error("SBR.NL.2.3.4.01",
                                 _("Tuple %(concept)s has mismatch between content and presentation children: %(missingQname)s."),
                                 modelObject=concept, concept=concept.qname, missingQname=missingQname)
@@ -900,6 +897,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
             
         conceptsUsedWithPreferredLabels = defaultdict(list)
         usedCalcsPresented = defaultdict(set) # pairs of concepts objectIds used in calc
+        localPreferredLabels = defaultdict(set)
         drsELRs = set()
         
         # do calculation, then presentation, then other arcroles
@@ -923,7 +921,6 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                                     ineffectivity=modelRel.ineffectivity)
                     if arcrole == XbrlConst.parentChild:
                         conceptsPresented = set()
-                        localPreferredLabels = {}
                         # 6.12.2 check for distinct order attributes
                         for relFrom, rels in modelXbrl.relationshipSet(arcrole, ELR).fromModelObjects().items():
                             targetConceptPreferredLabels = defaultdict(dict)
@@ -981,12 +978,12 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                                     localPreferredLabels[relTo].add(preferredLabel)
                             targetConceptPreferredLabels.clear()
                             orderRels.clear()
+                        localPreferredLabels.clear() # clear for next relationship
                         for conceptPresented in conceptsPresented:
                             if conceptPresented in usedCalcsPresented:
                                 usedCalcPairingsOfConcept = usedCalcsPresented[conceptPresented]
                                 if len(usedCalcPairingsOfConcept & conceptsPresented) > 0:
                                     usedCalcPairingsOfConcept -= conceptsPresented
-                        del localPreferredLabels
                     elif arcrole == XbrlConst.summationItem:
                         if self.validateEFMorGFM:
                             # 6.14.3 check for relation concept periods
@@ -1089,6 +1086,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                                         _("Disallowed xbrldt:usable='false' attribute on %(arc)s relationship from concept %(conceptFrom)s in base set role %(linkrole)s to concept %(conceptTo)s"),
                                         modelObject=(rel, relFrom, relTo), arc=rel.qname, conceptFrom=relFrom.qname, linkrole=rel.linkrole, conceptTo=rel.toModelObject.qname)
 
+        del localPreferredLabels # dereference
         self.modelXbrl.profileActivity("... filer relationships checks", minTimeToShow=1.0)
 
                                 
@@ -1288,3 +1286,15 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                     hasDefaultLang = True
         except Exception as err:
             pass
+
+# for SBR 2.3.4.01
+def pLinkedNonAbstractDescendantQnames(modelXbrl, concept, descendants=None):
+    if descendants is None: descendants = set()
+    for rel in modelXbrl.relationshipSet(XbrlConst.parentChild).fromModelObject(concept):
+        child = rel.toModelObject
+        if child is not None:
+            if child.isAbstract:
+                pLinkedNonAbstractDescendantQnames(modelXbrl, child, descendants)
+            else:
+                descendants.add(child.qname)
+    return descendants

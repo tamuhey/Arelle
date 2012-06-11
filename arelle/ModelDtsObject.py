@@ -274,7 +274,7 @@ class ModelConcept(ModelNamableTerm, ModelParticle):
     @property
     def abstract(self):
         """(str) -- Value of abstract attribute or 'false' if absent"""
-        return self.get("abstract") if self.get("abstract") else 'false'
+        return self.get("abstract", 'false')
     
     @property
     def isAbstract(self):
@@ -482,7 +482,7 @@ class ModelConcept(ModelNamableTerm, ModelParticle):
     @property
     def nillable(self):
         """(str) --Value of the nillable attribute or its default"""
-        return self.get("nillable") if self.get("nillable") else 'false'
+        return self.get("nillable", 'false')
     
     @property
     def isNillable(self):
@@ -1587,7 +1587,7 @@ class ModelRelationship(ModelObject):
 
     @property
     def isComplemented(self):
-        """(bool) -- True if complemented is true (on applicable formula arcs, defaults to False if absent)"""
+        """(bool) -- True if complemented is true (on applicable formula/rendering arcs, defaults to False if absent)"""
         try:
             return self._isComplemented
         except AttributeError:
@@ -1596,7 +1596,7 @@ class ModelRelationship(ModelObject):
     
     @property
     def isCovered(self):
-        """(bool) -- True if cover is true (on applicable formula arcs, defaults to False if absent)"""
+        """(bool) -- True if cover is true (on applicable formula/rendering arcs, defaults to False if absent)"""
         try:
             return self._isCovered
         except AttributeError:
@@ -1604,17 +1604,18 @@ class ModelRelationship(ModelObject):
             return self._isCovered
         
     @property
-    def axisType(self):
-        """(str) -- Value of axisType (on applicable table linkbase arcs"""
+    def axisDisposition(self):
+        """(str) -- Value of axisDisposition (on applicable table linkbase arcs"""
         try:
             return self._tableAxis
         except AttributeError:
-            aType = self.get("axisType")
-            if aType in ("xAxis","x-axis"): self._axisType = "xAxis"
-            elif aType in ("yAxis","y-axis"): self._axisType = "yAxis"
-            elif aType in ("zAxis","z-axis"): self._axisType = "zAxis"
-            else: self._axisType = None
-            return self._axisType
+            aType = self.get("axisDisposition")  # XII
+            if aType is None: aType = self.get("axisType")  # Eurofiling
+            if aType in ("xAxis","x"): self._axisDisposition = "x"
+            elif aType in ("yAxis","y"): self._axisDisposition = "y"
+            elif aType in ("zAxis","z"): self._axisDisposition = "z"
+            else: self._axisDisposition = None
+            return self._axisDisposition
         
     @property
     def equivalenceKey(self):
