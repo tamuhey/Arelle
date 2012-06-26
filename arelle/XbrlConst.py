@@ -260,6 +260,7 @@ tableFilter = "http://xbrl.org/arcrole/2011/table-filter"
 tableAxisSubtree = "http://xbrl.org/arcrole/2011/axis-subtree"
 tableAxisFilter = "http://xbrl.org/arcrole/2011/axis-filter"
 tableTupleContent = "http://xbrl.org/arcrole/2011/axis/tuple-content"
+tableAxisMessage = "http://xbrl.org/arcrole/2011/axis-message"
 qnTableTable = qname("{http://xbrl.org/2011/table}table:table")
 qnTableCompositionAxis = qname("{http://xbrl.org/2011/table}table:compositionAxis")
 qnTableFilterAxis = qname("{http://xbrl.org/2011/table}table:filterAxis")
@@ -294,6 +295,8 @@ errMsgPrefixNS = {
     "xbrlmfe": "http://xbrl.org/2008/filter/match/error",
     "xbrlvarscopee": "http://xbrl.org/2010/variable/variables-scope/error",
     }
+
+arcroleGroupDetect = "*detect*"
 
 def baseSetArcroleLabel(arcrole): # with sort char in first position
     if arcrole == "XBRL-dimensions": return _("1Dimension")
@@ -473,3 +476,12 @@ def isFormulaArcrole(arcrole):
                        "http://xbrl.org/arcrole/2010/formula-instance",
                        "http://xbrl.org/arcrole/2010/function-implementation",
                        "http://xbrl.org/arcrole/2010/variables-scope"}
+
+def isResourceArcrole(arcrole):
+    return (arcrole in {"http://www.xbrl.org/2003/arcrole/concept-label",
+                        "http://www.xbrl.org/2003/arcrole/concept-reference",
+                        "http://www.xbrl.org/2003/arcrole/fact-footnote",
+                        "http://xbrl.org/arcrole/2008/element-label",
+                        "http://xbrl.org/arcrole/2008/element-reference"}
+            or isFormulaArcrole(arcrole))
+    

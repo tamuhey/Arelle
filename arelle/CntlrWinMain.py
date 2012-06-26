@@ -27,6 +27,7 @@ from arelle import (DialogURL, DialogLanguage,
                     DialogPluginManager,
                     ModelDocument,
                     ModelManager,
+                    RenderingEvaluator,
                     ViewWinDTS,
                     ViewWinProperties, ViewWinConcepts, ViewWinRelationshipSet, ViewWinFormulae,
                     ViewWinFactList, ViewWinFactTable, ViewWinRenderedGrid, ViewWinXml,
@@ -51,6 +52,9 @@ class CntlrWinMain (Cntlr.Cntlr):
         overrideLang = self.config.get("labelLangOverride")
         self.labelLang = overrideLang if overrideLang else self.modelManager.defaultLang
         self.data = {}
+
+        tkinter.CallWrapper = TkinterCallWrapper 
+
         
         imgpath = self.imagesDir + os.sep
 
@@ -148,6 +152,12 @@ class CntlrWinMain (Cntlr.Cntlr):
         toolsMenu.add_cascade(label=_("Messages log"), menu=logmsgMenu, underline=0)
         logmsgMenu.add_command(label=_("Clear"), underline=0, command=self.logClear)
         logmsgMenu.add_command(label=_("Save to file"), underline=0, command=self.logSaveToFile)
+        self.modelManager.collectProfileStats = self.config.setdefault("collectProfileStats",False)
+        self.collectProfileStats = BooleanVar(value=self.modelManager.collectProfileStats)
+        self.collectProfileStats.trace("w", self.setCollectProfileStats)
+        logmsgMenu.add_checkbutton(label=_("Collect profile stats"), underline=0, variable=self.collectProfileStats, onvalue=True, offvalue=False)
+        logmsgMenu.add_command(label=_("Log profile stats"), underline=0, command=self.showProfileStats)
+        logmsgMenu.add_command(label=_("Clear profile stats"), underline=0, command=self.clearProfileStats)
 
         toolsMenu.add_command(label=_("Language..."), underline=0, command=lambda: DialogLanguage.askLanguage(self))
         
@@ -551,12 +561,17 @@ class CntlrWinMain (Cntlr.Cntlr):
         try:
             if importToDTS:
                 action = _("imported")
+                profileStat = "import"
                 modelXbrl = self.modelManager.modelXbrl
                 if modelXbrl:
                     ModelDocument.load(modelXbrl, filesource.url)
             else:
                 action = _("loaded")
+                profileStat = "load"
                 modelXbrl = self.modelManager.load(filesource, _("views loading"))
+        except ModelDocument.LoadingException:
+            self.showStatus(_("Loading terminated, unrecoverable error"), 20000)
+            return
         except Exception as err:
             msg = _("Exception loading {0}: {1}, at {2}").format(
                      filesource.url,
@@ -565,11 +580,17 @@ class CntlrWinMain (Cntlr.Cntlr):
             # not sure if message box can be shown from background thread
             # tkinter.messagebox.showwarning(_("Exception loading"),msg, parent=self.parent)
             self.addToLog(msg);
+            self.showStatus(_("Loading terminated, unrecoverable error"), 20000)
             return
         if modelXbrl and modelXbrl.modelDocument:
+            statTime = time.time() - startedAt
+            modelXbrl.profileStat(profileStat, statTime)
             self.addToLog(format_string(self.modelManager.locale, 
                                         _("%s in %.2f secs"), 
-                                        (action, time.time() - startedAt)))
+                                        (action, statTime)))
+            if modelXbrl.hasTableRendering:
+                self.showStatus(_("Initializing table rendering"))
+                RenderingEvaluator.init(modelXbrl)
             self.showStatus(_("{0}, preparing views").format(action))
             self.waitForUiThreadQueue() # force status update
             self.uiThreadQueue.put((self.showLoadedXbrl, [modelXbrl, importToDTS, selectTopView]))
@@ -630,12 +651,18 @@ class CntlrWinMain (Cntlr.Cntlr):
                 if modelXbrl.hasTableRendering:
                     currentAction = "rendering view"
                     ViewWinRelationshipSet.viewRelationshipSet(modelXbrl, self.tabWinTopRt, "Table-rendering", lang=self.labelLang)
+                for name, arcroles in sorted(self.config.get("arcroleGroups", {}).items()):
+                    if XbrlConst.arcroleGroupDetect in arcroles:
+                        currentAction = name + " view"
+                        ViewWinRelationshipSet.viewRelationshipSet(modelXbrl, self.tabWinTopRt, (name, arcroles), lang=self.labelLang)
+                
             currentAction = "property grid"
             ViewWinProperties.viewProperties(modelXbrl, self.tabWinTopLeft)
             currentAction = "log view creation time"
+            viewTime = time.time() - startedAt
+            modelXbrl.profileStat("view", viewTime)
             self.addToLog(format_string(self.modelManager.locale, 
-                                        _("views %.2f secs"), 
-                                        time.time() - startedAt))
+                                        _("views %.2f secs"), viewTime))
             if selectTopView and topView:
                 topView.select()
         except Exception as err:
@@ -663,6 +690,16 @@ class CntlrWinMain (Cntlr.Cntlr):
             tkinter.messagebox.showwarning(_("Exception preparing view"),msg, parent=self.parent)
             self.addToLog(msg);
         self.showStatus(_("Ready..."), 2000)
+        
+    def showProfileStats(self):
+        modelXbrl = self.modelManager.modelXbrl
+        if modelXbrl and self.modelManager.collectProfileStats:
+            modelXbrl.logProfileStats()
+        
+    def clearProfileStats(self):
+        modelXbrl = self.modelManager.modelXbrl
+        if modelXbrl and self.modelManager.collectProfileStats:
+            modelXbrl.profileStats.clear()
         
     def fileClose(self):
         if not self.okayToContinue():
@@ -935,6 +972,11 @@ class CntlrWinMain (Cntlr.Cntlr):
         self.saveConfig()
         self.setValidateTooltipText()
         
+    def setCollectProfileStats(self, *args):
+        self.modelManager.collectProfileStats = self.collectProfileStats.get()
+        self.config["collectProfileStats"] = self.modelManager.collectProfileStats
+        self.saveConfig()
+        
     def find(self, *args):
         from arelle.DialogFind import find
         find(self)
@@ -1109,6 +1151,32 @@ class WinMainLogHandler(logging.Handler):
         except:
             pass
 
+class TkinterCallWrapper: 
+    """Replacement for internal tkinter class. Stores function to call when some user
+    defined Tcl function is called e.g. after an event occurred."""
+    def __init__(self, func, subst, widget):
+        """Store FUNC, SUBST and WIDGET as members."""
+        self.func = func
+        self.subst = subst
+        self.widget = widget
+    def __call__(self, *args):
+        """Apply first function SUBST to arguments, than FUNC."""
+        try:
+            if self.subst:
+                args = self.subst(*args)
+            return self.func(*args)
+        except SystemExit as msg:
+            raise SystemExit(msg)
+        except Exception:
+            # this was tkinter's standard coding: self.widget._report_exception()
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            msg = ''.join(traceback.format_exception_only(exc_type, exc_value))
+            tracebk = ''.join(traceback.format_tb(exc_traceback, limit=7))
+            tkinter.messagebox.showerror(_("Exception"), 
+                                         _("{0}\nCall trace\n{1}").format(msg, tracebk))
+                
+
+
 def main():
     # this is the entry called by arelleGUI.pyw for windows
     global restartMain
@@ -1117,7 +1185,7 @@ def main():
         application = Tk()
         cntlrWinMain = CntlrWinMain(application)
         application.protocol("WM_DELETE_WINDOW", cntlrWinMain.quit)
-        application.mainloop()
+        application.mainloop()            
 
 if __name__ == "__main__":
     # this is the entry called by MacOS open and MacOS shell scripts
