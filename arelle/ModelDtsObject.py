@@ -983,7 +983,8 @@ class ModelType(ModelNamableTerm):
         if self.name == "escapedItemType" and self.modelDocument.targetNamespace.startswith(XbrlConst.dtrTypesStartsWith):
             return True
         qnameDerivedFrom = self.qnameDerivedFrom
-        if qnameDerivedFrom is None or (qnameDerivedFrom.namespaceURI in(XbrlConst.xsd,XbrlConst.xbrli)):
+        if (not isinstance(qnameDerivedFrom, ModelValue.QName) or # textblock not a union type
+            (qnameDerivedFrom.namespaceURI in(XbrlConst.xsd,XbrlConst.xbrli))):
             return False
         typeDerivedFrom = self.modelXbrl.qnameTypes.get(qnameDerivedFrom)
         return typeDerivedFrom.isTextBlock if typeDerivedFrom is not None else False
@@ -996,7 +997,8 @@ class ModelType(ModelNamableTerm):
             self.modelDocument.targetNamespace.startswith(XbrlConst.dtrTypesStartsWith)):
             return True
         qnameDerivedFrom = self.qnameDerivedFrom
-        if qnameDerivedFrom is None or (qnameDerivedFrom.namespaceURI in (XbrlConst.xsd,XbrlConst.xbrli)):
+        if (not isinstance(qnameDerivedFrom, ModelValue.QName) or # domainItemType not a union type
+            (qnameDerivedFrom.namespaceURI in(XbrlConst.xsd,XbrlConst.xbrli))):
             return False
         typeDerivedFrom = self.modelXbrl.qnameTypes.get(qnameDerivedFrom)
         return typeDerivedFrom.isDomainItemType if typeDerivedFrom is not None else False
@@ -1591,7 +1593,7 @@ class ModelRelationship(ModelObject):
         try:
             return self._isComplemented
         except AttributeError:
-            self._isComplemented = self.get("complement") == "true" if self.get("complement") else False
+            self._isComplemented = self.get("complement") == "true"
             return self._isComplemented
     
     @property
@@ -1600,7 +1602,7 @@ class ModelRelationship(ModelObject):
         try:
             return self._isCovered
         except AttributeError:
-            self._isCovered = self.get("cover") == "true" if self.get("cover") else False
+            self._isCovered = self.get("cover") == "true"
             return self._isCovered
         
     @property

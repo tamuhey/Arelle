@@ -79,6 +79,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
         # instance checks
         self.fileNameBasePart = None # prevent testing on fileNameParts if not instance or invalid
         self.fileNameDate = None
+        self.entityRegistrantName = None
         if modelXbrl.modelDocument.type == ModelDocument.Type.INSTANCE or \
            modelXbrl.modelDocument.type == ModelDocument.Type.INLINEXBRL:
             #6.3.3 filename check
@@ -351,6 +352,8 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                                 'ix-numeric Fact %(fact)s of context %(contextID)s has a sign or currency symbol "%(value)s" in "%(text)s"',
                                 modelObject=f, fact=f.qname, contextID=factContextID, 
                                 value="".join(s for t in syms for s in t), text=f.text)
+                            
+            self.entityRegistrantName = deiItems.get("EntityRegistrantName") # used for name check in 6.8.6
                             
             self.modelXbrl.profileActivity("... filer fact checks", minTimeToShow=1.0)
     
@@ -646,10 +649,12 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                                 modelXbrl.error("EFM.6.05.26",
                                     _("dei:EntityCommonStockSharesOutstanding is required for DocumentType '%(documentType)s' but only one per stock class %(stockClass)s"),
                                     modelObject=documentTypeFact, documentType=documentType, stockClasse=mem)
+                            ''' removed per ARELLE-124
                             elif facts[0].context.instantDatetime != commonStockMeasurementDatetime:
                                 modelXbrl.error("EFM.6.05.26",
                                     _("dei:EntityCommonStockSharesOutstanding is required for DocumentType '%(documentType)s' in stock class %(stockClass)s with measurement date %(date)s"),
                                     modelObject=documentTypeFact, documentType=documentType, stockClass=mem, date=commonStockMeasurementDatetime)
+                            '''
                     elif hasUndefinedDefaultStockMember and not defaultSharesOutstanding:
                             modelXbrl.error("EFM.6.05.26",
                                 _("dei:EntityCommonStockSharesOutstanding is required for DocumentType '%(documentType)s' but missing for a non-default-context fact"),
@@ -1153,7 +1158,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                 
         # 6 16 4, 1.16.5 Base sets of Domain Relationship Sets testing
         self.modelXbrl.profileActivity("... filer preferred label checks", minTimeToShow=1.0)
-
+        
         if self.validateSBRNL:
             # check presentation link roles for generic linkbase order number
             ordersRelationshipSet = modelXbrl.relationshipSet("http://www.nltaxonomie.nl/2011/arcrole/linkrole-order")

@@ -4,7 +4,7 @@ Created on Dec 20, 2010
 @author: Mark V Systems Limited
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
-import math, re
+import math, re, sre_constants
 from arelle.ModelObject import ModelObject, ModelAttribute
 from arelle.ModelValue import (qname, dateTime, DateTime, DATE, DATETIME, dayTimeDuration,
                          YearMonthDuration, DayTimeDuration, time, Time)
@@ -173,7 +173,7 @@ def string_length(xc, p, contextItem, args):
 nonSpacePattern = re.compile(r"\S+")
 def normalize_space(xc, p, contextItem, args):
     if len(args) > 1: raise XPathContext.FunctionNumArgs()
-    return ' '.join( p.findall( stringArg(xc, args, 0, "xs:string", missingArgFallback=contextItem) ) )
+    return ' '.join( nonSpacePattern.findall( stringArg(xc, args, 0, "xs:string", missingArgFallback=contextItem) ) )
 
 def normalize_unicode(xc, p, contextItem, args):
     raise fnFunctionNotAvailable()
@@ -264,14 +264,25 @@ def matches(xc, p, contextItem, args):
     if not 2 <= len(args) <= 3: raise XPathContext.FunctionNumArgs()
     input = stringArg(xc, args, 0, "xs:string?", emptyFallback=())
     pattern = stringArg(xc, args, 1, "xs:string", emptyFallback=())
-    return bool(re.match(pattern,input,flags=regexFlags(xc, p, args, 2)))
+    try:
+        return bool(re.search(pattern,input,flags=regexFlags(xc, p, args, 2)))
+    except sre_constants.error as err:
+        raise XPathContext.XPathException(p, 'err:FORX0002', _('fn:matches regular expression pattern error: {0}').format(err))
+        
 
 def replace(xc, p, contextItem, args):
     if not 3 <= len(args) <= 4: raise XPathContext.FunctionNumArgs()
     input = stringArg(xc, args, 0, "xs:string?", emptyFallback=())
     pattern = stringArg(xc, args, 1, "xs:string", emptyFallback=())
-    replacement = stringArg(xc, args, 2, "xs:string", emptyFallback=())
-    return re.sub(pattern,replacement,input,flags=regexFlags(xc, p, args, 3))
+    fnReplacement = stringArg(xc, args, 2, "xs:string", emptyFallback=())
+    if re.findall(r"(^|[^\\])[$]|[$][^0-9]", fnReplacement):
+        raise XPathContext.XPathException(p, 'err:FORX0004', _('fn:replace pattern \'$\' error in: {0}').format(fnReplacement))
+    reReplacement = re.sub(r"[\\][$]", "$", 
+                         re.sub(r"(^|[^\\])[$]([1-9])", r"\\\2", fnReplacement))
+    try:
+        return re.sub(pattern,reReplacement,input,flags=regexFlags(xc, p, args, 3))
+    except sre_constants.error as err:
+        raise XPathContext.XPathException(p, 'err:FORX0002', _('fn:replace regular expression pattern error: {0}').format(err))
 
 def tokenize(xc, p, contextItem, args):
     raise fnFunctionNotAvailable()
@@ -630,19 +641,35 @@ def count(xc, p, contextItem, args):
 
 def avg(xc, p, contextItem, args):
     if len(args) != 1: raise XPathContext.FunctionNumArgs()
-    return sum( xc.atomize( p, args[0] ) ) / len( args[0] )
+    addends = xc.atomize( p, args[0] )
+    try:
+        return sum( addends / len( args[0] ) )
+    except TypeError:
+        raise XPathContext.FunctionArgType(1,"sumable values", addends, errCode='err:FORG0001')
 
 def fn_max(xc, p, contextItem, args):
     if len(args) != 1: raise XPathContext.FunctionNumArgs()
-    return max( xc.atomize( p, args[0] ) )
+    comparands = xc.atomize( p, args[0] )
+    try:
+        return max( comparands )
+    except TypeError:
+        raise XPathContext.FunctionArgType(1,"comparable values", comparands, errCode='err:FORG0001')
 
 def fn_min(xc, p, contextItem, args):
     if len(args) != 1: raise XPathContext.FunctionNumArgs()
-    return min( xc.atomize( p, args[0] ) )
+    comparands = xc.atomize( p, args[0] )
+    try:
+        return min( comparands )
+    except TypeError:
+        raise XPathContext.FunctionArgType(1,"comparable values", comparands, errCode='err:FORG0001')
 
 def fn_sum(xc, p, contextItem, args):
     if len(args) != 1: raise XPathContext.FunctionNumArgs()
-    return sum( xc.atomize( p, args[0] ) )
+    addends = xc.atomize( p, args[0] )
+    try:
+        return sum( addends )
+    except TypeError:
+        raise XPathContext.FunctionArgType(1,"summable sequence", addends, errCode='err:FORG0001')
 
 def id(xc, p, contextItem, args):
     raise fnFunctionNotAvailable()

@@ -72,3 +72,24 @@ def py3unquote(string, encoding='utf-8', errors='replace'):
         # Flush the final pct_sequence
         string += pct_sequence.decode(encoding, errors)
     return string
+
+def pyTypeName(object):
+    try:
+        objectClass = object.__class__
+        classModule = objectClass.__module__
+        className = objectClass.__name__
+        if sys.version[0] >= '3':
+            if classModule == 'builtins':
+                return className
+        else:
+            if classModule == '__builtin__':
+                return className
+        fullname = classModule + '.' + className
+        if fullname == 'arelle.ModelValue.DateTime':
+            if object.dateOnly:
+                fullname += '-dateOnly'
+            else:
+                fullname += '-dateTime'
+        return fullname
+    except:
+        return str(type(object))

@@ -12,6 +12,7 @@ from arelle.ModelObject import ModelObject, ModelAttribute
 from arelle.ModelInstanceObject import ModelFact, ModelInlineFact
 from arelle.ModelValue import (qname,QName,dateTime, DateTime, DATEUNION, DATE, DATETIME, anyURI, AnyURI)
 from arelle.XmlValidate import UNKNOWN, VALID, validate
+from arelle.PluginManager import pluginClassMethods
 from lxml import etree
 
 class XPathException(Exception):
@@ -46,10 +47,11 @@ class FunctionNumArgs(Exception):
         return _("Exception: Number of arguments mismatch")
     
 class FunctionArgType(Exception):
-    def __init__(self, argIndex, expectedType, errCode='err:XPTY0004'):
+    def __init__(self, argIndex, expectedType, foundObject='', errCode='err:XPTY0004'):
         self.errCode = errCode
         self.argNum = argIndex + 1
         self.expectedType = expectedType
+        self.foundObject = foundObject
         self.args = ( self.__repr__(), )
     def __repr__(self):
         return _("Exception: Arg {0} expected type {1}").format(self.argNum, self.expectedType)
@@ -61,6 +63,12 @@ class FunctionNotAvailable(Exception):
     def __repr__(self):
         return _("Exception, function not available: {0}").format(self.name)
     
+class RunTimeExceededException(Exception):
+    def __init__(self):
+        self.args = ( self.__repr__(), )
+    def __repr__(self):
+        return _("Formula run time exceeded")
+
    
 def create(modelXbrl, inputXbrlInstance=None, sourceElement=None):
     return XPathContext(modelXbrl, 
@@ -81,6 +89,7 @@ SEQUENCE_TYPES = (tuple,list,set)
 class XPathContext:
     def __init__(self, modelXbrl, inputXbrlInstance, sourceElement, inScopeVars=None):
         self.modelXbrl = modelXbrl
+        self.isRunTimeExceeded = False
         self.inputXbrlInstance = inputXbrlInstance
         self.outputLastContext = {}   # last context element output per output instance
         self.outputLastUnit = {}
@@ -95,6 +104,10 @@ class XPathContext:
         self.cachedFilterResults = {}
         if inputXbrlInstance: 
             self.inScopeVars[XbrlConst.qnStandardInputInstance] = inputXbrlInstance.modelXbrl
+        self.customFunctions = {}
+        for pluginXbrlMethod in pluginClassMethods("Formula.CustomFunctions"):
+            self.customFunctions.update(pluginXbrlMethod())
+        
             
     def close(self):
         self.outputLastContext.clear() # dereference
@@ -105,6 +118,8 @@ class XPathContext:
         self.cachedFilterResults.clear()
         self.__dict__.clear() # dereference everything
         
+    def runTimeExceededCallback(self):
+        self.isRunTimeExceeded = True
         
     @property
     def formulaOptions(self):
@@ -157,8 +172,8 @@ class XPathContext:
                     except FunctionNumArgs:
                         raise XPathException(p, 'err:XPST0017', _('Number of arguments do not match signature arity: {0}').format(op))
                     except FunctionArgType as err:
-                        raise XPathException(p, err.errCode, _('Argument {0} does not match expected type {1} for {2}.')
-                                             .format(err.argNum, err.expectedType, op))
+                        raise XPathException(p, err.errCode, _('Argument {0} does not match expected type {1} for {2} {3}.')
+                                             .format(err.argNum, err.expectedType, op, err.foundObject))
                     except FunctionNotAvailable:
                         raise XPathException(p, 'arelle:functDeferred', _('Function {0} is not available in this build.').format(op))
                 elif op in VALUE_OPS:
@@ -448,7 +463,7 @@ class XPathContext:
                 raise XPathException(self.progHeader, 'err:XPTY0020', _('Axis step {0} context item is not a node: {1}').format(op, node))
             targetNodes = []
             if isinstance(p,QNameDef):
-                ns = p.namespaceURI; localname = p.localName
+                ns = p.namespaceURI; localname = p.localName; axis = p.axis
                 if p.isAttribute:
                     if isinstance(node,ModelObject):
                         attrTag = p.localName if p.unprefixed else p.clarkNotation
@@ -469,10 +484,68 @@ class XPathContext:
                         elif modelAttribute.xValid >= VALID:
                                 targetNodes.append(modelAttribute)
                 elif op == '/' or op is None:
-                    if isinstance(node,(ModelObject, etree._ElementTree)):
-                        targetNodes = XmlUtil.children(node, ns, localname)
+                    if axis is None or axis == "child":
+                        if isinstance(node,(ModelObject, etree._ElementTree)):
+                            targetNodes = XmlUtil.children(node, ns, localname)
+                    elif axis == "parent":
+                        if isinstance(node,ModelAttribute):
+                            paretNode = [ node.modelElement ]
+                        else:
+                            parentNode = [ XmlUtil.parent(node) ]
+                        if (isinstance(node,ModelObject) and
+                                (not ns or ns == parentNode.namespaceURI or ns == "*") and
+                            (localname == parentNode.localName or localname == "*")):
+                            targetNodes = [ parentNode ]
+                    elif axis == "self":
+                        if (isinstance(node,ModelObject) and
+                                (not ns or ns == node.namespaceURI or ns == "*") and
+                            (localname == node.localName or localname == "*")):
+                            targetNodes = [ node ]
+                    elif axis.startswith("descendant"):
+                        if isinstance(node,(ModelObject, etree._ElementTree)):
+                            targetNodes = XmlUtil.descendants(node, ns, localname)
+                            if (axis.endswith("-or-self") and
+                                isinstance(node,ModelObject) and
+                                (not ns or ns == node.namespaceURI or ns == "*") and
+                                (localname == node.localName or localname == "*")):
+                                targetNodes.append(node) 
+                    elif axis.startswith("ancestor"):
+                        if isinstance(node,ModelObject):
+                            targetNodes = [ancestor
+                                           for ancestor in XmlUtil.ancestors(node)
+                                           if ((not ns or ns == ancestor.namespaceURI or ns == "*") and
+                                               (localname == ancestor.localName or localname == "*"))]
+                            if (axis.endswith("-or-self") and
+                                isinstance(node,ModelObject) and
+                                (not ns or ns == node.namespaceURI or ns == "*") and
+                                (localname == node.localName or localname == "*")):
+                                targetNodes.insert(0, node) 
+                    elif axis.endswith("-sibling"):
+                        if isinstance(node,ModelObject):
+                            targetNodes = [sibling
+                                           for sibling in node.itersiblings(preceding=axis.startswith("preceding"))
+                                           if ((not ns or ns == ancestor.namespaceURI or ns == "*") and
+                                               (localname == ancestor.localName or localname == "*"))]
+                    elif axis == "preceding":
+                        if isinstance(node,ModelObject):
+                            for preceding in node.getroottree().iter():
+                                if preceding == node:
+                                    break
+                                elif ((not ns or ns == preceding.namespaceURI or ns == "*") and
+                                      (localname == preceding.localName or localname == "*")):
+                                    targetNodes.append(preceding)
+                    elif axis == "following":
+                        if isinstance(node,ModelObject):
+                            foundNode = False
+                            for following in node.getroottree().iter():
+                                if following == node:
+                                    foundNode = True
+                                elif (foundNode and
+                                      (not ns or ns == following.namespaceURI or ns == "*") and
+                                      (localname == following.localName or localname == "*")):
+                                    targetNodes.append(following)
                 elif op == '//':
-                    if isinstance(node,(ModelObject, etree._ElementTree)):
+                    if isinstance(node,(ModelObject, etree. _ElementTree)):
                         targetNodes = XmlUtil.descendants(node, ns, localname)
                 elif op == '..':
                     if isinstance(node,ModelAttribute):
@@ -557,7 +630,12 @@ class XPathContext:
                 x = float(v)
             except ValueError:
                 raise XPathException(p, 'err:FORG0001', _('Atomizing {0} to a {1} does not have a proper value').format(x,baseXsdType))
-        elif baseXsdType in ("integer",):
+        elif baseXsdType in ("integer",
+                             "nonPositiveInteger","negativeInteger","nonNegativeInteger","positiveInteger",
+                             "long","unsignedLong",
+                             "int","unsignedInt",
+                             "short","unsignedShort",
+                             "byte","unsignedByte"):
             try:
                 x = _INT(v)
             except ValueError:

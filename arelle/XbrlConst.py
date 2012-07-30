@@ -16,6 +16,8 @@ qnXbrliContext = qname("{http://www.xbrl.org/2003/instance}xbrli:context")
 qnXbrliUnit = qname("{http://www.xbrl.org/2003/instance}xbrli:unit")
 qnXbrliStringItemType = qname("{http://www.xbrl.org/2003/instance}xbrli:stringItemType")
 qnXbrliMonetaryItemType = qname("{http://www.xbrl.org/2003/instance}xbrli:monetaryItemType")
+qnXbrliDateItemType = qname("{http://www.xbrl.org/2003/instance}xbrli:dateItemType")
+qnXbrliDurationItemType = qname("{http://www.xbrl.org/2003/instance}xbrli:durationItemType")
 qnXbrliPure = qname("{http://www.xbrl.org/2003/instance}xbrli:pure")
 qnXbrliShares = qname("{http://www.xbrl.org/2003/instance}xbrli:shares")
 qnXbrliDateUnion = qname("{http://www.xbrl.org/2003/instance}xbrli:dateUnion")
@@ -261,6 +263,7 @@ tableAxisSubtree = "http://xbrl.org/arcrole/2011/axis-subtree"
 tableAxisFilter = "http://xbrl.org/arcrole/2011/axis-filter"
 tableTupleContent = "http://xbrl.org/arcrole/2011/axis/tuple-content"
 tableAxisMessage = "http://xbrl.org/arcrole/2011/axis-message"
+tableAxisSelectionMessage = "http://xbrl.org/arcrole/2011/axis-selection-message"
 qnTableTable = qname("{http://xbrl.org/2011/table}table:table")
 qnTableCompositionAxis = qname("{http://xbrl.org/2011/table}table:compositionAxis")
 qnTableFilterAxis = qname("{http://xbrl.org/2011/table}table:filterAxis")
@@ -412,15 +415,15 @@ def isDefinitionOrXdtArcrole(arcrole):
             "http://www.xbrl.org/2003/arcrole/essence-alias",
             "http://www.xbrl.org/2003/arcrole/similar-tuples",
             "http://www.xbrl.org/2003/arcrole/requires-element"}
-
+            
 def isStandardResourceOrExtLinkElement(element):
-    return element.namespaceURI == link and element.localName in (
+    return element.namespaceURI == link and element.localName in {
           "definitionLink", "calculationLink", "presentationLink", "labelLink", "referenceLink", "footnoteLink", 
-          "label", "footnote", "reference")
+          "label", "footnote", "reference"}
     
 def isStandardArcElement(element):
-    return element.namespaceURI == link and element.localName in (
-          "definitionArc", "calculationArc", "presentationArc", "labelArc", "referenceArc", "footnoteArc")
+    return element.namespaceURI == link and element.localName in {
+          "definitionArc", "calculationArc", "presentationArc", "labelArc", "referenceArc", "footnoteArc"}
         
 def isStandardArcInExtLinkElement(element):
     return isStandardArcElement(element) and isStandardResourceOrExtLinkElement(element.getparent())
