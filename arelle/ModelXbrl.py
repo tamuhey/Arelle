@@ -256,7 +256,6 @@ class ModelXbrl:
         self.hasFormulae = False
         self.formulaOutputInstance = None
         self.logger = logging.getLogger("arelle")
-        self.logger.setLevel(logging.DEBUG)
         self.profileStats = {}
         self.modelXbrl = self # for consistency in addressing modelXbrl
 
@@ -269,12 +268,13 @@ class ModelXbrl:
                 self.formulaOutputInstance.close()
             if hasattr(self,"fileSource") and self.closeFileSource:
                 self.fileSource.close()
-            modelDocument = self.modelDocument if hasattr(self,"modelDocument") else None
+            modelDocument = getattr(self,"modelDocument",None)
+            urlDocs = getattr(self,"urlDocs",None)
             for relSet in self.relationshipSets.values():
                 relSet.clear()
             self.__dict__.clear() # dereference everything before closing document
             if modelDocument:
-                modelDocument.close()
+                modelDocument.close(urlDocs=urlDocs)
             
     @property
     def isClosed(self):
@@ -761,6 +761,10 @@ class ModelXbrl:
         If codes includes EFM, GFM, HMRC, or SBR-coded error then the code chosen (if a sequence)
         corresponds to whether EFM, GFM, HMRC, or SBR validation is in effect.
         """
+        def propValues(properties):
+            # deref objects in properties
+            return [(p[0],str(p[1])) if len(p) == 2 else (p[0],str(p[1]),propValues(p[2]))
+                    for p in properties if 2 <= len(p) <= 3]
         # determine logCode
         messageCode = None
         for argCode in codes if isinstance(codes,tuple) else (codes,):
@@ -776,6 +780,7 @@ class ModelXbrl:
         # determine message and extra arguments
         fmtArgs = {}
         extras = {"messageCode":messageCode}
+        logHrefObjectProperties = getattr(self.logger, "logHrefObjectProperties", False)
         for argName, argValue in codedArgs.items():
             if argName in ("modelObject", "modelXbrl", "modelDocument"):
                 try:
@@ -801,23 +806,15 @@ class ModelXbrl:
                             ref["href"] = file + "#" + XmlUtil.elementFragmentIdentifier(arg)
                             ref["sourceLine"] = arg.sourceline
                             ref["objectId"] = arg.objectId()
-                        elif isinstance(arg, (tuple,list)):
-                            name = arg[0]
-                            arg = arg[1]
-                            if isinstance(arg, ModelObject):
-                                ref["variable"] = name
-                                ref["href"] = file + "#" + XmlUtil.elementFragmentIdentifier(arg)
-                                ref["sourceLine"] = arg.sourceline
-                                ref["objectId"] = arg.objectId()
-                            else:
-                                ref = None
+                            if logHrefObjectProperties:
+                                try:
+                                    ref["properties"] = propValues(arg.propertyView)
+                                except AttributeError:
+                                    pass # is a default properties entry appropriate or needed?
                         else:
                             ref["href"] = file
-                        if ref is not None:
-                            refs.append(ref)
+                        refs.append(ref)
                 extras["refs"] = refs
-            elif argName == "results":
-                extras["results"] = argValue
             elif argName == "sourceLine":
                 if isinstance(argValue, _INT_TYPES):    # must be sortable with int's in logger
                     extras["sourceLine"] = argValue
@@ -844,7 +841,7 @@ class ModelXbrl:
         return (messageCode, 
                 (msg, fmtArgs) if fmtArgs else (msg,), 
                 extras)
-
+        
     def info(self, codes, msg, **args):
         """Same as error(), but as info
         """

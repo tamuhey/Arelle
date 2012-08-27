@@ -37,7 +37,7 @@ def main():
     gettext.install("arelle") # needed for options messages
     parseAndRun(args)
        
-def parseAndRun(args, logger=None):
+def parseAndRun(args):
     try:
         from arelle import webserver
         hasWebServer = True
@@ -77,7 +77,9 @@ def parseAndRun(args, logger=None):
                              "SEC Edgar Filing Manual (if --efm selected) or Global Filer Manual "
                              "disclosure system validation (if --gfm=XXX selected). "
                              "If a test suite or testcase, the test case variations "
-                             "are individually so validated."))
+                             "are individually so validated. "
+                             "If formulae are present they will be validated and run unless --formula=none is specified. "
+                             ))
     parser.add_option("--calcDecimals", action="store_true", dest="calcDecimals",
                       help=_("Specify calculation linkbase validation inferring decimals."))
     parser.add_option("--calcdecimals", action="store_true", dest="calcDecimals", help=SUPPRESS_HELP)
@@ -129,7 +131,22 @@ def parseAndRun(args, logger=None):
                       help=_("Write log messages into file, otherwise they go to standard output.  " 
                              "If file ends in .xml it is xml-formatted, otherwise it is text. "))
     parser.add_option("--logfile", action="store", dest="logFile", help=SUPPRESS_HELP)
+    parser.add_option("--logFormat", action="store", dest="logFormat",
+                      help=_("Logging format for messages capture, otherwise default is \"[%(messageCode)s] %(message)s - %(file)s\"."))
+    parser.add_option("--logformat", action="store", dest="logFormat", help=SUPPRESS_HELP)
+    parser.add_option("--logLevel", action="store", dest="logLevel",
+                      help=_("Minimum level for messages capture, otherwise the message is ignored.  " 
+                             "Current order of levels are debug, info, info-semantic, warning, warning-semantic, warning, assertion-satisfied, inconsistency, error-semantic, assertion-not-satisfied, and error. "))
+    parser.add_option("--loglevel", action="store", dest="logLevel", help=SUPPRESS_HELP)
     parser.add_option("--parameters", action="store", dest="parameters", help=_("Specify parameters for formula and validation (name=value[,name=value])."))
+    parser.add_option("--parameterSeparator", action="store", dest="parameterSeparator", help=_("Specify parameters separator string (if other than comma)."))
+    parser.add_option("--parameterseparator", action="store", dest="parameterSeparator", help=SUPPRESS_HELP)
+    parser.add_option("--formula", choices=("validate", "run", "none"), dest="formulaAction", 
+                      help=_("Specify formula action: "
+                             "validate - validate only, without running, "
+                             "run - validate and run, or "
+                             "none - prevent formula validation or running when also specifying -v or --validate.  "
+                             "if this option is not specified, -v or --validate will validate and run formulas if present"))
     parser.add_option("--formulaParamExprResult", action="store_true", dest="formulaParamExprResult", help=_("Specify formula tracing."))
     parser.add_option("--formulaParamInputValue", action="store_true", dest="formulaParamInputValue", help=_("Specify formula tracing."))
     parser.add_option("--formulaCallExprSource", action="store_true", dest="formulaCallExprSource", help=_("Specify formula tracing."))
@@ -157,6 +174,10 @@ def parseAndRun(args, logger=None):
                              "'http://[user[:password]@]host[:port]' "
                              " (e.g., http://192.168.1.253, http://example.com:8080, http://joe:secret@example.com:8080), "
                              " or 'show' to show current setting, ." ))
+    parser.add_option("--internetConnectivity", choices=("online", "offline"), dest="internetConnectivity", 
+                      help=_("Specify internet connectivity: online or offline"))
+    parser.add_option("--internetTimeout", type="int", dest="internetTimeout", 
+                      help=_("Specify internet connection timeout in seconds (0 means unlimited)."))
     parser.add_option("--plugins", action="store", dest="plugins",
                       help=_("Modify and re-save plug-in configuration.  " 
                              "Enter 'show' to show current plug-in configuration, or '|' separated modules: "
@@ -207,7 +228,7 @@ def parseAndRun(args, logger=None):
                 options.validate, options.calcDecimals, options.calcPrecision, options.validateEFM, options.validateHMRC, options.gfmName,
                 options.utrValidate, options.infosetValidate, options.DTSFile, options.factsFile, options.factListCols, options.factTableFile,
                 options.conceptsFile, options.preFile, options.calFile, options.dimFile, options.formulaeFile,
-                options.logFile, options.formulaParamExprResult, options.formulaParamInputValue,
+                options.logFile, options.logFormat, options.logLevel, options.formulaParamExprResult, options.formulaParamInputValue,
                 options.formulaCallExprSource, options.formulaCallExprCode, options.formulaCallExprEval,
                 options.formulaCallExprResult, options.formulaVarSetExprEval, options.formulaVarSetExprResult,
                 options.formulaAsserResultCounts, options.formulaFormulaRules, options.formulaVarsOrder,
@@ -216,14 +237,14 @@ def parseAndRun(args, logger=None):
                 options.proxy, options.plugins)):
             parser.error(_("incorrect arguments with --webserver, please try\n  python CntlrCmdLine.pyw --help"))
         else:
-            cntlr.startLogging(logger=logger, logFileName='logToBuffer')
+            cntlr.startLogging(logFileName='logToBuffer')
             from arelle import CntlrWebMain
             CntlrWebMain.startWebserver(cntlr, options)
     else:
         # parse and run the FILENAME
-        cntlr.startLogging(logger=logger, 
-                           logFileName=options.logFile if options.logFile else "logToPrint",
-                           logFormat="[%(messageCode)s] %(message)s - %(file)s")
+        cntlr.startLogging(logFileName=(options.logFile or "logToPrint"),
+                           logFormat=(options.logFormat or "[%(messageCode)s] %(message)s - %(file)s"),
+                           logLevel=(options.logLevel or "DEBUG"))
         cntlr.run(options)
         
         return cntlr
@@ -347,10 +368,17 @@ class CntlrCmdLine(Cntlr.Cntlr):
             self.modelManager.abortOnMajorError = True
         if options.collectProfileStats:
             self.modelManager.collectProfileStats = True
+        if options.internetConnectivity == "offline":
+            self.webCache.workOffline = True
+        elif options.internetConnectivity == "online":
+            self.webCache.workOffline = False
+        if options.internetTimeout is not None:
+            self.webCache.timeout = (options.internetTimeout or None)  # use None if zero specified to disable timeout
         fo = FormulaOptions()
         if options.parameters:
+            parameterSeparator = (options.parameterSeparator or ',')
             fo.parameterValues = dict(((qname(key, noPrefixIsNoNamespace=True),(None,value)) 
-                                       for param in options.parameters.split(',') 
+                                       for param in options.parameters.split(parameterSeparator) 
                                        for key,sep,value in (param.partition('='),) ) )   
         if options.formulaParamExprResult:
             fo.traceParameterExpressionResult = True
@@ -423,7 +451,7 @@ class CntlrCmdLine(Cntlr.Cntlr):
                     loadTime = time.time() - startedAt
                     self.addToLog(format_string(self.modelManager.locale, 
                                                 _("import in %.2f secs at %s"), 
-                                                (loadingTime, timeNow)), 
+                                                (loadTime, timeNow)), 
                                                 messageCode="info", file=importFile)
                     modelXbrl.profileStat(_("import"), loadTime)
                 if modelXbrl.errors:
@@ -463,13 +491,35 @@ class CntlrCmdLine(Cntlr.Cntlr):
                             traceback.format_tb(sys.exc_info()[2])))
         if success:
             try:
+                modelXbrl = self.modelManager.modelXbrl
+                hasFormulae = modelXbrl.hasFormulae
                 if options.validate:
                     startedAt = time.time()
+                    if options.formulaAction: # don't automatically run formulas
+                        modelXbrl.hasFormulae = False
                     self.modelManager.validate()
+                    if options.formulaAction: # restore setting
+                        modelXbrl.hasFormulae = hasFormulae
                     self.addToLog(format_string(self.modelManager.locale, 
                                                 _("validated in %.2f secs"), 
                                                 time.time() - startedAt),
                                                 messageCode="info", file=self.entrypointFile)
+                if options.formulaAction in ("validate", "run"):  # do nothing here if "none"
+                    from arelle import ValidateXbrlDimensions, ValidateFormula
+                    startedAt = time.time()
+                    if not options.validate:
+                        ValidateXbrlDimensions.loadDimensionDefaults(modelXbrl)
+                    # setup fresh parameters from formula optoins
+                    modelXbrl.parameters = fo.typedParameters()
+                    ValidateFormula.validate(modelXbrl, compileOnly=(options.formulaAction != "run"))
+                    self.addToLog(format_string(self.modelManager.locale, 
+                                                _("formula validation and execution in %.2f secs")
+                                                if options.formulaAction == "run"
+                                                else _("formula validation only in %.2f secs"), 
+                                                time.time() - startedAt),
+                                                messageCode="info", file=self.entrypointFile)
+                    
+
                 if (options.testReport and 
                     self.modelManager.modelXbrl.modelDocument.type in 
                         (ModelDocument.Type.TESTCASESINDEX, 
@@ -508,9 +558,9 @@ class CntlrCmdLine(Cntlr.Cntlr):
             modelXbrl.logProfileStats()
         if not options.keepOpen:
             if modelDiffReport:
-                modelDiffReport.close()
+                self.modelManager.close(modelDiffReport)
             elif modelXbrl:
-                modelXbrl.close()
+                self.modelManager.close(modelXbrl)
         self.username = self.password = None #dereference password
         return success
 

@@ -299,19 +299,22 @@ class ModelFact(ModelObject):
             return None
         if self.isNil:
             return "(nil)"
-        if concept.isNumeric:
-            val = self.value
-            try:
-                num = float(val)
-                dec = self.decimals
-                if dec is None or dec == "INF":
-                    dec = len(val.partition(".")[2])
-                else:
-                    dec = int(dec) # 2.7 wants short int, 3.2 takes regular int, don't use _INT here
-                return Locale.format(self.modelXbrl.locale, "%.*f", (dec, num), True)
-            except ValueError: 
-                return "(error)"
-        return self.value
+        try:
+            if concept.isNumeric:
+                val = self.value
+                try:
+                    num = float(val)
+                    dec = self.decimals
+                    if dec is None or dec == "INF":
+                        dec = len(val.partition(".")[2])
+                    else:
+                        dec = int(dec) # 2.7 wants short int, 3.2 takes regular int, don't use _INT here
+                    return Locale.format(self.modelXbrl.locale, "%.*f", (dec, num), True)
+                except ValueError: 
+                    return "(error)"
+            return self.value
+        except Exception as ex:
+            return str(ex)  # could be transform value of inline fact
 
     @property
     def vEqValue(self):
@@ -520,7 +523,7 @@ class ModelInlineFact(ModelFact):
         try:
             return self._ixValue
         except AttributeError:
-            v = XmlUtil.innerText(self, ixExclude=True, strip=False)
+            v = XmlUtil.innerText(self, ixExclude=True, strip=True) # transforms are whitespace-collapse
             f = self.format
             if f is not None:
                 if (f.namespaceURI in FunctionIxt.ixtNamespaceURIs and
@@ -931,14 +934,14 @@ class ModelContext(ModelObject):
     @property
     def propertyView(self):
         scheme, entityId = self.entityIdentifier
-        return (("entity", entityId, entityId, (("scheme", scheme),)),
-                (("forever", "") if self.isForeverPeriod else
-                  (("instant", str(self.instantDatetime)) if self.isInstantPeriod else
-                   (("startDate", str(self.startDatetime)),("endDate",str(self.endDatetime))))),
-                ("dimensions", "({0})".format(len(self.qnameDims)),
+        return ((("entity", entityId, (("scheme", scheme),)),) +
+                ((("forever", ""),) if self.isForeverPeriod else
+                (("instant", str(self.instantDatetime)),) if self.isInstantPeriod else
+                (("startDate", str(self.startDatetime)),("endDate",str(self.endDatetime)))) +
+                (("dimensions", "({0})".format(len(self.qnameDims)),
                   tuple(mem.propertyView for dim,mem in sorted(self.qnameDims.items())))
                   if self.qnameDims else (),
-                )
+                ))
 
 
 class ModelDimensionValue(ModelObject):
@@ -1113,7 +1116,7 @@ class ModelUnit(ModelObject):
             return tuple(('mul',m) for m in measures[0]) + \
                    tuple(('div',d) for d in measures[1]) 
         else:
-            return tuple(('',m) for m in measures[0])
+            return tuple(('measure',m) for m in measures[0])
 
 from arelle.ModelFormulaObject import Aspect
 from arelle import FunctionIxt

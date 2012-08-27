@@ -195,36 +195,49 @@ class Cntlr:
                 gettext.install("arelle", 
                                 self.localeDir)
         
-    def startLogging(self, logFileName=None, logFileMode=None, logFileEncoding=None, logFormat=None, logger=None):
-        if logger is not None:
-            self.logger = logger # custom logger
-        elif logFileName: # use default logging
-            self.logger = logging.getLogger("arelle")
-            if logFileName in ("logToPrint", "logToStdErr"):
-                self.logHandler = LogToPrintHandler(logFileName)
-            elif logFileName == "logToBuffer":
-                self.logHandler = LogToBufferHandler()
-            elif logFileName.endswith(".xml"):
-                self.logHandler = LogToXmlHandler(filename=logFileName)
-                logFormat = "%(message)s"
-            else:
-                self.logHandler = logging.FileHandler(filename=logFileName, 
-                                                      mode=logFileMode if logFileMode else "w", 
-                                                      encoding=logFileEncoding if logFileEncoding else "utf-8")
-            self.logHandler.setFormatter(LogFormatter(logFormat if logFormat else "%(asctime)s [%(messageCode)s] %(message)s - %(file)s\n"))
-            self.logger.addHandler(self.logHandler)
-            self.logger.setLevel(logging.DEBUG)
-        else:
-            self.logger = None
-            
+    def startLogging(self, logFileName=None, logFileMode=None, logFileEncoding=None, logFormat=None, logLevel=None, logHandler=None):
+        # add additional logging levels    
         logging.addLevelName(logging.INFO + 1, "INFO-SEMANTIC")
         logging.addLevelName(logging.WARNING + 1, "WARNING-SEMANTIC")
         logging.addLevelName(logging.WARNING + 2, "ASSERTION-SATISFIED")
         logging.addLevelName(logging.WARNING + 3, "INCONSISTENCY")
         logging.addLevelName(logging.ERROR - 2, "ERROR-SEMANTIC")
         logging.addLevelName(logging.ERROR - 1, "ASSERTION-NOT-SATISFIED")
+
+        if logHandler is not None:
+            self.logger = logging.getLogger("arelle")
+            self.logHandler = logHandler
+            self.logger.addHandler(logHandler)
+        elif logFileName: # use default logging
+            self.logger = logging.getLogger("arelle")
+            if logFileName in ("logToPrint", "logToStdErr"):
+                self.logHandler = LogToPrintHandler(logFileName)
+            elif logFileName == "logToBuffer":
+                self.logHandler = LogToBufferHandler()
+                self.logger.logHrefObjectProperties = True
+            elif logFileName.endswith(".xml"):
+                self.logHandler = LogToXmlHandler(filename=logFileName)
+                self.logger.logHrefObjectProperties = True
+                logFormat = "%(message)s"
+            else:
+                self.logHandler = logging.FileHandler(filename=logFileName, 
+                                                      mode=logFileMode if logFileMode else "w", 
+                                                      encoding=logFileEncoding if logFileEncoding else "utf-8")
+            self.logHandler.setFormatter(LogFormatter(logFormat or "%(asctime)s [%(messageCode)s] %(message)s - %(file)s\n"))
+            self.logger.addHandler(self.logHandler)
+        else:
+            self.logger = None
+        if self.logger:
+            if logLevel and logLevel.upper() not in logging._levelNames.keys():
+                self.addToLog(_("Unknown log level name: {0}, please choose from {1}").format(
+                    logLevel, ', '.join(logging.getLevelName(l).lower()
+                                        for l in sorted([i for i in logging._levelNames.keys()
+                                                         if isinstance(i,int) and i > 0]))),
+                              level=logging.ERROR, messageCode="arelle:logLevel")
+            else:
+                self.logger.setLevel(logging.getLevelName((logLevel or "debug").upper()))
                         
-    def addToLog(self, message, messageCode="", file=""):
+    def addToLog(self, message, messageCode="", file="", level=logging.INFO):
         """Add a simple info message to the default logger
            
         :param message: Text of message to add to log.
@@ -235,7 +248,7 @@ class Cntlr:
         :type file: str
         """
         if self.logger is not None:
-            self.logger.info(message, extra={"messageCode":messageCode,"refs":[{"href": file}]})
+            self.logger.log(level, message, extra={"messageCode":messageCode,"refs":[{"href": file}]})
         else:
             print(message) # allows printing on standard out
             
@@ -422,25 +435,38 @@ class LogHandlerWithXml(logging.Handler):
         super(LogHandlerWithXml, self).__init__()
         
     def recordToXml(self, logRec):
+        def entityEncode(arg):  # be sure it's a string, vs int, etc, and encode &, <, ".
+            return str(arg).replace("&","&amp;").replace("<","&lt;").replace('"','&quot;')
+        
+        def propElts(properties, indent):
+            nestedIndent = indent + ' '
+            return indent.join('<property name="{0}" value="{1}"{2}>'.format(
+                                    entityEncode(p[0]),
+                                    entityEncode(p[1]),
+                                    '/' if len(p) == 2 
+                                    else '>' + nestedIndent + propElts(p[2],nestedIndent) + indent + '</property')
+                                for p in properties 
+                                if 2 <= len(p) <= 3)
+        
         msg = self.format(logRec)
         if logRec.args:
-            args = "".join([' {0}="{1}"'.format(n, 
-                                                str(v).replace("&","&amp;").replace("<","&lt;").replace('"','&quot;')) 
+            args = "".join([' {0}="{1}"'.format(n, entityEncode(v)) 
                             for n, v in logRec.args.items()])
         else:
             args = ""
-        refs = "\n".join('<ref href="{0}"{1}/>'.format(
-                        ref["href"], 
-                        ' sourceLine="{0}"'.format(ref["sourceLine"]) if "sourceLine" in ref else '')
+        refs = "\n ".join('\n <ref href="{0}"{1}{2}>'.format(
+                        entityEncode(ref["href"]), 
+                        ' sourceLine="{0}"'.format(ref["sourceLine"]) if "sourceLine" in ref else '',
+                        (">\n  " + propElts(ref["properties"],"\n  ") + "\n </ref" ) if "properties" in ref else '/')
                        for ref in logRec.refs)
         return ('<entry code="{0}" level="{1}">'
-                '<message{2}>{3}</message>{4}'
+                '\n <message{2}>{3}</message>{4}'
                 '</entry>\n'.format(logRec.messageCode, 
                                     logRec.levelname.lower(), 
                                     args, 
-                                    msg.replace("&","&amp;").replace("<","&lt;"), 
+                                    entityEncode(msg), 
                                     refs))
-
+    
 class LogToXmlHandler(LogHandlerWithXml):
     """
     .. class:: LogToXmlHandler(filename)

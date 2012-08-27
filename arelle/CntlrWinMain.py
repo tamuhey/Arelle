@@ -10,7 +10,10 @@ from arelle import PythonUtil # define 2.x or 3.x string types
 import os, sys, subprocess, pickle, time, locale, re
 from tkinter import (Tk, TclError, Toplevel, Menu, PhotoImage, StringVar, BooleanVar, N, S, E, W, EW, 
                      HORIZONTAL, VERTICAL, END)
-from tkinter.ttk import Frame, Button, Label, Combobox, Separator, PanedWindow, Notebook
+try:
+    from tkinter.ttk import Frame, Button, Label, Combobox, Separator, PanedWindow, Notebook
+except ImportError:  # 3.0 versions of tkinter
+    from ttk import Frame, Button, Label, Combobox, Separator, PanedWindow, Notebook
 import tkinter.tix
 import tkinter.filedialog
 import tkinter.messagebox, traceback
@@ -250,7 +253,7 @@ class CntlrWinMain (Cntlr.Cntlr):
 
         from arelle import ViewWinList
         self.logView = ViewWinList.ViewList(None, self.tabWinBtm, _("messages"), True)
-        WinMainLogHandler(self) # start logger
+        self.startLogging(logHandler=WinMainLogHandler(self)) # start logger
         logViewMenu = self.logView.contextMenu(contextMenuClick=self.contextMenuClick)
         logViewMenu.add_command(label=_("Clear"), underline=0, command=self.logClear)
         logViewMenu.add_command(label=_("Save to file"), underline=0, command=self.logSaveToFile)
@@ -533,7 +536,8 @@ class CntlrWinMain (Cntlr.Cntlr):
                 
         if filename:
             if importToDTS:
-                self.config["importOpenDir"] = os.path.dirname(filename)
+                if not filename.startswith("http://"):
+                    self.config["importOpenDir"] = os.path.dirname(filename)
             else:
                 if not filename.startswith("http://"):
                     self.config["fileOpenDir"] = os.path.dirname(filesource.baseurl if filesource.isArchive else filename)
@@ -1149,11 +1153,9 @@ class WinMainLogHandler(logging.Handler):
     def __init__(self, cntlr):
         super(WinMainLogHandler, self).__init__()
         self.cntlr = cntlr
-        self.level = logging.DEBUG
         #formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s - %(file)s %(sourceLine)s")
         formatter = Cntlr.LogFormatter("[%(messageCode)s] %(message)s - %(file)s")
         self.setFormatter(formatter)
-        logging.getLogger("arelle").addHandler(self)
     def flush(self):
         ''' Nothing to flush '''
     def emit(self, logRecord):

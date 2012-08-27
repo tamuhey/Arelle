@@ -114,11 +114,16 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                 for entityIdentifierElt in xbrlInstDoc.iterdescendants("{http://www.xbrl.org/2003/instance}identifier"):
                     if isinstance(entityIdentifierElt,ModelObject):
                         schemeAttr = entityIdentifierElt.get("scheme")
-                        if not disclosureSystem.identifierSchemePattern.match(schemeAttr):
-                            modelXbrl.error(("EFM.6.05.01", "GFM.1.02.01"),
-                                _("Invalid entity identifier scheme: %(scheme)s"),
-                                modelObject=entityIdentifierElt, scheme=schemeAttr)
                         entityIdentifier = XmlUtil.text(entityIdentifierElt)
+                        if not disclosureSystem.identifierSchemePattern.match(schemeAttr):
+                            try:
+                                contextId = entityIdentifierElt.getparent().getparent().id
+                            except AttributeError:
+                                contextId = "not available"
+                            modelXbrl.error(("EFM.6.05.01", "GFM.1.02.01"),
+                                _("Invalid entity identifier scheme %(scheme)s in context %(context)s for identifier %(identifier)s"),
+                                modelObject=entityIdentifierElt, scheme=schemeAttr,
+                                context=contextId, identifier=entityIdentifier)
                         if not disclosureSystem.identifierValuePattern.match(entityIdentifier):
                             modelXbrl.error(("EFM.6.05.02", "GFM.1.02.02"),
                                 _("Invalid entity identifier %(entityIdentifierName)s: %(entityIdentifer)s"),
@@ -1227,7 +1232,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
 
         if self.validateEFM:
             for pluginXbrlMethod in pluginClassMethods("Validate.EFM.Finally"):
-                pluginXbrlMethod(self)
+                pluginXbrlMethod(self, conceptsUsed)
         self.modelXbrl.profileActivity("... plug in '.Finally' checks", minTimeToShow=1.0)
         self.modelXbrl.profileStat(_("validate") + modelXbrl.modelManager.disclosureSystem.validationType)
         
