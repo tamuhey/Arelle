@@ -811,10 +811,28 @@ class ModelXbrl:
                                     ref["properties"] = propValues(arg.propertyView)
                                 except AttributeError:
                                     pass # is a default properties entry appropriate or needed?
+                        elif isinstance(arg, (tuple,list)):
+                            name = arg[0]
+                            arg = arg[1]
+                            if isinstance(arg, ModelObject):
+                                ref["variable"] = name
+                                ref["href"] = file + "#" + XmlUtil.elementFragmentIdentifier(arg)
+                                ref["sourceLine"] = arg.sourceline
+                                ref["objectId"] = arg.objectId()
+                                if logHrefObjectProperties:
+                                    try:
+                                        ref["properties"] = propValues(arg.propertyView)
+                                    except AttributeError:
+                                        pass # is a default properties entry appropriate or needed?
+                            else:
+                                ref = None
                         else:
                             ref["href"] = file
-                        refs.append(ref)
+                        if ref is not None:
+                            refs.append(ref)
                 extras["refs"] = refs
+            elif argName == "results":
+                extras["results"] = argValue
             elif argName == "sourceLine":
                 if isinstance(argValue, _INT_TYPES):    # must be sortable with int's in logger
                     extras["sourceLine"] = argValue
