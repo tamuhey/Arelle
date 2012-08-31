@@ -21,8 +21,12 @@ def startWebserver(_cntlr, options):
     cntlr = _cntlr
     imagesDir = cntlr.imagesDir
     optionsNames = [option for option in dir(options) if not option.startswith('_')]
-    host, sep, port = options.webserver.partition(":")
-    run(host=host, port=port)
+    host, sep, portServer = options.webserver.partition(":")
+    port, sep, server = portServer.partition(":")
+    if server:
+        run(host=host, port=port, server=server)
+    else:
+        run(host=host, port=port)
     
 @get('/rest/login')
 def login_form():
@@ -87,13 +91,15 @@ def image(imgFile):
     return static_file(imgFile, root=imagesDir)
 
 validationOptions = {
-    "efm": "validateEFM",
-    "ifrs": "gfmName=ifrs",
-    "hmrc": "gfmName=hmrc",
-    "sbr-nl": "gfmName=sbr-nl",
-    "utr": "utrValidate",
-    "infoset": "infosetValidate",
-    "import": "importFiles"
+    # these options have no value (after + in query)
+    "efm": ("validateEFM", True),
+    "ifrs": ("gfmName", "ifrs"),
+    "hmrc": ("gfmName", "hmrc"),
+    "sbr-nl": ("gfmName", "sbr-nl"),
+    "utr": ("utrValidate", True),
+    "infoset": ("infosetValidate", True),
+    # these parameters pass through the value after + in query
+    "import": ("importFiles", None),
                      }
 
 class Options():
@@ -153,25 +159,35 @@ def validation(file=None):
             errors.append(_("Media '{0}' is not supported for view (please select xhtml, html, xml, csv, or json)").format(media))
     elif requestPathParts[-1] not in ("open", "close"):                
         errors.append(_("Neither validation nor view requested, nothing to do."))
-    if flavor != 'standard' and not flavor.startswith('edgar') and not flavor.startswith('sec'):
+    if (flavor not in ('standard', 'standard-except-formula', 'formula-compile-only', 'formula-compile-and-run')
+        and not flavor.startswith('edgar') and not flavor.startswith('sec')):
         errors.append(_("Flavor '{0}' is not supported").format(flavor)) 
     if view and view not in supportedViews:
         errors.append(_("View '{0}' is not supported").format(view))
     if errors:
-        errors.insert(0, _("URL: ") + file)
+        errors.insert(0, _("URL: ") + (file or request.query.file or '(no file)'))
         return errorReport(errors, media)
     options = Options() # need named parameters to simulate options
+    isFormulaOnly = False
     for key, value in request.query.items():
         if key == "file":
             setattr(options, "entrypointFile", value)
         elif key == "flavor":
             if value.startswith("sec") or value.startswith("edgar"):
                 setattr(options, "validateEFM", True)
+            elif value == "formula-compile-only":
+                isFormulaOnly = True
+                setattr(options, "formulaAction", "validate")
+            elif value == "formula-compile-and-run":
+                isFormulaOnly = True
+                setattr(options, "formulaAction", "run")
+            elif value == "standard-except-formula":
+                setattr(options, "formulaAction", "none")
         elif key in("media", "view"):
             pass
         elif key in validationOptions:
-            optionKey, sep, optionValue = validationOptions[key].partition('=')
-            setattr(options, optionKey, optionValue or value)
+            optionKey, optionValue = validationOptions[key]
+            setattr(options, optionKey, optionValue if optionValue is not None else value)
         elif not value: # convert plain str parameter present to True parameter
             setattr(options, key, True)
         else:
@@ -181,7 +197,8 @@ def validation(file=None):
     requestPathParts = set(request.urlparts[2].split('/'))
     viewFile = None
     if isValidation:
-        setattr(options, "validate", True)
+        if not isFormulaOnly:
+            setattr(options, "validate", True)
     elif view:
         viewFile = FileNamedStringIO(media)
         setattr(options, view + "File", viewFile)
@@ -415,8 +432,11 @@ document at c:/a/b/c.xbrl (on local drive) and return structured xml results.</t
 document at c:/a/b/c.xbrl (on local drive) and return structured xml results.</td></tr>
 <tr><td></td><td>Parameters are optional after "?" character, and are separated by "&amp;" characters, 
 as follows:</td></tr>
-<tr><td style="text-indent: 1em;">flavor</td><td><code>standard</code>: XBRL 2.1 and XDT validation. (default)
-<br/>{<code>sec</code>*|<code>edgar</code>*}: SEC Edgar Filer Manual validation.</td></tr> 
+<tr><td style="text-indent: 1em;">flavor</td><td><code>standard</code>: XBRL 2.1 and XDT validation.  (If formulas are present they will also be compiled and run.)  (default)
+<br/>{<code>sec</code>*|<code>edgar</code>*}: SEC Edgar Filer Manual validation.   (If formulas are present they will also be compiled and run.)
+<br/><code>standard-except-formula</code>: XBRL 2.1 and XDT validation.  (If formulas are present they will be ignored.)
+<br/><code>formula-compile-only</code>: Formulas will be compiled but not run.  (No XBRL 2.1, XDT, or disclosure system validation.)
+<br/><code>formula-compile-and-run</code>: Formulas will be compiled and run.  (No XBRL 2.1, XDT, or disclosure system validation.)</td></tr> 
 <tr><td style="text-indent: 1em;">media</td><td><code>html</code> or <code>xhtml</code>: Html text results. (default)
 <br/><code>xml</code>: XML structured results.
 <br/><code>json</code>: JSON results.
