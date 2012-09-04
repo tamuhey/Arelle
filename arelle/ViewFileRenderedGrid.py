@@ -287,6 +287,7 @@ class ViewRenderedGrid(ViewFile.View):
 
     
     def bodyCells(self, row, yParentOrdCntx, xOrdCntxs, zAspects, yChildrenFirst):
+        rendrCntx = getattr(self.modelXbrl, "rendrCntx", None) # none for EU 2010 tables
         dimDefaults = self.modelXbrl.qnameDimensionDefaults
         for yOrdCntx in yParentOrdCntx.subOrdinateContexts:
             if yChildrenFirst:
@@ -316,7 +317,7 @@ class ViewRenderedGrid(ViewFile.View):
                     cellAspectValues = {}
                     matchableAspects = set()
                     for aspect in _DICT_SET(xAspects.keys()) | _DICT_SET(yAspects.keys()) | _DICT_SET(zAspects.keys()):
-                        aspectValue = inheritedAspectValue(self, aspect, xAspects, yAspects, zAspects)
+                        aspectValue = inheritedAspectValue(self, aspect, xAspects, yAspects, zAspects, xOrdCntx, yOrdCntx)
                         if dimDefaults.get(aspect) != aspectValue: # don't include defaulted dimensions
                             cellAspectValues[aspect] = aspectValue
                         matchableAspects.add(aspectModelAspect.get(aspect,aspect)) #filterable aspect from rule aspect
@@ -332,7 +333,7 @@ class ViewRenderedGrid(ViewFile.View):
                     fp = FactPrototype(self, cellAspectValues)
                     if conceptNotAbstract:
                         for fact in self.modelXbrl.factsByQname[priItemQname] if priItemQname else self.modelXbrl.facts:
-                            if (all(aspectMatches(None, fact, fp, aspect) 
+                            if (all(aspectMatches(rendrCntx, fact, fp, aspect) 
                                     for aspect in matchableAspects) and
                                 all(fact.context.dimMemberQname(dim,includeDefaults=True) in (dimDefaults[dim], None)
                                     for dim in cellDefaultedDims)):

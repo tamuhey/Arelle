@@ -7,11 +7,11 @@ Created on Sep 13, 2011
 import os
 from arelle import XbrlConst
 from tkinter import BooleanVar
-from arelle.ModelFormulaObject import Aspect
 from arelle.ModelObject import ModelObject
+from arelle.ModelInstanceObject import ModelFact
 from arelle.ModelRenderingObject import (ModelEuAxisCoord, ModelOpenAxis, ModelPredefinedAxis,
-                                         ModelRelationshipAxis, ModelSelectionAxis,
-                                         OrdinateContext)
+                                         ModelRelationshipAxis, ModelSelectionAxis, ModelFilterAxis,
+                                         ModelCompositionAxis, ModelTupleAxis, OrdinateContext)
 
 def setDefaults(view):
     view.ignoreDimValidity = BooleanVar(value=True)
@@ -24,7 +24,7 @@ def getTblAxes(view, viewTblELR):
         view.axisSubtreeRelSet = view.modelXbrl.relationshipSet(XbrlConst.euAxisMember, viewTblELR)
     else: # try 2011 roles
         tblAxisRelSet = view.modelXbrl.relationshipSet(XbrlConst.tableAxis, viewTblELR)
-        view.axisSubtreeRelSet = view.modelXbrl.relationshipSet(XbrlConst.tableAxisSubtree, viewTblELR)
+        view.axisSubtreeRelSet = view.modelXbrl.relationshipSet((XbrlConst.tableAxisSubtree,XbrlConst.tableAxisSubtree2011), viewTblELR)
     if tblAxisRelSet is None or len(tblAxisRelSet.modelRelationships) == 0:
         view.modelXbrl.modelManager.addToLog(_("no table relationships for {0}").format(view.arcrole))
         return (None, None, None, None)
@@ -52,6 +52,7 @@ def getTblAxes(view, viewTblELR):
         xOrdCntx = yOrdCntx = zOrdCntx = None
         # must be cartesian product of top level relationships
         tblAxisRels = tblAxisRelSet.fromModelObject(table)
+        facts = view.modelXbrl.factsInInstance
         # do z's first to set variables needed by x and y axes expressions
         for disposition in ("z", "x", "y"):
             for i, tblAxisRel in enumerate(tblAxisRels):
@@ -62,17 +63,17 @@ def getTblAxes(view, viewTblELR):
                         xOrdCntx = OrdinateContext(None, axisObj, view.zmostOrdCntx)
                         if isinstance(axisObj,ModelPredefinedAxis) and axisObj.parentChildOrder is not None:
                             view.xAxisChildrenFirst.set(axisObj.parentChildOrder == "children-first")
-                        analyzeHdrs(view, xOrdCntx, axisObj, 1, disposition, i, tblAxisRels)
+                        analyzeHdrs(view, xOrdCntx, axisObj, 1, disposition, facts, i, tblAxisRels)
                         break
                     elif disposition == "y" and yOrdCntx is None:
                         yOrdCntx = OrdinateContext(None, axisObj, view.zmostOrdCntx)
                         if isinstance(axisObj,ModelPredefinedAxis) and axisObj.parentChildOrder is not None:
                             view.yAxisChildrenFirst.set(axisObj.parentChildOrder == "children-first")
-                        analyzeHdrs(view, yOrdCntx, axisObj, 1, disposition, i, tblAxisRels)
+                        analyzeHdrs(view, yOrdCntx, axisObj, 1, disposition, facts, i, tblAxisRels)
                         break
                     elif disposition == "z" and zOrdCntx is None:
                         zOrdCntx = OrdinateContext(None, axisObj)
-                        analyzeHdrs(view, zOrdCntx, axisObj, 1, disposition, i, tblAxisRels)
+                        analyzeHdrs(view, zOrdCntx, axisObj, 1, disposition, facts, i, tblAxisRels)
                         break
         view.colHdrTopRow = view.zAxisRows + 1 # need rest if combobox used (2 if view.zAxisRows else 1)
         view.rowHdrWrapLength = 200 + sum(view.rowHdrColWidth[i] for i in range(view.rowHdrCols))
@@ -82,6 +83,7 @@ def getTblAxes(view, viewTblELR):
         #    view.gridView.rowconfigure(i)
         #for i in range(view.dataFirstCol + view.dataCols):
         #    view.gridView.columnconfigure(i)
+        view.modelTable = table
         
         return (tblAxisRelSet, xOrdCntx, yOrdCntx, zOrdCntx)
     
@@ -92,9 +94,9 @@ def sortkey(obj):
         return obj.objectIndex
     return obj
                   
-def analyzeHdrs(view, ordCntx, axisObject, depth, axisDisposition, i=None, tblAxisRels=None):
+def analyzeHdrs(view, ordCntx, axisObject, depth, axisDisposition, facts, i=None, tblAxisRels=None):
     if ordCntx and isinstance(axisObject, (ModelEuAxisCoord, ModelOpenAxis)):
-        cartesianProductNestedArgs = (view, depth, axisDisposition, tblAxisRels, i)
+        cartesianProductNestedArgs = (view, depth, axisDisposition, facts, tblAxisRels, i)
         ordCardinality, ordDepth = axisObject.cardinalityAndDepth(ordCntx)
         nestedDepth = depth + ordDepth
         if axisDisposition == "z":
@@ -133,44 +135,78 @@ def analyzeHdrs(view, ordCntx, axisObject, depth, axisDisposition, i=None, tblAx
                 if not view.rowHdrCodeCol:
                     if axisObject.header(role="http://www.eurofiling.info/role/2010/coordinate-code"): 
                         ordCntx.rowHdrCodeCol = True
-        if isinstance(axisObject, ModelRelationshipAxis):
-            selfOrdContexts = {} if axisObject.axis.endswith('-or-self') else None
-            for rel in axisObject.relationships(ordCntx):
-                if not isinstance(rel, list):
-                    relSubOrdCntx = addRelationship(axisObject, rel, ordCntx, cartesianProductNestedArgs, selfOrdContexts)
-                else:
-                    addRelationships(axisObject, rel, relSubOrdCntx, cartesianProductNestedArgs)
-                
+        hasSubtreeRels = False
         for axisSubtreeRel in view.axisSubtreeRelSet.fromModelObject(axisObject):
+            hasSubtreeRels = True
             subtreeObj = axisSubtreeRel.toModelObject
-            subOrdCntx = OrdinateContext(ordCntx, subtreeObj)
+            if (isinstance(axisObject, ModelCompositionAxis) and
+                isinstance(subtreeObj, ModelRelationshipAxis)): # append list products to composititionAxes subObjCntxs
+                subOrdCntx = ordCntx
+            else:
+                subOrdCntx = OrdinateContext(ordCntx, subtreeObj) # others are nested ordCntx
+                if axisDisposition != "z":
+                    ordCntx.subOrdinateContexts.append(subOrdCntx)
             if axisDisposition != "z":
-                ordCntx.subOrdinateContexts.append(subOrdCntx)
-                analyzeHdrs(view, subOrdCntx, subtreeObj, depth+ordDepth, axisDisposition) #recurse
+                analyzeHdrs(view, subOrdCntx, subtreeObj, depth+ordDepth, axisDisposition, facts) #recurse
+                analyzeCartesianProductHdrs(subOrdCntx, *cartesianProductNestedArgs)
             else:
                 subOrdCntx.indent = depth - 1
                 ordCntx.choiceOrdinateContexts.append(subOrdCntx)
-                analyzeHdrs(view, ordCntx, subtreeObj, depth + 1, axisDisposition) #recurse
-            if axisDisposition != "z":
-                analyzeCartesianProductHdrs(subOrdCntx, *cartesianProductNestedArgs)
+                analyzeHdrs(view, ordCntx, subtreeObj, depth + 1, axisDisposition, facts) #recurse
         if not hasattr(ordCntx, "indent"): # probably also for multiple open axes
-            if isinstance(axisObject, ModelSelectionAxis):
+            if isinstance(axisObject, ModelRelationshipAxis):
+                selfOrdContexts = {} if axisObject.axis.endswith('-or-self') else None
+                for rel in axisObject.relationships(ordCntx):
+                    if not isinstance(rel, list):
+                        relSubOrdCntx = addRelationship(axisObject, rel, ordCntx, cartesianProductNestedArgs, selfOrdContexts)
+                    else:
+                        addRelationships(axisObject, rel, relSubOrdCntx, cartesianProductNestedArgs)
+                    
+            elif isinstance(axisObject, ModelSelectionAxis):
                 varQn = axisObject.variableQname
                 if varQn:
                     selections = sorted(ordCntx.evaluate(axisObject, axisObject.evaluate) or [], 
                                         key=lambda obj:sortkey(obj))
                     if isinstance(selections, (list,set,tuple)) and len(selections) > 1:
                         for selection in selections: # nested choices from selection list
-                            subOrdCntx = OrdinateContext(ordCntx, axisObject)
+                            subOrdCntx = OrdinateContext(ordCntx, axisObject, contextItemFact=selection)
                             subOrdCntx.variables[varQn] = selection
                             subOrdCntx.indent = 0
                             if axisDisposition == "z":
                                 ordCntx.choiceOrdinateContexts.append(subOrdCntx)
+                                subOrdCntx.zSelection = True
                             else:
                                 ordCntx.subOrdinateContexts.append(subOrdCntx)
-                                analyzeHdrs(view, subOrdCntx, axisObject, depth, axisDisposition) #recurse
+                                analyzeHdrs(view, subOrdCntx, axisObject, depth, axisDisposition, facts) #recurse
                     else:
                         ordCntx.variables[varQn] = selections
+            elif isinstance(axisObject, ModelFilterAxis):
+                ordCntx.abstract = True # spanning ordinate acts as a subtitle
+                filteredFactsPartitions = ordCntx.evaluate(axisObject, 
+                                                           axisObject.filteredFactsPartitions, 
+                                                           evalArgs=(facts,))
+                for factsPartition in filteredFactsPartitions:
+                    subOrdCntx = OrdinateContext(ordCntx, axisObject, contextItemFact=factsPartition[0])
+                    subOrdCntx.indent = 0
+                    ordCntx.subOrdinateContexts.append(subOrdCntx)
+                    analyzeHdrs(view, subOrdCntx, axisObject, depth, axisDisposition, factsPartition) #recurse
+                # sort by header (which is likely to be typed dim value, for example)
+                ordCntx.subOrdinateContexts.sort(key=lambda subOrdCntx: subOrdCntx.header(lang=view.lang))
+                
+                # TBD if there is no abstract 'sub header' for these subOrdCntxs, move them in place of parent ordCntx 
+            elif isinstance(axisObject, ModelTupleAxis):
+                ordCntx.abstract = True # spanning ordinate acts as a subtitle
+                matchingTupleFacts = ordCntx.evaluate(axisObject, 
+                                                      axisObject.filteredFacts, 
+                                                      evalArgs=(facts,))
+                for tupleFact in matchingTupleFacts:
+                    subOrdCntx = OrdinateContext(ordCntx, axisObject, contextItemFact=tupleFact)
+                    subOrdCntx.indent = 0
+                    ordCntx.subOrdinateContexts.append(subOrdCntx)
+                    analyzeHdrs(view, subOrdCntx, axisObject, depth, axisDisposition, [tupleFact]) #recurse
+                # sort by header (which is likely to be typed dim value, for example)
+                if any(sOC.header(lang=view.lang) for sOC in ordCntx.subOrdinateContexts):
+                    ordCntx.subOrdinateContexts.sort(key=lambda subOrdCntx: subOrdCntx.header(lang=view.lang))
 
             if axisDisposition == "z":
                 if ordCntx.choiceOrdinateContexts:
@@ -181,24 +217,34 @@ def analyzeHdrs(view, ordCntx, axisObject, depth, axisDisposition, i=None, tblAx
                         ordCntx.choiceOrdinateIndex = 0
                 view.zmostOrdCntx = ordCntx
                     
-            analyzeCartesianProductHdrs(ordCntx, *cartesianProductNestedArgs)
+            if not hasSubtreeRels or axisDisposition == "z":
+                analyzeCartesianProductHdrs(ordCntx, *cartesianProductNestedArgs)
                     
             if not ordCntx.subOrdinateContexts: # childless root ordinate, make a child to iterate in producing table
                 subOrdContext = OrdinateContext(ordCntx, axisObject)
 
-def analyzeCartesianProductHdrs(subOrdCntx, view, depth, axisDisposition, tblAxisRels, i):
+def analyzeCartesianProductHdrs(subOrdCntx, view, depth, axisDisposition, facts, tblAxisRels, i):
     if i is not None: # recurse table relationships for cartesian product
         for j, tblRel in enumerate(tblAxisRels[i+1:]):
             tblObj = tblRel.toModelObject
             if isinstance(tblObj, (ModelEuAxisCoord, ModelOpenAxis)) and axisDisposition == tblRel.axisDisposition:
-                if tblObj.cardinalityAndDepth(subOrdCntx)[1] or axisDisposition == "z":
+                #if tblObj.cardinalityAndDepth(subOrdCntx)[1] or axisDisposition == "z":
+                if axisDisposition == "z":
                     subOrdTblCntx = OrdinateContext(subOrdCntx, tblObj)
                     subOrdCntx.subOrdinateContexts.append(subOrdTblCntx)
                 else: # non-ordinate composition
                     subOrdTblCntx = subOrdCntx
+                # predefined axes need facts sub-filtered
+                if isinstance(subOrdCntx.axisObject, ModelPredefinedAxis):
+                    matchingFacts = subOrdCntx.evaluate(subOrdCntx.axisObject, 
+                                                        subOrdCntx.axisObject.filteredFacts, 
+                                                        evalArgs=(facts,))
+                else:
+                    matchingFacts = facts
+                    
                 analyzeHdrs(view, subOrdTblCntx, tblObj, 
                             depth + (0 if axisDisposition == 'z' else 1), 
-                            axisDisposition, j + i + 1, tblAxisRels) #cartesian product
+                            axisDisposition, matchingFacts, j + i + 1, tblAxisRels) #cartesian product
                 break
                 
 def addRelationship(relAxisObj, rel, ordCntx, cartesianProductNestedArgs, selfOrdContexts=None):
@@ -259,14 +305,22 @@ def inheritedExplicitDims(view, ordCntx, dims=None, nested=False):
         return {(dim,mem) for dim,mem in dims.items() if mem != 'omit'}
 
 emptySet = set()
-def inheritedAspectValue(view, aspect, xAspects, yAspects, zAspects):
+def inheritedAspectValue(view, aspect, xAspects, yAspects, zAspects, xOrdCntx, yOrdCntx):
     ords = xAspects.get(aspect, emptySet) | yAspects.get(aspect, emptySet) | zAspects.get(aspect, emptySet)
     if len(ords) > 1:
+        from arelle.ModelFormulaObject import aspectStr
         view.modelXbrl.error("xbrlte:axisAspectClash",
             _("Aspect %(aspect)s covered by multiple axes."),
-            modelObject=ordObjects(ords), aspect=aspectStr(aspect))
+            modelObject=view.modelTable, aspect=aspectStr(aspect))
     if ords:
-        return ords.pop().aspectValue(aspect)
+        ordCntx = ords.pop()
+        axisObject = ordCntx.axisObject
+        if axisObject.aspectValueDependsOnVars(aspect):
+            return xOrdCntx.evaluate(axisObject, 
+                                     axisObject.aspectValue, 
+                                     otherOrdinate=yOrdCntx,
+                                     evalArgs=(aspect,))
+        return ordCntx.aspectValue(aspect)
     return None 
 
 

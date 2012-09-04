@@ -37,6 +37,7 @@ from arelle import XmlUtil, XbrlConst, XbrlUtil, UrlUtil, Locale, ModelValue
 from arelle.ValidateXbrlCalcs import inferredPrecision, inferredDecimals, roundValue
 from math import isnan
 from arelle.ModelObject import ModelObject
+Aspect = None
 
 class NewFactItemOptions():
     """
@@ -403,7 +404,7 @@ class ModelFact(ModelObject):
         if unmatchedFactsStack is not None: 
             del unmatchedFactsStack[entryDepth:]
         return True
-
+    
     @property
     def propertyView(self):
         try:

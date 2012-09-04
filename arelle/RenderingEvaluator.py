@@ -85,9 +85,9 @@ def checkAxisAspectModel(modelXbrl, modelTable, tblAxisRel, uncoverableAspects):
                 aspect=str(aspect) if isinstance(aspect,QName) else Aspect.label[aspect])
         hasCoveredAspect = True
         if aspect in modelTable.priorAspectAxisDisposition:
-            if tblAxisDisposition != modelTable.priorAspectAxisDisposition[aspect]:
+            if tblAxisDisposition != modelTable.priorAspectAxisDisposition[aspect] and aspect != Aspect.DIMENSIONS:
                 modelXbrl.error("xbrlte:axisAspectClash",
-                    _("%(axis)s ordinate %(xlinkLabel)s, aspect %(aspect)s defined on axes of disposition %(axisDisposition)s and %(otherAxisDisposition)s"),
+                    _("%(axis)s ordinate %(xlinkLabel)s, aspect %(aspect)s defined on axes of disposition %(axisDisposition)s and %(axisDisposition2)s"),
                     modelObject=modelTable, axis=tblAxis.localName, xlinkLabel=tblAxis.xlinkLabel, 
                     axisDisposition=tblAxisDisposition, axisDisposition2=modelTable.priorAspectAxisDisposition[aspect],
                     aspect=str(aspect) if isinstance(aspect,QName) else Aspect.label[aspect])
@@ -100,7 +100,7 @@ def checkAxisAspectModel(modelXbrl, modelTable, tblAxisRel, uncoverableAspects):
                 _("DimensionRelationship axis %(xlinkLabel)s can't be used in non-dimensional aspect model"),
                 modelObject=(modelTable,tblAxis), xlinkLabel=tblAxis.xlinkLabel)
     axisOrdinateHasChild = False
-    for axisSubtreeRel in modelXbrl.relationshipSet(XbrlConst.tableAxisSubtree).fromModelObject(tblAxis):
+    for axisSubtreeRel in modelXbrl.relationshipSet((XbrlConst.tableAxisSubtree, XbrlConst.tableAxisSubtree2011)).fromModelObject(tblAxis):
         checkAxisAspectModel(modelXbrl, modelTable, axisSubtreeRel, uncoverableAspects)
         axisOrdinateHasChild = True
     if not axisOrdinateHasChild and not hasCoveredAspect:
