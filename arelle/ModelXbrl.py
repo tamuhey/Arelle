@@ -811,6 +811,8 @@ class ModelXbrl:
                                     ref["properties"] = propValues(arg.propertyView)
                                 except AttributeError:
                                     pass # is a default properties entry appropriate or needed?
+            # PATCHED CODE! Take care if this region conflicts during a merge!
+            ### BEGIN PATCH: business-rules logging changes
                         elif isinstance(arg, (tuple,list)):
                             name = arg[0]
                             arg = arg[1]
@@ -833,6 +835,7 @@ class ModelXbrl:
                 extras["refs"] = refs
             elif argName == "results":
                 extras["results"] = argValue
+            ### END PATCH: business-rule logging changes
             elif argName == "sourceLine":
                 if isinstance(argValue, _INT_TYPES):    # must be sortable with int's in logger
                     extras["sourceLine"] = argValue
