@@ -6,17 +6,10 @@ Created on Sep 13, 2011
 '''
 import os
 from arelle import XbrlConst
-from tkinter import BooleanVar
 from arelle.ModelObject import ModelObject
-from arelle.ModelInstanceObject import ModelFact
 from arelle.ModelRenderingObject import (ModelEuAxisCoord, ModelOpenAxis, ModelPredefinedAxis,
                                          ModelRelationshipAxis, ModelSelectionAxis, ModelFilterAxis,
                                          ModelCompositionAxis, ModelTupleAxis, OrdinateContext)
-
-def setDefaults(view):
-    view.ignoreDimValidity = BooleanVar(value=True)
-    view.xAxisChildrenFirst = BooleanVar(value=True)
-    view.yAxisChildrenFirst = BooleanVar(value=False)
 
 def getTblAxes(view, viewTblELR):
     tblAxisRelSet = view.modelXbrl.relationshipSet(XbrlConst.euTableAxis, viewTblELR)
@@ -48,6 +41,7 @@ def getTblAxes(view, viewTblELR):
         view.zAxisRows = 0
         view.aspectModel = table.aspectModel
         view.zmostOrdCntx = None
+        view.modelTable = table
         
         xOrdCntx = yOrdCntx = zOrdCntx = None
         # must be cartesian product of top level relationships
@@ -134,7 +128,7 @@ def analyzeHdrs(view, ordCntx, axisObject, depth, axisDisposition, facts, i=None
                         view.rowHdrDocCol = True
                 if not view.rowHdrCodeCol:
                     if axisObject.header(role="http://www.eurofiling.info/role/2010/coordinate-code"): 
-                        ordCntx.rowHdrCodeCol = True
+                        view.rowHdrCodeCol = True
         hasSubtreeRels = False
         for axisSubtreeRel in view.axisSubtreeRelSet.fromModelObject(axisObject):
             hasSubtreeRels = True
