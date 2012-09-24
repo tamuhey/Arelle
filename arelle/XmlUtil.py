@@ -384,6 +384,7 @@ def emptyContentModel(element):
 def addChild(parent, childName1, childName2=None, attributes=None, text=None, afterSibling=None, beforeSibling=None):
     from arelle.FunctionXs import xsString
     modelDocument = parent.modelDocument
+                    
     if isinstance(childName1, QName):
         addQnameValue(modelDocument, childName1)
         child = modelDocument.parser.makeelement(childName1.clarkNotation)
@@ -424,8 +425,9 @@ def copyNodes(parent, elts):
         parent.append(copyElt)
         for attrTag, attrValue in origElt.items():
             qn = qname(attrTag, noPrefixIsNoNamespace=True)
-            if qn.prefix and qn.namespaceURI:
-                setXmlns(modelDocument, qn.prefix, qn.namespaceURI)
+            prefix = xmlnsprefix(origElt, qn.namespaceURI)
+            if prefix:
+                setXmlns(modelDocument, prefix, qn.namespaceURI)
                 copyElt.set(attrTag, attrValue)
             else:
                 copyElt.set(attrTag, attrValue)
@@ -615,7 +617,9 @@ def ixToXhtml(fromRoot):
     toRoot = etree.Element(fromRoot.localName)
     copyNonIxChildren(fromRoot, toRoot)
     for attrTag, attrValue in fromRoot.items():
-        toRoot.set(attrTag, attrValue)
+        if attrTag not in ('version', # used in inline test cases but not valid xhtml
+                           '{http://www.w3.org/2001/XMLSchema-instance}schemaLocation'):
+            toRoot.set(attrTag, attrValue)
     return toRoot
 
 def copyNonIxChildren(fromElt, toElt):
