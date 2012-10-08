@@ -253,8 +253,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
             #6.5.8 unused contexts
             for f in modelXbrl.facts:
                 factContextID = f.contextID
-                if factContextID in contextIDs:
-                    contextIDs.remove(factContextID)
+                contextIDs.discard(factContextID)
                     
                 context = f.context
                 factElementName = f.localName
@@ -368,10 +367,13 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                             
             self.modelXbrl.profileActivity("... filer fact checks", minTimeToShow=1.0)
     
-            if len(contextIDs) > 0:
-                modelXbrl.error(("EFM.6.05.08", "GFM.1.02.08"),
-                                _("The instance document contained a context(s) %(contextIDs)s that was(are) not used in any fact."),
-                                modelXbrl=modelXbrl, contextIDs=", ".join(contextIDs))
+            if len(contextIDs) > 0: # check if contextID is on any undefined facts
+                for undefinedFact in modelXbrl.undefinedFacts:
+                    contextIDs.discard(undefinedFact.get("contextRef"))
+                if len(contextIDs) > 0:
+                    modelXbrl.error(("EFM.6.05.08", "GFM.1.02.08"),
+                                    _("The instance document contained a context(s) %(contextIDs)s that was(are) not used in any fact."),
+                                    modelXbrl=modelXbrl, contextIDs=", ".join(contextIDs))
     
             #6.5.9 start-end durations
             if disclosureSystem.GFM or \
@@ -1312,7 +1314,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                 if dupDetectKey in dupLabels:
                     modelXbrl.error(("EFM.6.10.02", "GFM.1.5.2", "SBR.NL.2.2.1.05"),
                         _("Concept %(concept)s has duplicated labels for role %(role)s lang %(lang)s."),
-                        modelObject=(concept, modelLabel, dupLabels[dupDetectKey]), 
+                        modelObject=(modelLabel, dupLabels[dupDetectKey]), # removed concept from modelObjects
                         concept=concept.qname, role=dupDetectKey[0], lang=dupDetectKey[1])
                 else:
                     dupLabels[dupDetectKey] = modelLabel
