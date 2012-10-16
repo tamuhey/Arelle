@@ -45,6 +45,8 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
         
         # find typedDomainRefs before validateXBRL pass
         if modelXbrl.modelManager.disclosureSystem.SBRNL:
+            for pluginXbrlMethod in pluginClassMethods("Validate.SBRNL.Start"):
+                pluginXbrlMethod(self, modelXbrl)
             self.qnSbrLinkroleorder = ModelValue.qname("http://www.nltaxonomie.nl/5.0/basis/sbr/xbrl/xbrl-syntax-extension","linkroleOrder")
 
             self.typedDomainQnames = set()
@@ -422,7 +424,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                             if duration > datetime.timedelta(0) and duration <= datetime.timedelta(1):
                                 probCntxs |= otherCntxs
                         if probCntxs:
-                            probInstantCntxsByEnd[end] |= ( otherCntxs | {cntx} )
+                            probInstantCntxsByEnd[end] |= ( probCntxs | {cntx} )
                             probCntxs.clear()
                 del probCntxs
                 for end, probCntxs in probStartEndCntxsByEnd.items():
@@ -1252,6 +1254,9 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
 
         if self.validateEFM:
             for pluginXbrlMethod in pluginClassMethods("Validate.EFM.Finally"):
+                pluginXbrlMethod(self, conceptsUsed)
+        elif self.validateSBRNL:
+            for pluginXbrlMethod in pluginClassMethods("Validate.SBRNL.Finally"):
                 pluginXbrlMethod(self, conceptsUsed)
         self.modelXbrl.profileActivity("... plug in '.Finally' checks", minTimeToShow=1.0)
         self.modelXbrl.profileStat(_("validate {0}").format(modelXbrl.modelManager.disclosureSystem.validationType))
