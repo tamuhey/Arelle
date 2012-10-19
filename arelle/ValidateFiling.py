@@ -22,16 +22,13 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
     def __init__(self, modelXbrl):
         super(ValidateFiling, self).__init__(modelXbrl)
         
-        global datePattern, GFMcontextDatePattern, signOrCurrencyPattern, usTypesPattern, usRolesPattern, usDeiPattern, instanceFileNamePattern, linkroleDefinitionStatementSheet
+        global datePattern, GFMcontextDatePattern, signOrCurrencyPattern, instanceFileNamePattern, linkroleDefinitionStatementSheet
         
         if datePattern is None:
             datePattern = re.compile(r"([12][0-9]{3})-([01][0-9])-([0-3][0-9])")
             GFMcontextDatePattern = re.compile(r"^[12][0-9]{3}-[01][0-9]-[0-3][0-9]$")
             # note \u20zc = euro, \u00a3 = pound, \u00a5 = yen
             signOrCurrencyPattern = re.compile("^(-)[0-9]+|[^eE](-)[0-9]+|(\\()[0-9].*(\\))|([$\u20ac\u00a3\00a5])")
-            usTypesPattern = re.compile(r"^http://(xbrl.us|fasb.org)/us-types/")
-            usRolesPattern = re.compile(r"^http://(xbrl.us|fasb.org)/us-roles/")
-            usDeiPattern = re.compile(r"http://(xbrl.us|xbrl.sec.gov)/dei/")
             instanceFileNamePattern = re.compile(r"^(\w+)-([12][0-9]{3}[01][0-9][0-3][0-9]).xml$")
             linkroleDefinitionStatementSheet = re.compile(r"[^-]+-\s+Statement\s+-\s+.*", # no restriction to type of statement
                                                           re.IGNORECASE)
@@ -86,6 +83,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
         self.fileNameDate = None
         self.entityRegistrantName = None
         self.requiredContext = None
+        self.standardNamespaceConflicts = defaultdict(set)
         if modelXbrl.modelDocument.type == ModelDocument.Type.INSTANCE or \
            modelXbrl.modelDocument.type == ModelDocument.Type.INLINEXBRL:
             #6.3.3 filename check
@@ -934,12 +932,13 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
         # checks for namespace clashes
         if self.validateEFM:
             # check number of us-roles taxonomies referenced
-            for nsPattern in (usTypesPattern, usRolesPattern, usDeiPattern):
-                usTypesURIs = set(ns for ns in modelXbrl.namespaceDocs.keys() if nsPattern.match(ns))
-                if len(usTypesURIs) > 1:
+            for conflictClass, modelDocuments in self.standardNamespaceConflicts.items():
+                if len(modelDocuments) > 1:
                     modelXbrl.error("EFM.6.22.03",
-                        _("References for conflicting standard taxonomies %(namespaceConflicts)s are not allowed in same DTS"),
-                        modelObject=modelXbrl, namespaceConflicts=usTypesURIs)
+                        _("References for conflicting standard %(conflictClass)s taxonomies %(namespaceConflicts)s are not allowed in same DTS"),
+                        modelObject=modelXbrl, conflictClass=conflictClass, 
+                        namespaceConflicts=sorted((d.targetNamespace for d in modelDocuments),
+                                                  key=lambda ns: ns.rpartition('/')[2]))
             
         conceptsUsedWithPreferredLabels = defaultdict(list)
         usedCalcsPresented = defaultdict(set) # pairs of concepts objectIds used in calc
@@ -1073,18 +1072,18 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                                         _("Calculation relationships have a directed cycle in base set role %(linkrole)s starting from %(concept)s"),
                                         modelObject=[relFrom] + rels, linkrole=ELR, concept=relFrom.qname)
                                 orderRels.clear()
-                            # if relFrom used by fact and multiple calc networks from relFrom, test 6.15.04
-                            if rels and relFrom in conceptsUsed:
-                                relFromAndTos = (relFrom.objectIndex,) + tuple(sorted((rel.toModelObject.objectIndex 
-                                                                                       for rel in rels if rel.toModelObject is not None)))
-                                if relFromAndTos in usedCalcFromTosELR:
-                                    otherRels = usedCalcFromTosELR[relFromAndTos]
-                                    otherELR = otherRels[0].linkrole
-                                    self.modelXbrl.error(("EFM.6.15.04", "GFM.2.06.04"),
-                                        _("Calculation relationships have a same set of targets in %(linkrole)s and %(linkrole2)s starting from %(concept)s"),
-                                        modelObject=[relFrom] + rels + otherRels, linkrole=ELR, linkrole2=otherELR, concept=relFrom.qname)
-                                else:
-                                    usedCalcFromTosELR[relFromAndTos] = rels
+                                # if relFrom used by fact and multiple calc networks from relFrom, test 6.15.04
+                                if rels and relFrom in conceptsUsed:
+                                    relFromAndTos = (relFrom.objectIndex,) + tuple(sorted((rel.toModelObject.objectIndex 
+                                                                                           for rel in rels if rel.toModelObject is not None)))
+                                    if relFromAndTos in usedCalcFromTosELR:
+                                        otherRels = usedCalcFromTosELR[relFromAndTos]
+                                        otherELR = otherRels[0].linkrole
+                                        self.modelXbrl.error(("EFM.6.15.04", "GFM.2.06.04"),
+                                            _("Calculation relationships have a same set of targets in %(linkrole)s and %(linkrole2)s starting from %(concept)s"),
+                                            modelObject=[relFrom] + rels + otherRels, linkrole=ELR, linkrole2=otherELR, concept=relFrom.qname)
+                                    else:
+                                        usedCalcFromTosELR[relFromAndTos] = rels
                                     
                         elif self.validateSBRNL:
                             # find a calc relationship to get the containing document name
@@ -1390,7 +1389,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                         # check if facts add up??
                         if (parent.isAbstract or not parent.isMonetary) and not nestedInTotal:
                             return _("last monetary item in statement sheet monetary line items parented by nonMonetary concept")
-                        elif 'Total' in effectiveLabel: 
+                        elif effectiveLabel and 'Total' in effectiveLabel: 
                             return _("last monetary item in statement sheet monetary line items with word 'Total' in effective label {0}").format(effectiveLabel)
                         elif 'Total' in concept.name:
                             return _("last monetary item in statement sheet monetary line items with word 'Total' in concept name {0}").format(concept.name)
