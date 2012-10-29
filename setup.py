@@ -4,7 +4,7 @@ Created on Jan 30, 2011
 @author: Mark V Systems Limited
 (c) Copyright 2011 Mark V Systems Limited, All rights reserved.
 '''
-import sys, os
+import sys, os, datetime
 
 setup_requires = ['lxml']
 # install_requires specifies a list of package dependencies that are 
@@ -159,7 +159,6 @@ elif sys.platform in ('linux2', 'sunos5'): # works on ubuntu with hand-built cx_
     from setuptools import find_packages 
     try:
         from cx_Freeze import setup, Executable  
-        
         cx_FreezeExecutables = [ 
             Executable( 
                 script="arelleGUI.pyw", 
@@ -168,7 +167,6 @@ elif sys.platform in ('linux2', 'sunos5'): # works on ubuntu with hand-built cx_
                 script="arelleCmdLine.py", 
                 )                             
             ] 
-
     except:
         from setuptools import setup
         cx_FreezeExecutables = []
@@ -189,7 +187,7 @@ elif sys.platform in ('linux2', 'sunos5'): # works on ubuntu with hand-built cx_
         "packages": packages, 
         } ) 
     
-
+    
 elif sys.platform == 'win32':
     from setuptools import find_packages
     from cx_Freeze import setup, Executable 
@@ -224,8 +222,9 @@ elif sys.platform == 'win32':
                 script="arelleCmdLine.py",
                 )                            
         ]
-
-else: #Ensure setuptools works if not on above platforms
+else:  
+    #print("Your platform {0} isn't supported".format(sys.platform)) 
+    #sys.exit(1) 
     from setuptools import os, setup, find_packages
     packages = find_packages('.')
     dataFiles = [        
@@ -233,9 +232,10 @@ else: #Ensure setuptools works if not on above platforms
         ]
     cx_FreezeExecutables = []
 
-
+timestamp = datetime.datetime.utcnow()
 setup(name='Arelle',
-      version='0.9.0',
+      # for version use year.month.day.hour (in UTC timezone) - must be 4 integers for building
+      version=timestamp.strftime("%Y.%m.%d.%H"),
       description='An open source XBRL platform',
       long_description=open('README.md').read(),
       author='arelle.org',
