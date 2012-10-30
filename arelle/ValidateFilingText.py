@@ -460,7 +460,7 @@ def validateTextBlockFacts(modelXbrl):
                 if not entity in xhtmlEntities:
                     modelXbrl.error(("EFM.6.05.16", "GFM.1.2.15"),
                         _("Fact %(fact)s contextID %(contextID)s has disallowed entity %(entity)s"),
-                        modelObject=f1, fact=f1.qname, contextID=f1.contextID, entity=entity)
+                        modelObject=f1, fact=f1.qname, contextID=f1.contextID, entity=entity, error=entity)
             # test html
             for xmltext in [f1.value] + CDATApattern.findall(f1.value):
                 '''
@@ -477,8 +477,9 @@ def validateTextBlockFacts(modelXbrl):
                             _("Fact %(fact)s contextID %(contextID)s has text which causes the XML error %(error)s"),
                             modelObject=f1, fact=f1.qname, contextID=f1.contextID, error=err)
                 '''
+                xmlBodyWithoutEntities = "<body>\n{0}\n</body>\n".format(removeEntities(xmltext))
                 try:
-                    textblockXml = XML("<body>\n{0}\n</body>\n".format(removeEntities(xmltext)))
+                    textblockXml = XML(xmlBodyWithoutEntities)
                     if not edbodyDTD.validate( textblockXml ):
                         errors = edbodyDTD.error_log.filter_from_errors()
                         htmlError = any(e.type_name in ("DTD_INVALID_CHILD", "DTD_UNKNOWN_ATTRIBUTE") 
@@ -534,7 +535,7 @@ def validateTextBlockFacts(modelXbrl):
                         modelObject=f1, fact=f1.qname, contextID=f1.contextID, error=err)
                     
             #handler.fact = None
-    #handler.modelXbrl = None
+                #handler.modelXbrl = None
     
 def copyHtml(sourceXml, targetHtml):
     for sourceChild in sourceXml.iterchildren():

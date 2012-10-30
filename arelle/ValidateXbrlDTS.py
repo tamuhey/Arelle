@@ -803,6 +803,7 @@ def checkElements(val, modelDocument, parent):
                 if val.modelXbrl.hasXDT and elt.get("{http://xbrl.org/2005/xbrldt}targetRole") is not None:
                     targetRole = elt.get("{http://xbrl.org/2005/xbrldt}targetRole")
                     if not XbrlConst.isStandardRole(targetRole) and \
+                       elt.qname == XbrlConst.qnLinkDefinitionArc and \
                        targetRole not in val.roleRefURIs:
                         val.modelXbrl.error("xbrldte:TargetRoleNotResolvedError",
                             _("TargetRole %(targetRole)s is missing a roleRef"),
@@ -901,7 +902,7 @@ def checkElements(val, modelDocument, parent):
                             modelsRole[0].modelDocument.targetNamespace not in val.disclosureSystem.standardTaxonomiesDict):
                             val.modelXbrl.error(("EFM.6.09.05", "GFM.1.04.05", "SBR.NL.2.3.10.14"),
                                 _("Resource %(xlinkLabel)s role %(role)s is not a standard taxonomy role"),
-                                modelObject=elt, xlinkLabel=elt.get("{http://www.w3.org/1999/xlink}label"), role=xlinkRole)
+                                modelObject=elt, xlinkLabel=elt.get("{http://www.w3.org/1999/xlink}label"), role=xlinkRole, element=elt.qname)
                     if val.validateSBRNL:
                         if elt.localName == "reference":
                             for child in elt.iterdescendants():
@@ -980,7 +981,8 @@ def checkElements(val, modelDocument, parent):
                                     _("CalculationArc from %(xlinkFrom)s to %(xlinkTo)s must have an weight"),
                                     modelObject=elt, 
                                     xlinkFrom=elt.get("{http://www.w3.org/1999/xlink}from"),
-                                    xlinkTo=elt.get("{http://www.w3.org/1999/xlink}to"))
+                                    xlinkTo=elt.get("{http://www.w3.org/1999/xlink}to"),
+                                    weight="(value error)")
                         elif elt.localName == "definitionArc":
                             if not elt.get("order"):
                                 val.modelXbrl.error(("EFM.6.16.01", "GFM.1.08.01"),
