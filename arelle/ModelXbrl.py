@@ -862,6 +862,11 @@ class ModelXbrl:
                                 ref = None
                         else:
                             ref["href"] = file
+                            try:
+                                ref["sourceLine"] = arg.sourceline
+                            except AttributeError:
+                                pass # arg may not have sourceline, ignore if so
+
                         if ref is not None:
                             refs.append(ref)
                 extras["refs"] = refs
