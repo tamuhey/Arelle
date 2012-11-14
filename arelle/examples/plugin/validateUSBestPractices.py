@@ -104,6 +104,20 @@ def factCheck(val, fact):
     
     try:
         if fact.isNumeric and not fact.isNil and fact.xValue is not None:
+            # 2.3.3 additional unit tests beyond UTR spec
+            unit = fact.unit
+            if unit is not None and concept.type is not None and val.validateUTR:
+                typeName = concept.type.name
+                if typeName == "perUnitItemType" and any(m.namespaceURI == XbrlConst.iso4217 or
+                                                         m in (XbrlConst.qnXbrliPure, XbrlConst.qnXbrliShares)
+                                                         for m in unit.measures[1]):
+                    val.modelXbrl.log('WARNING-SEMANTIC', "US-BPG.2.3.3.perUnitItemType",
+                        _("PureItemType fact %(fact)s in context %(contextID)s unit %(unitID)s value %(value)s has disallowed unit denominator %(denominator)s"),
+                        modelObject=fact, fact=fact.qname, contextID=fact.contextID, unitID=fact.unitID,
+                        value=fact.effectiveValue, denominator=", ".join((str(m) for m in unit.measures[1])))
+                        
+                                                            
+
             # 2.4.1 decimal disagreement
             if fact.decimals and fact.decimals != "INF":
                 vf = float(fact.value)
@@ -190,13 +204,18 @@ def final(val, conceptsUsed):
     # check for unused concept relationships of standard taxonomy elements
     standardRelationships = val.modelXbrl.relationshipSet((XbrlConst.parentChild, XbrlConst.summationItem, XbrlConst.dimensionDomain, XbrlConst.domainMember, XbrlConst.dimensionDefault))
     standardConceptsUnused = defaultdict(set) # dict by concept of relationship where unused
+    standardConceptsDeprecated = defaultdict(set)
     for rel in standardRelationships.modelRelationships:
         for concept in (rel.fromModelObject, rel.toModelObject):
             if (concept is not None and
                 concept.namespaceURI in val.disclosureSystem.standardTaxonomiesDict and
-                concept not in conceptsUsed and
-                (not concept.isAbstract or concept.isDimensionItem)):
-                standardConceptsUnused[concept].add(rel)
+                concept not in conceptsUsed):
+                if not concept.isAbstract or concept.isDimensionItem:
+                    standardConceptsUnused[concept].add(rel)
+                elif (concept.qname.namespaceURI == ugtNamespace and
+                      concept.name in val.usgaapDeprecations):
+                    # catches abstract deprecated concepts in linkbases
+                    standardConceptsDeprecated[concept].add(rel)
     for concept, rels in standardConceptsUnused.items():
         if concept.qname.namespaceURI == ugtNamespace:
             if concept.name in val.usgaapDeprecations:
@@ -214,9 +233,15 @@ def final(val, conceptsUsed):
             val.modelXbrl.log('INFO-SEMANTIC', "US-BPG.1.7.1",
                 _("Company extension relationships of unused standard concept: %(concept)s"),
                 modelObject=rels, concept=concept.qname) 
+    for concept, rels in standardConceptsDeprecated.items():
+        deprecation = val.usgaapDeprecations[concept.name]
+        val.modelXbrl.log('INFO-SEMANTIC', "FASB:deprecatedConcept",
+            _("Concept %(concept)s has extension relationships and was deprecated on %(date)s: %(documentation)s"),
+            modelObject=rels, concept=concept.qname,
+            date=deprecation[0], documentation=deprecation[1])
     val.modelXbrl.profileStat(_("validate US-BGP unused concepts"), time.time() - startedAt)
         
-    del standardRelationships, extensionConceptsUnused, standardConceptsUnused
+    del standardRelationships, extensionConceptsUnused, standardConceptsUnused, standardConceptsDeprecated
     del val.deprecatedFactConcepts
     del val.deprecatedDimensions
     del val.deprecatedMembers

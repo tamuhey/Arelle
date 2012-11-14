@@ -11,6 +11,7 @@ from arelle import FunctionIxt
 from arelle.ModelObject import ModelObject
 from arelle.ModelInstanceObject import ModelInlineFact
 from arelle.ModelValue import qname
+from arelle.PluginManager import pluginClassMethods
 validateUniqueParticleAttribution = None # dynamic import
 
 arcNamesTo21Resource = {"labelArc","referenceArc"}
@@ -60,7 +61,15 @@ class ValidateXbrl:
         self.validateXmlLang = self.validateDisclosureSystem and self.disclosureSystem.xmlLangPattern
         self.validateCalcLB = modelXbrl.modelManager.validateCalcLB
         self.validateInferDecimals = modelXbrl.modelManager.validateInferDecimals
+        self.validateUTR = (modelXbrl.modelManager.validateUtr or
+                            (self.parameters and self.parameters.get(qname("forceUtrValidation",noPrefixIsNoNamespace=True),(None,"false"))[1] == "true") or
+                            (self.validateEFM and 
+                             any((concept.namespaceURI in self.disclosureSystem.standardTaxonomiesDict) 
+                                 for concept in self.modelXbrl.nameConcepts.get("UTR",()))))
         
+        for pluginXbrlMethod in pluginClassMethods("Validate.XBRL.Start"):
+            pluginXbrlMethod(self)
+
         # xlink validation
         modelXbrl.profileStat(None)
         modelXbrl.modelManager.showStatus(_("validating links"))
@@ -260,13 +269,20 @@ class ValidateXbrl:
                 for modelRel in relsSet.modelRelationships:
                     preferredLabel = modelRel.preferredLabel
                     toConcept = modelRel.toModelObject
-                    if preferredLabel is not None and toConcept is not None and \
-                       toConcept.label(preferredLabel=preferredLabel,fallbackToQname=False) is None:
-                        modelXbrl.error("xbrl.5.2.4.2.1:preferredLabelMissing",
-                            _("Presentation relationship from %(source)s to %(target)s in link role %(linkrole)s missing preferredLabel %(preferredLabel)s"),
-                            modelObject=modelRel,
-                            source=modelRel.fromModelObject.qname, target=toConcept.qname, linkrole=ELR, 
-                            preferredLabel=preferredLabel)
+                    if preferredLabel is not None and toConcept is not None:
+                        label = toConcept.label(preferredLabel=preferredLabel,fallbackToQname=False,strip=True)
+                        if label is None:
+                            modelXbrl.error("xbrl.5.2.4.2.1:preferredLabelMissing",
+                                _("Presentation relationship from %(source)s to %(target)s in link role %(linkrole)s missing preferredLabel %(preferredLabel)s"),
+                                modelObject=modelRel,
+                                source=modelRel.fromModelObject.qname, target=toConcept.qname, linkrole=ELR, 
+                                preferredLabel=preferredLabel)
+                        elif not label: # empty string
+                            modelXbrl.info("arelle:info.preferredLabelEmpty",
+                                _("(Info xbrl.5.2.4.2.1) Presentation relationship from %(source)s to %(target)s in link role %(linkrole)s has empty preferredLabel %(preferredLabel)s"),
+                                modelObject=modelRel,
+                                source=modelRel.fromModelObject.qname, target=toConcept.qname, linkrole=ELR, 
+                                preferredLabel=preferredLabel)
             # check essence-alias relationships
             elif arcrole == XbrlConst.essenceAlias:
                 for modelRel in relsSet.modelRelationships:
@@ -448,6 +464,11 @@ class ValidateXbrl:
             if modelXbrl.hasXDT:
                 ValidateXbrlDimensions.checkConcept(self, concept)
         modelXbrl.profileStat(_("validateConcepts"))
+        
+        for pluginXbrlMethod in pluginClassMethods("Validate.XBRL.Finally"):
+            pluginXbrlMethod(self)
+
+        modelXbrl.profileStat() # reset after plugins
             
         modelXbrl.modelManager.showStatus(_("validating DTS"))
         self.DTSreferenceResourceIDs = {}
@@ -466,12 +487,8 @@ class ValidateXbrl:
             ValidateXbrlCalcs.validate(modelXbrl, inferDecimals=self.validateInferDecimals)
             modelXbrl.profileStat(_("validateCalculations"))
             
-        if (modelXbrl.modelManager.validateUtr or
-            (self.parameters and self.parameters.get(qname("forceUtrValidation",noPrefixIsNoNamespace=True),(None,"false"))[1] == "true") or
-             #(self.validateEFM and 
-             #any((concept.namespaceURI in self.disclosureSystem.standardTaxonomiesDict) 
-             #    for concept in self.modelXbrl.nameConcepts.get("UTR",())))):
-            (self.validateEFM and any(modelDoc.definesUTR for modelDoc in self.modelXbrl.urlDocs.values()))):
+        if self.validateUTR:
+            #(self.validateEFM and any(modelDoc.definesUTR for modelDoc in self.modelXbrl.urlDocs.values()))):
             ValidateUtr.validate(modelXbrl)
             modelXbrl.profileStat(_("validateUTR"))
             
@@ -635,6 +652,10 @@ class ValidateXbrl:
                         modelObject=f, fact=f.qname, order=f.order)
             if f.modelTupleFacts:
                 self.checkFacts(f.modelTupleFacts, inTuple=True)
+             
+            # uncomment if anybody uses this   
+            #for pluginXbrlMethod in pluginClassMethods("Validate.XBRL.Fact"):
+            #    pluginXbrlMethod(self, f)
                 
     def checkFactDimensions(self, facts): # check fact dimensions in document order
         for f in facts:
