@@ -192,7 +192,12 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                         modelObject=context, elementName=notAllowed, context=contextID)
         
                 #6.5.5 segment only explicit dimensions
-                for contextName in ("{http://www.xbrl.org/2003/instance}segment","{http://www.xbrl.org/2003/instance}scenario"):
+                for contextName in {"segment": ("{http://www.xbrl.org/2003/instance}segment",),
+                                    "scenario": ("{http://www.xbrl.org/2003/instance}scenario",),
+                                    "either": ("{http://www.xbrl.org/2003/instance}segment","{http://www.xbrl.org/2003/instance}scenario"),
+                                    "both": ("{http://www.xbrl.org/2003/instance}segment","{http://www.xbrl.org/2003/instance}scenario"),
+                                    "none": [],
+                                    }[disclosureSystem.contextElement]:
                     for segScenElt in context.iterdescendants(contextName):
                         if isinstance(segScenElt,ModelObject):
                             childTags = ", ".join([child.prefixedName for child in segScenElt.iterchildren()
@@ -200,8 +205,9 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                                                    child.tag != "{http://xbrl.org/2006/xbrldi}explicitMember"])
                             if len(childTags) > 0:
                                 modelXbrl.error(("EFM.6.05.05", "GFM.1.02.05"),
-                                                _("Segment of context Id %(context)s has disallowed content: %(content)s"),
-                                                modelObject=context, context=contextID, content=childTags)
+                                                _("%(elementName)s of context Id %(context)s has disallowed content: %(content)s"),
+                                                modelObject=context, context=contextID, content=childTags, 
+                                                elementName=contextName.partition("}")[2].title())
             del uniqueContextHashes
             self.modelXbrl.profileActivity("... filer context checks", minTimeToShow=1.0)
     
@@ -276,7 +282,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                             value = f.value
                             if factElementName == disclosureSystem.deiAmendmentFlagElement:
                                 amendmentFlag = value
-                                ammedmentFlagFact = f
+                                amendmentFlagFact = f
                             elif factElementName == "AmendmentDescription":
                                 amendmentDescription = value
                                 amendmentDescriptionFact = f
@@ -600,7 +606,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                 if amendmentFlag == "true" and amendmentDescription is None:
                     modelXbrl.error("EFM.6.05.20.missingAmendmentDescription",
                         _("AmendmentFlag is true in context %(contextID)s so AmendmentDescription is also required"),
-                        modelObject=amendmentFlagFact, contextID=amendmentFlagFact.contextID if amendmentFlagFact else "unknown")
+                        modelObject=amendmentFlagFact, contextID=amendmentFlagFact.contextID if amendmentFlagFact is not None else "unknown")
         
                 if amendmentDescription is not None and amendmentFlag != "true":
                     modelXbrl.error("EFM.6.05.20.extraneous",
@@ -615,7 +621,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                                           "20-F", "20-F/A", "40-F", "40-F/A", "6-K", "6-K/A", "8-K", "8-K/A", 
                                           "F-1", "F-1/A", "F-10", "F-10/A", "F-3", "F-3/A", "F-4", "F-4/A", "F-9", "F-9/A", 
                                           "S-1", "S-1/A", "S-11", "S-11/A", "S-3", "S-3/A", "S-4", "S-4/A", 
-                                          "POS AM",
+                                          "POS AM", "POSAR",
                                           "485BPOS", "497", 
                                           "NCSR", "NCSR/A", "N-CSR", "N-CSR/A", "N-CSRS", "NCSRS/A", "N-CSRS/A", 
                                           "N-Q",  "N-Q/A",
@@ -1414,7 +1420,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
     # check if concept is behaving as a total based on role, deed, or circumstances
     def presumptionOfTotal(self, rel, siblingRels, iSibling, isStatementSheet, nestedInTotal, checkLabelRoleOnly):
         concept = rel.toModelObject
-        if concept.isNumeric:
+        if concept is not None and concept.isNumeric:
             preferredLabel = rel.preferredLabel
             if XbrlConst.isTotalRole(preferredLabel):
                 return _("preferredLabel {0}").format(os.path.basename(preferredLabel))

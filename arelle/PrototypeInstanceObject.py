@@ -1,5 +1,5 @@
 
-
+from arelle import XmlUtil
 from arelle.ModelValue import QName
 Aspect = None
 
@@ -16,6 +16,7 @@ class FactPrototype():      # behaves like a fact for dimensional validity testi
             self.isItem = self.concept is not None and self.concept.isItem
             self.isTuple = self.concept is not None and self.concept.isTuple
         else:
+            self.concept = None # undefined concept
             self.isTuple = False # don't block aspectMatches
         if Aspect.LOCATION in aspectValues:
             self.parent = aspectValues[Aspect.LOCATION]
@@ -41,10 +42,12 @@ class FactPrototype():      # behaves like a fact for dimensional validity testi
     
     @property
     def propertyView(self):
-        return (("concept", str(self.qname)),
-                ("dimensions", "({0})".format(len(self.dims)),
-                  tuple((str(dim),str(mem)) for dim,mem in sorted(self.dims)))
-                  if self.dims else (),
+        dims = self.context.qnameDims
+        return (("concept", str(self.qname) if self.concept is not None else "not specified"),
+                ("dimensions", "({0})".format(len(dims)),
+                  tuple(dimVal.propertyView if dimVal is not None else (str(dim.qname),"None")
+                        for dim,dimVal in sorted(dims.items(), key=lambda i:i[0])))
+                  if dims else (),
                 )
 
     @property
@@ -146,3 +149,12 @@ class DimValuePrototype():
 
     def clear(self):
         self.__dict__.clear()  # delete local attributes
+
+    @property
+    def propertyView(self):
+        if self.isExplicit:
+            return (str(self.dimensionQname),str(self.memberQname))
+        else:
+            return (str(self.dimensionQname), 
+                    XmlUtil.xmlstring( self.typedMember, stripXmlns=True, prettyPrint=True )
+                    if self.typedMember is not None else "None" )
