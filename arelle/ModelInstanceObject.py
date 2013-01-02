@@ -38,6 +38,8 @@ from arelle.ValidateXbrlCalcs import inferredPrecision, inferredDecimals, roundV
 from math import isnan
 from arelle.ModelObject import ModelObject
 Aspect = None
+POSINF = float("inf")
+NEGINF = float("-inf")
 
 class NewFactItemOptions():
     """
@@ -943,8 +945,8 @@ class ModelContext(ModelObject):
         scheme, entityId = self.entityIdentifier
         return ((("entity", entityId, (("scheme", scheme),)),) +
                 ((("forever", ""),) if self.isForeverPeriod else
-                (("instant", str(self.instantDatetime)),) if self.isInstantPeriod else
-                (("startDate", str(self.startDatetime)),("endDate",str(self.endDatetime)))) +
+                (("instant", XmlUtil.dateunionValue(self.instantDatetime, subtractOneDay=True)),) if self.isInstantPeriod else
+                (("startDate", XmlUtil.dateunionValue(self.startDatetime)),("endDate", XmlUtil.dateunionValue(self.endDatetime, subtractOneDay=True)))) +
                 (("dimensions", "({0})".format(len(self.qnameDims)),
                   tuple(mem.propertyView for dim,mem in sorted(self.qnameDims.items())))
                   if self.qnameDims else (),
@@ -954,8 +956,8 @@ class ModelContext(ModelObject):
         return ("modelContext[{0}, period: {1}, {2}{3} line {4}]"
                 .format(self.id,
                         "forever" if self.isForeverPeriod else
-                        "instant " + str(self.instantDatetime) if self.isInstantPeriod else
-                        "duration " + str(self.startDatetime) + " - " + str(self.endDatetime),
+                        "instant " + XmlUtil.dateunionValue(self.instantDatetime, subtractOneDay=True) if self.isInstantPeriod else
+                        "duration " + XmlUtil.dateunionValue(self.startDatetime) + " - " + XmlUtil.dateunionValue(self.endDatetime, subtractOneDay=True),
                         "dimensions: ({0}) {1},".format(len(self.qnameDims),
                         tuple(mem.propertyView for dim,mem in sorted(self.qnameDims.items())))
                         if self.qnameDims else "",

@@ -8,35 +8,38 @@ import zipfile, os, io, base64, gzip, zlib, re
 from lxml import etree
 from arelle import XmlUtil
 
-archivePathSeparators = (".zip" + os.sep, ".eis" + os.sep, ".xfd" + os.sep, ".frm" + os.sep) + \
-                        ((".zip/", ".eis/", ".xfd/", ".frm/") if os.sep != "/" else ()) #acomodate windows and http styles
+archivePathSeparators = (".zip" + os.sep, ".eis" + os.sep, ".xml" + os.sep, ".xfd" + os.sep, ".frm" + os.sep) + \
+                        ((".zip/", ".eis/", ".xml/", ".xfd/", ".frm/") if os.sep != "/" else ()) #acomodate windows and http styles
 
 XMLdeclaration = re.compile(r"<\?xml[^><\?]*\?>", re.DOTALL)
 
-def openFileSource(filename, cntlr=None, sourceZipStream=None):
+def openFileSource(filename, cntlr=None, sourceZipStream=None, checkIfXmlIsEis=False):
     if sourceZipStream:
         filesource = FileSource("POSTupload.zip", cntlr)
         filesource.openZipStream(sourceZipStream)
         filesource.select(filename)
         return filesource
     else:
-        archivepathSelection = archiveFilenameParts(filename)
+        archivepathSelection = archiveFilenameParts(filename, checkIfXmlIsEis)
         if archivepathSelection is not None:
             archivepath = archivepathSelection[0]
             selection = archivepathSelection[1]
-            filesource = FileSource(archivepath, cntlr)
+            filesource = FileSource(archivepath, cntlr, checkIfXmlIsEis)
             filesource.open()
             filesource.select(selection)
             return filesource
         # not archived content
-        return FileSource(filename, cntlr) 
+        return FileSource(filename, cntlr, checkIfXmlIsEis) 
 
-def archiveFilenameParts(filename):
+def archiveFilenameParts(filename, checkIfXmlIsEis=False):
     # check if path has an archive file plus appended in-archive content reference
     for archiveSep in archivePathSeparators:
-        if archiveSep in filename:
+        if (archiveSep in filename and
+            (not archiveSep.startswith(".xml") or checkIfXmlIsEis)):
             filenameParts = filename.partition(archiveSep)
-            return (filenameParts[0] + archiveSep[:-1], filenameParts[2])
+            fileDir = filenameParts[0] + archiveSep[:-1]
+            if os.path.isfile(fileDir): # be sure it is not a directory name
+                return (fileDir, filenameParts[2])
     return None
 
 class FileNamedStringIO(io.StringIO):  # provide string IO in memory but behave as a fileName string
@@ -46,9 +49,17 @@ class FileNamedStringIO(io.StringIO):  # provide string IO in memory but behave 
 
     def __str__(self):
         return self.fileName
+    
+class ArchiveFileIOError(IOError):
+    def __init__(self, fileSource, fileName):
+        self.fileName = fileName
+        self.url = fileSource.url
+        
+    def __str__(self):
+        return _("Archive does not contain file: {0}, archive: {1}").format(self.fileName, self.url)
             
 class FileSource:
-    def __init__(self, url, cntlr=None):
+    def __init__(self, url, cntlr=None, checkIfXmlIsEis=False):
         self.url = str(url)  # allow either string or FileNamedStringIO
         self.baseIsHttp = self.url.startswith("http://")
         self.cntlr = cntlr
@@ -62,6 +73,26 @@ class FileSource:
         self.selection = None
         self.filesDir = None
         self.referencedFileSources = {}  # archive file name, fileSource object
+        
+        # for SEC xml files, check if it's an EIS anyway
+        if (not (self.isZip or self.isEis or self.isXfd or self.isRss) and
+            self.type == ".xml" and
+            checkIfXmlIsEis):
+            match = b'<?xml version="1.0" ?><cor:edgarSubmission'
+            try:
+                file = open(self.cntlr.webCache.getfilename(self.url), 'rb')
+                l = file.read(len(match))
+                file.close()
+                if l == match:
+                    self.isEis = True
+            except EnvironmentError as err:
+                if self.cntlr:
+                    self.cntlr.addToLog(_("[{0}] {1}").format(type(err).__name__, err))
+                pass
+            
+    def logError(self, err):
+        if self.cntlr:
+            self.cntlr.addToLog(_("[{0}] {1}").format(type(err).__name__, err))
 
     def open(self):
         if not self.isOpen:
@@ -97,6 +128,7 @@ class FileSource:
                         buf += zlib.decompress(compressedBytes)
                     file.close()
                 except EnvironmentError as err:
+                    self.logError(err)
                     pass
                 #uncomment to save for debugging
                 #with open("c:/temp/test.xml", "wb") as f:
@@ -109,8 +141,10 @@ class FileSource:
                         file.close()
                         self.isOpen = True
                     except EnvironmentError as err:
+                        self.logError(err)
                         return # provide error message later
                     except etree.LxmlError as err:
+                        self.logError(err)
                         return # provide error message later
                 
             elif self.isXfd:
@@ -160,8 +194,10 @@ class FileSource:
                     file.close()
                     self.isOpen = True
                 except EnvironmentError as err:
+                    self.logError(err)
                     return # provide error message later
                 except etree.LxmlError as err:
+                    self.logError(err)
                     return # provide error message later
                 
             elif self.isRss:
@@ -169,8 +205,10 @@ class FileSource:
                     self.rssDocument = etree.parse(self.basefile)
                     self.isOpen = True
                 except EnvironmentError as err:
+                    self.logError(err)
                     return # provide error message later
                 except etree.LxmlError as err:
+                    self.logError(err)
                     return # provide error message later
 
     def openZipStream(self, sourceZipStream):
@@ -248,9 +286,8 @@ class FileSource:
             if archiveFileSource.isZip:
                 b = archiveFileSource.fs.read(archiveFileName.replace("\\","/"))
                 encoding = XmlUtil.encoding(b)
-                return (io.TextIOWrapper(
-                        io.BytesIO(b), 
-                        encoding=encoding), encoding)
+                return (io.TextIOWrapper(io.BytesIO(b), encoding=encoding), 
+                        encoding)
             elif archiveFileSource.isEis:
                 for docElt in self.eisDocument.iter(tag="{http://www.sec.gov/edgar/common}document"):
                     outfn = docElt.findtext("{http://www.sec.gov/edgar/common}conformedName")
@@ -266,25 +303,16 @@ class FileSource:
                             else:
                                 start = 0;
                                 length = len(b);
-                            # pass back as ascii
-                            #str = ""
-                            #for bChar in b[start:start + length]:
-                            #    str += chr( bChar )
-                            #return str
-                            return (io.TextIOWrapper(
-                                io.BytesIO(b), 
-                                encoding=XmlUtil.encoding(b)), "latin-1")
-                return (None,None)
+                            encoding = XmlUtil.encoding(b, default="latin-1")
+                            return (io.TextIOWrapper(io.BytesIO(b), encoding=encoding), 
+                                    encoding)
+                raise ArchiveFileIOError(self, archiveFileName)
             elif archiveFileSource.isXfd:
                 for data in archiveFileSource.xfdDocument.iter(tag="data"):
                     outfn = data.findtext("filename")
                     if outfn == archiveFileName:
                         b64data = data.findtext("mimedata")
                         if b64data:
-                            # convert to bytes
-                            #byteData = []
-                            #for c in b64data:
-                            #    byteData.append(ord(c))
                             b = base64.b64decode(b64data.encode("latin-1"))
                             # remove BOM codes if present
                             if len(b) > 3 and b[0] == 239 and b[1] == 187 and b[2] == 191:
@@ -294,15 +322,10 @@ class FileSource:
                             else:
                                 start = 0;
                                 length = len(b);
-                            # pass back as ascii
-                            #str = ""
-                            #for bChar in b[start:start + length]:
-                            #    str += chr( bChar )
-                            #return str
-                            return (io.TextIOWrapper(
-                                io.BytesIO(b), 
-                                encoding=XmlUtil.encoding(b)), "latin-1")
-                return (None,None)
+                            encoding = XmlUtil.encoding(b, default="latin-1")
+                            return (io.TextIOWrapper(io.BytesIO(b), encoding=encoding), 
+                                    encoding)
+                raise ArchiveFileIOError(self, archiveFileName)
         # check encoding
         with open(filepath, 'rb') as fb:
             hdrBytes = fb.read(512)

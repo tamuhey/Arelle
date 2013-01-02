@@ -536,7 +536,9 @@ class CntlrWinMain (Cntlr.Cntlr):
         if filename:
             filesource = None
             # check for archive files
-            filesource = openFileSource(filename,self)
+            filesource = openFileSource(filename, self,
+                                        checkIfXmlIsEis=self.modelManager.disclosureSystem and
+                                        self.modelManager.disclosureSystem.EFM)
             if filesource.isArchive and not filesource.selection: # or filesource.isRss:
                 from arelle import DialogOpenArchive
                 filename = DialogOpenArchive.askArchiveFile(self, filesource)
@@ -1017,7 +1019,7 @@ class CntlrWinMain (Cntlr.Cntlr):
                           os.path.join(self.imagesDir, "arelle32.gif"),
                           _("arelle\u00ae {0} {1}\n"
                               "An open source XBRL platform\n"
-                              "\u00a9 2010-2012 Mark V Systems Limited\n"
+                              "\u00a9 2010-2013 Mark V Systems Limited\n"
                               "All rights reserved\nhttp://www.arelle.org\nsupport@arelle.org\n\n"
                               "Licensed under the Apache License, Version 2.0 (the \"License\"); "
                               "you may not use this file except in compliance with the License.  "

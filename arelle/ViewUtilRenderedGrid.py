@@ -9,7 +9,7 @@ from arelle import XbrlConst
 from arelle.ModelObject import ModelObject
 from arelle.ModelFormulaObject import Aspect
 from arelle.ModelRenderingObject import (ModelEuTable, ModelTable,
-                                         ModelEuAxisCoord, ModelDefinitionNode, ModelClosedDefinitionNode,
+                                         ModelEuAxisCoord, ModelDefinitionNode, ModelClosedDefinitionNode, ModelOpenDefinitionNode,
                                          ModelRelationshipDefinitionNode, ModelSelectionDefinitionNode, ModelFilterDefinitionNode,
                                          ModelCompositionDefinitionNode, ModelTupleDefinitionNode, StructuralNode,
                                          ROLLUP_NOT_ANALYZED, CHILDREN_BUT_NO_ROLLUP, CHILD_ROLLUP_FIRST, CHILD_ROLLUP_LAST)
@@ -96,6 +96,7 @@ def resolveTableAxesStructure(view, table, tblAxisRelSet):
                     if isinstance(definitionNode,ModelClosedDefinitionNode) and definitionNode.parentChildOrder is not None:
                         view.xTopRollup = CHILD_ROLLUP_LAST if definitionNode.parentChildOrder == "children-first" else CHILD_ROLLUP_FIRST
                     analyzeHdrs(view, xTopStructuralNode, definitionNode, 1, disposition, facts, i, tblAxisRels)
+                    view.dataCols = leafNodeCount(xTopStructuralNode)
                     break
                 elif disposition == "y" and yTopStructuralNode is None:
                     yTopStructuralNode = StructuralNode(None, definitionNode, view.zmostOrdCntx)
@@ -103,6 +104,7 @@ def resolveTableAxesStructure(view, table, tblAxisRelSet):
                         view.yAxisChildrenFirst.set(definitionNode.parentChildOrder == "children-first")
                         view.yTopRollup = CHILD_ROLLUP_LAST if definitionNode.parentChildOrder == "children-first" else CHILD_ROLLUP_FIRST
                     analyzeHdrs(view, yTopStructuralNode, definitionNode, 1, disposition, facts, i, tblAxisRels)
+                    view.dataRows = leafNodeCount(yTopStructuralNode)
                     break
                 elif disposition == "z" and zTopStructuralNode is None:
                     zTopStructuralNode = StructuralNode(None, definitionNode)
@@ -114,6 +116,7 @@ def resolveTableAxesStructure(view, table, tblAxisRelSet):
             lastRowMinWidth = view.rowNonAbstractHdrSpanMin[i] - sum(view.rowHdrColWidth[i] for j in range(i, view.rowHdrCols - 1))
             if lastRowMinWidth > view.rowHdrColWidth[view.rowHdrCols - 1]:
                 view.rowHdrColWidth[view.rowHdrCols - 1] = lastRowMinWidth 
+    #view.rowHdrColWidth = (60,60,60,60,60,60,60,60,60,60,60,60,60,60)
     # use as wraplength for all row hdr name columns 200 + fixed indent and abstract mins (not incl last name col)
     view.rowHdrWrapLength = 200 + sum(view.rowHdrColWidth[i] for i in range(view.rowHdrCols - 1))
     view.dataFirstRow = view.colHdrTopRow + view.colHdrRows + len(view.colHdrNonStdRoles)
@@ -149,21 +152,38 @@ def sortkey(obj):
         return obj.objectIndex
     return obj
                   
-def analyzeHdrs(view, structuralNode, definitionNode, depth, axisDisposition, facts, i=None, tblAxisRels=None):
+def analyzeHdrs(view, structuralNode, definitionNode, depth, axisDisposition, facts, i=None, tblAxisRels=None, processOpenDefinitionNode=True):
+    subtreeRelationships = view.axisSubtreeRelSet.fromModelObject(definitionNode)
+    
+    def checkLabelWidth(structuralNode, checkBoundFact=False):
+        if axisDisposition == "y":
+            # messages can't be evaluated, just use the text portion of format string
+            label = structuralNode.header(lang=view.lang, 
+                                          returnGenLabel=not checkBoundFact, 
+                                          returnMsgFormatString=not checkBoundFact)
+            if label:
+                # need to et more exact word length in screen units
+                widestWordLen = max(len(w) * 16 for w in label.split())
+                # abstract only pertains to subtree of closed nodesbut not cartesian products or open nodes
+                if definitionNode.isAbstract or not subtreeRelationships: # isinstance(definitionNode, ModelOpenDefinitionNode):                    
+                    if widestWordLen > view.rowHdrColWidth[structuralNode.depth]:
+                        view.rowHdrColWidth[structuralNode.depth] = widestWordLen
+                else:
+                    if widestWordLen > view.rowNonAbstractHdrSpanMin[structuralNode.depth]:
+                        view.rowNonAbstractHdrSpanMin[structuralNode.depth] = widestWordLen
+                        
     if structuralNode and isinstance(definitionNode, (ModelEuAxisCoord, ModelDefinitionNode)):
         try:
             #cartesianProductNestedArgs = (view, depth, axisDisposition, facts, tblAxisRels, i)
             ordCardinality, ordDepth = definitionNode.cardinalityAndDepth(structuralNode)
             nestedDepth = depth + ordDepth
             # HF test
-            cartesianProductNestedArgs = (view, nestedDepth, axisDisposition, facts, tblAxisRels, i)
+            cartesianProductNestedArgs = [view, nestedDepth, axisDisposition, facts, tblAxisRels, i]
             if axisDisposition == "z":
                 if depth == 1: # choices (combo boxes) don't add to z row count
                     view.zAxisRows += 1 
             elif axisDisposition == "x":
                 if ordDepth:
-                    if not definitionNode.isAbstract:
-                        view.dataCols += ordCardinality
                     if nestedDepth > view.colHdrRows: view.colHdrRows = nestedDepth 
                     '''
                     if not view.colHdrDocRow:
@@ -177,24 +197,14 @@ def analyzeHdrs(view, structuralNode, definitionNode, depth, axisDisposition, fa
                 hdrNonStdRoles = view.colHdrNonStdRoles
             elif axisDisposition == "y":
                 if ordDepth:
-                    if not definitionNode.isAbstract:
-                        view.dataRows += ordCardinality
+                    #if not definitionNode.isAbstract:
+                    #    view.dataRows += ordCardinality
                     if nestedDepth > view.rowHdrCols: 
                         view.rowHdrCols = nestedDepth
                         for j in range(1 + ordDepth):
                             view.rowHdrColWidth.append(16)  # min width for 'tail' of nonAbstract coordinate
                             view.rowNonAbstractHdrSpanMin.append(0)
-                    # messages can't be evaluated, just use the text portion of format string
-                    label = structuralNode.header(lang=view.lang, returnMsgFormatString=True)
-                    if label:
-                        # need to et more exact word length in screen units
-                        widestWordLen = max(len(w) * 16 for w in label.split())
-                        if definitionNode.isAbstract:                    
-                            if widestWordLen > view.rowHdrColWidth[depth]:
-                                view.rowHdrColWidth[depth] = widestWordLen
-                        else:
-                            if widestWordLen > view.rowNonAbstractHdrSpanMin[depth]:
-                                view.rowNonAbstractHdrSpanMin[depth] = widestWordLen
+                    checkLabelWidth(structuralNode, checkBoundFact=False)
                     ''' 
                     if not view.rowHdrDocCol:
                         if definitionNode.header(role="http://www.xbrl.org/2008/role/documentation",
@@ -218,9 +228,9 @@ def analyzeHdrs(view, structuralNode, definitionNode, depth, axisDisposition, fa
                                 hdrNonStdPosition = hdrNonStdRoles.index(labelRole)
                             else:
                                 hdrNonStdRoles.insert(hdrNonStdPosition + 1, labelRole)
-            hasSubtreeRels = False
-            for axisSubtreeRel in view.axisSubtreeRelSet.fromModelObject(definitionNode):
-                hasSubtreeRels = True
+            cartesianProductAnalyzed = False
+            for axisSubtreeRel in subtreeRelationships:
+                cartesianProductAnalyzed = True
                 childDefinitionNode = axisSubtreeRel.toModelObject
                 if childDefinitionNode.isRollUp:
                     structuralNode.rollUpStructuralNode = StructuralNode(structuralNode, childDefinitionNode)
@@ -245,9 +255,11 @@ def analyzeHdrs(view, structuralNode, definitionNode, depth, axisDisposition, fa
                         childStructuralNode.indent = depth - 1
                         structuralNode.choiceStructuralNodes.append(childStructuralNode)
                         analyzeHdrs(view, structuralNode, childDefinitionNode, depth + 1, axisDisposition, facts) #recurse
-                if not structuralNode.subtreeRollUp and structuralNode.childStructuralNodes and definitionNode.tag.endswith("Node"):
-                    structuralNode.subtreeRollUp = CHILDREN_BUT_NO_ROLLUP
-            if not hasattr(structuralNode, "indent"): # probably also for multiple open axes
+                # required when switching from abstract to roll up to determine abstractness
+                #if not structuralNode.subtreeRollUp and structuralNode.childStructuralNodes and definitionNode.tag.endswith("Node"):
+                #    structuralNode.subtreeRollUp = CHILDREN_BUT_NO_ROLLUP
+            #if not hasattr(structuralNode, "indent"): # probably also for multiple open axes
+            if processOpenDefinitionNode:
                 if isinstance(definitionNode, ModelRelationshipDefinitionNode):
                     selfStructuralNodes = {} if definitionNode.axis.endswith('-or-self') else None
                     for rel in definitionNode.relationships(structuralNode):
@@ -269,6 +281,7 @@ def analyzeHdrs(view, structuralNode, definitionNode, depth, axisDisposition, fa
                         flattenChildNodesToChoices(structuralNode.childStructuralNodes, 0)
                     
                 elif isinstance(definitionNode, ModelSelectionDefinitionNode):
+                    cartesianProductAnalyzed = True
                     varQn = definitionNode.variableQname
                     if varQn:
                         selections = sorted(structuralNode.evaluate(definitionNode, definitionNode.evaluate) or [], 
@@ -283,10 +296,12 @@ def analyzeHdrs(view, structuralNode, definitionNode, depth, axisDisposition, fa
                                     childStructuralNode.zSelection = True
                                 else:
                                     structuralNode.childStructuralNodes.append(childStructuralNode)
-                                    analyzeHdrs(view, childStructuralNode, definitionNode, depth, axisDisposition, facts) #recurse
+                                    analyzeHdrs(view, childStructuralNode, definitionNode, depth, axisDisposition, facts, processOpenDefinitionNode=False) #recurse
+                                    analyzeCartesianProductHdrs(childStructuralNode, *cartesianProductNestedArgs)
                         else:
                             structuralNode.variables[varQn] = selections
                 elif isinstance(definitionNode, ModelFilterDefinitionNode):
+                    cartesianProductAnalyzed = True
                     structuralNode.abstract = True # spanning ordinate acts as a subtitle
                     filteredFactsPartitions = structuralNode.evaluate(definitionNode, 
                                                                       definitionNode.filteredFactsPartitions, 
@@ -295,9 +310,15 @@ def analyzeHdrs(view, structuralNode, definitionNode, depth, axisDisposition, fa
                         childStructuralNode = StructuralNode(structuralNode, definitionNode, contextItemFact=factsPartition[0])
                         childStructuralNode.indent = 0
                         structuralNode.childStructuralNodes.append(childStructuralNode)
-                        analyzeHdrs(view, childStructuralNode, definitionNode, depth, axisDisposition, factsPartition) #recurse
+                        checkLabelWidth(childStructuralNode, checkBoundFact=True)
+                        #analyzeHdrs(view, childStructuralNode, definitionNode, depth, axisDisposition, factsPartition, processOpenDefinitionNode=False) #recurse
+                        cartesianProductNestedArgs[3] = factsPartition
+                        analyzeCartesianProductHdrs(childStructuralNode, *cartesianProductNestedArgs)
                     # sort by header (which is likely to be typed dim value, for example)
-                    structuralNode.childStructuralNodes.sort(key=lambda childStructuralNode: childStructuralNode.header(lang=view.lang))
+                    structuralNode.childStructuralNodes.sort(key=lambda childStructuralNode: 
+                                                             childStructuralNode.header(lang=view.lang, 
+                                                                                        returnGenLabel=False, 
+                                                                                        returnMsgFormatString=False))
                     
                     # TBD if there is no abstract 'sub header' for these subOrdCntxs, move them in place of parent structuralNode 
                 elif isinstance(definitionNode, ModelTupleDefinitionNode):
@@ -323,7 +344,7 @@ def analyzeHdrs(view, structuralNode, definitionNode, depth, axisDisposition, fa
                             structuralNode.choiceNodeIndex = 0
                     view.zmostOrdCntx = structuralNode
                         
-                if not hasSubtreeRels or axisDisposition == "z":
+                if not cartesianProductAnalyzed or axisDisposition == "z":
                     analyzeCartesianProductHdrs(structuralNode, *cartesianProductNestedArgs)
                         
                 if not structuralNode.childStructuralNodes: # childless root ordinate, make a child to iterate in producing table
@@ -334,7 +355,6 @@ def analyzeHdrs(view, structuralNode, definitionNode, depth, axisDisposition, fa
             raise ResolutionException("arelle:resolutionException",
                                       _("Exception in resolution of definition node %(node)s: %(error)s"),
                                       modelObject=definitionNode, node=definitionNode.qname, error=str(ex))
-            
             
 def analyzeCartesianProductHdrs(childStructuralNode, view, depth, axisDisposition, facts, tblAxisRels, i):
     if i is not None: # recurse table relationships for cartesian product
@@ -354,9 +374,9 @@ def analyzeCartesianProductHdrs(childStructuralNode, view, depth, axisDispositio
                                                         evalArgs=(facts,))
                 else:
                     matchingFacts = facts
-                    
+                # returns whether there were no structural node results
                 analyzeHdrs(view, subOrdTblCntx, tblObj, 
-                            depth + (0 if axisDisposition == 'z' else 1), 
+                            depth, # depth + (0 if axisDisposition == 'z' else 1), 
                             axisDisposition, matchingFacts, j + i + 1, tblAxisRels) #cartesian product
                 break
                 
@@ -406,6 +426,16 @@ def addRelationships(relAxisObj, rels, structuralNode, cartesianProductNestedArg
             addRelationships(relAxisObj, rel, childStructuralNode, cartesianProductNestedArgs)
         else:
             addRelationships(relAxisObj, rel, childStructuralNode, cartesianProductNestedArgs)
+            
+def leafNodeCount(structuralNode):
+    childLeafCount = 0
+    for childStructuralNode in structuralNode.childStructuralNodes:
+        childLeafCount += leafNodeCount(childStructuralNode)
+    if childLeafCount == 0:
+        return 1
+    if not structuralNode.isAbstract and isinstance(structuralNode.definitionNode, (ModelClosedDefinitionNode, ModelEuAxisCoord)):
+        childLeafCount += 1 # has a roll up
+    return childLeafCount
     
 def inheritedPrimaryItemQname(view, structuralNode):
     if structuralNode is None:

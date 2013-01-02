@@ -7,12 +7,14 @@ Created on Oct 17, 2010
 from collections import defaultdict
 from arelle import XbrlConst
 import os
+emptySet = set()
 
 def checkDimensions(val, drsELRs):
     
     fromConceptELRs = defaultdict(set)
     hypercubes = set()
     hypercubesInLinkrole = defaultdict(set)
+    domainsInLinkrole = defaultdict(set)
     for ELR in drsELRs:
         domainMemberRelationshipSet = val.modelXbrl.relationshipSet( XbrlConst.domainMember, ELR)
                             
@@ -43,7 +45,7 @@ def checkDimensions(val, drsELRs):
                         if hc in positiveHypercubes:
                             val.modelXbrl.error(("EFM.6.16.08", "GFM.1.08.08"),
                                 _("Not all hypercube %(hypercube)s in DRS role %(linkrole)s, is also the target of a positive hypercube"),
-                                modelObject=hasHcRel, hypercube=hc.qname, linkrole=ELR)
+                                modelObject=hasHcRel, hypercube=hc.qname, linkrole=ELR, linkroleDefinition=val.modelXbrl.roleTypeDefinition(ELR))
                     dimELR = hasHcRel.targetRole
                     dimTargetRequired = (dimELR is not None)
                     if not dimELR:
@@ -54,7 +56,9 @@ def checkDimensions(val, drsELRs):
                     if dimTargetRequired and len(hcDimRels) == 0:
                         val.modelXbrl.error(("EFM.6.16.09", "GFM.1.08.09"),
                             _("Table %(hypercube)s in DRS role %(linkrole)s, missing targetrole consecutive relationship"),
-                            modelObject=hasHcRel, hypercube=hc.qname, fromConcept=sourceConcept.qname, toConcept=hc.qname, linkrole=ELR, arcrole=os.path.basename(hasHcRel.arcrole))
+                            modelObject=hasHcRel, hypercube=hc.qname, fromConcept=sourceConcept.qname, toConcept=hc.qname, 
+                            linkrole=ELR, linkroleDefinition=val.modelXbrl.roleTypeDefinition(ELR), 
+                            arcrole=os.path.basename(hasHcRel.arcrole))
                     for hcDimRel in hcDimRels:
                         dim = hcDimRel.toModelObject
                         domELR = hcDimRel.targetRole
@@ -78,7 +82,7 @@ def checkDimensions(val, drsELRs):
                                               sourceConcept, positiveAxisTableSources[dim])):
                             val.modelXbrl.error(("EFM.6.16.07", "GFM.1.08.08"),
                                 _("Negative table axis %(dimension)s in DRS role %(linkrole)s, not in any positive table in same role"),
-                                 modelObject=hcDimRel, dimension=dim.qname, linkrole=ELR, primaryItem=sourceConcept.qname)
+                                 modelObject=hcDimRel, dimension=dim.qname, linkrole=ELR, linkroleDefinition=val.modelXbrl.roleTypeDefinition(ELR), primaryItem=sourceConcept.qname)
                         dimDomRels = val.modelXbrl.relationshipSet(
                              XbrlConst.dimensionDomain, domELR).fromModelObject(dim)   
                         if domTargetRequired and len(dimDomRels) == 0:
@@ -99,16 +103,20 @@ def checkDimensions(val, drsELRs):
                                 val.modelXbrl.error(("EFM.6.16.04", "GFM.1.08.04"),
                                     _("Dimension relationships have an undirected cycle in DRS role %(linkrole)s \nstarting from table %(hypercube)s, \naxis %(dimension)s, \npath %(path)s"),
                                     modelObject=[hc, dim] + [rel for rel in cycleCausingConcept if not isinstance(rel, bool)], 
-                                    linkrole=ELR, hypercube=hc.qname, dimension=dim.qname, conceptFrom=dim.qname,
+                                    linkrole=ELR, linkroleDefinition=val.modelXbrl.roleTypeDefinition(ELR), 
+                                    hypercube=hc.qname, dimension=dim.qname, conceptFrom=dim.qname,
                                     path=cyclePath(hc,cycleCausingConcept))
                             fromConceptELRs.clear()
                         elif val.validateSBRNL:
                             checkSBRNLMembers(val, hc, dim, domELR, dimDomRels, ELR, True)
+                            for dimDomRel in dimDomRels:
+                                dom = dimDomRel.toModelObject
+                                domainsInLinkrole[domELR].add(dom) # this is the elr containing the HC-dim relations
                 if hasHypercubeArcrole == XbrlConst.all and len(hasHcRels) > 1:
                     val.modelXbrl.error(("EFM.6.16.05", "GFM.1.08.05"),
                         _("Multiple tables (%(hypercubeCount)s) DRS role %(linkrole)s, source %(concept)s, only 1 allowed"),
                         modelObject=[sourceConcept] + hasHcRels, 
-                        hypercubeCount=len(hasHcRels), linkrole=ELR, 
+                        hypercubeCount=len(hasHcRels), linkrole=ELR, linkroleDefinition=val.modelXbrl.roleTypeDefinition(ELR),
                         concept=sourceConcept.qname,
                         hypercubes=', '.join(str(r.toModelObject.qname) for r in hasHcRels))
                     
@@ -163,12 +171,14 @@ def checkDimensions(val, drsELRs):
                         _("ELR role %(linkrole)s, is not dedicated to %(hypercube)s, but also has %(otherQname)s"),
                         modelObject=val.modelXbrl, linkrole=ELR, hypercube=hc.qname, otherQname=modelRel.fromModelObject.qname)
             '''
+            domains = domainsInLinkrole.get(ELR, emptySet)
             for hc in hypercubes:  # only one member
                 for arcrole in (XbrlConst.parentChild, "XBRL-dimensions"):
                     for modelRel in val.modelXbrl.relationshipSet(arcrole, ELR).modelRelationships:
-                        if modelRel.fromModelObject != hc and modelRel.toModelObject != hc:
+                        if (modelRel.fromModelObject != hc and modelRel.toModelObject != hc and
+                            modelRel.fromModelObject not in domains and modelRel.toModelObject not in domains):
                             val.modelXbrl.error("SBR.NL.2.2.3.05",
-                                _("ELR role %(linkrole)s, has hypercube %(hypercube)s and a %(arcrole)s relationship not involving the hypercube, from %(fromConcept)s to %(toConcept)s"),
+                                _("ELR role %(linkrole)s, has hypercube %(hypercube)s and a %(arcrole)s relationship not involving the hypercube or primary domain, from %(fromConcept)s to %(toConcept)s"),
                                 modelObject=modelRel, linkrole=ELR, hypercube=hc.qname, arcrole=os.path.basename(modelRel.arcrole), 
                                 fromConcept=modelRel.fromModelObject.qname, toConcept=modelRel.toModelObject.qname)
         domainsInLinkrole = defaultdict(set)

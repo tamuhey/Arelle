@@ -12,6 +12,7 @@ from arelle.ModelFormulaObject import Aspect, aspectModels, aspectRuleAspects, a
 from arelle.FormulaEvaluator import aspectMatches
 from arelle.ModelInstanceObject import ModelDimensionValue
 from arelle.ModelValue import QName
+from arelle.ModelRenderingObject import ModelClosedDefinitionNode, ModelEuAxisCoord
 from arelle.PrototypeInstanceObject import FactPrototype
 from collections import defaultdict
 
@@ -271,7 +272,8 @@ class ViewRenderedGrid(ViewFile.View):
                 if nonAbstract:
                     width += 100 # width for this label
                 widthToSpanParent += width
-                label = xStructuralNode.header(lang=self.lang)
+                label = xStructuralNode.header(lang=self.lang,
+                                               returnGenLabel=isinstance(xStructuralNode.definitionNode, (ModelClosedDefinitionNode, ModelEuAxisCoord)))
                 if childrenFirst:
                     thisCol = rightCol
                 else:
@@ -370,9 +372,12 @@ class ViewRenderedGrid(ViewFile.View):
             for yStructuralNode in yParentStructuralNode.childStructuralNodes:
                 nestRow, nextRow = self.yAxisByRow(leftCol + 1, row, yStructuralNode,  # nested items before totals
                                         childrenFirst, childrenFirst, False)
-                isAbstract = yStructuralNode.isAbstract
+                isAbstract = (yStructuralNode.isAbstract or 
+                              (yStructuralNode.childStructuralNodes and
+                               not isinstance(yStructuralNode.definitionNode, (ModelClosedDefinitionNode, ModelEuAxisCoord))))
                 isNonAbstract = not isAbstract
-                label = yStructuralNode.header(lang=self.lang)
+                label = yStructuralNode.header(lang=self.lang,
+                                               returnGenLabel=isinstance(yStructuralNode.definitionNode, ModelClosedDefinitionNode))
                 topRow = row
                 #print ( "row {0} topRow {1} nxtRow {2} col {3} renderNow {4} label {5}".format(row, topRow, nextRow, leftCol, renderNow, label))
                 if renderNow:
@@ -399,12 +404,12 @@ class ViewRenderedGrid(ViewFile.View):
                     else:
                         if hdrRow == len(self.rowElts):
                             edgeBorder = "border-bottom:.5pt solid windowtext;"
+                    depth = yStructuralNode.depth
                     attrib = {"style":"text-align:{0};max-width:{1}em;{2}".format(
                                             "left" if isNonAbstract or nestRow == hdrRow else "center",
                                             # this is a wrap length max sidth in characters
-                                            self.rowHdrColWidth[leftCol] if isAbstract else
-                                            self.rowHdrWrapLength -
-                                            sum(self.rowHdrColWidth[i] for i in range(leftCol)),
+                                            self.rowHdrColWidth[depth] if isAbstract else
+                                            self.rowHdrWrapLength - sum(self.rowHdrColWidth[0:depth]),
                                             edgeBorder),
                               "colspan": str(columnspan)}
                     if isAbstract:
@@ -463,7 +468,7 @@ class ViewRenderedGrid(ViewFile.View):
                 elif childrenFirst:
                     row = nextRow
                 if nestRow > nestedBottomRow:
-                    nestedBottomRow = nestRow + (not childrenFirst)
+                    nestedBottomRow = nestRow + (isNonAbstract and not childrenFirst)
                 if row > nestedBottomRow:
                     nestedBottomRow = row
                 #if renderNow and not childrenFirst:
@@ -478,9 +483,12 @@ class ViewRenderedGrid(ViewFile.View):
             for yStructuralNode in yParentStructuralNode.childStructuralNodes:
                 nestRow, nextRow = self.yAxisByCol(leftCol + 1, row, yStructuralNode,  # nested items before totals
                                                    childrenFirst, childrenFirst, False)
-                isAbstract = yStructuralNode.isAbstract
+                isAbstract = (yStructuralNode.isAbstract or 
+                              (yStructuralNode.childStructuralNodes and
+                               not isinstance(yStructuralNode.definitionNode, (ModelClosedDefinitionNode, ModelEuAxisCoord))))
                 isNonAbstract = not isAbstract
-                label = yStructuralNode.header(lang=self.lang)
+                label = yStructuralNode.header(lang=self.lang,
+                                               returnGenLabel=isinstance(yStructuralNode.definitionNode, (ModelClosedDefinitionNode, ModelEuAxisCoord)))
                 topRow = row
                 if childrenFirst and isNonAbstract:
                     row = nextRow
@@ -521,7 +529,7 @@ class ViewRenderedGrid(ViewFile.View):
                 elif childrenFirst:
                     row = nextRow
                 if nestRow > nestedBottomRow:
-                    nestedBottomRow = nestRow + (not childrenFirst)
+                    nestedBottomRow = nestRow + (isNonAbstract and not childrenFirst)
                 if row > nestedBottomRow:
                     nestedBottomRow = row
                 #if renderNow and not childrenFirst:
