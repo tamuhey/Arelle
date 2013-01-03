@@ -39,8 +39,8 @@ Record Order in BIFF8
       EOF
 '''
 
-from arelle import BIFFRecords
-from arelle import Style
+from arelle.xlwt import BIFFRecords
+from arelle.xlwt import Style
 
 class Workbook(object):
 

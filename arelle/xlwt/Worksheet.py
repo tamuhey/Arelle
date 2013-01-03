@@ -33,10 +33,10 @@
             EOF
 '''
 
-from arelle import BIFFRecords
-from arelle import Bitmap
-from arelle import Formatting
-from arelle import Style
+from arelle.xlwt import BIFFRecords
+from arelle.xlwt import Bitmap
+from arelle.xlwt import Formatting
+from arelle.xlwt import Style
 import tempfile
 
 
