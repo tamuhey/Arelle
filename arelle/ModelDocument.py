@@ -589,7 +589,7 @@ class ModelDocument:
                 self.modelXbrl.modelManager.disclosureSystem.disallowedHrefOfNamespace(self.uri, targetNamespace)):
                     self.modelXbrl.error(("EFM.6.22.02", "GFM.1.1.3", "SBR.NL.2.1.0.06" if self.uri.startswith("http") else "SBR.NL.2.2.0.17"),
                             _("Namespace: %(namespace)s disallowed schemaLocation %(schemaLocation)s"),
-                            modelObject=rootElement, namespace=targetNamespace, schemaLocation=self.uri)
+                            modelObject=rootElement, namespace=targetNamespace, schemaLocation=self.uri, url=self.uri)
 
         else:
             if isIncluded == True and namespace:
@@ -668,7 +668,7 @@ class ModelDocument:
                     self.modelXbrl.modelManager.disclosureSystem.disallowedHrefOfNamespace(importSchemaLocation, importNamespace)):
                 self.modelXbrl.error(("EFM.6.22.02", "GFM.1.1.3", "SBR.NL.2.1.0.06" if importSchemaLocation.startswith("http") else "SBR.NL.2.2.0.17"),
                         _("Namespace: %(namespace)s disallowed schemaLocation blocked %(schemaLocation)s"),
-                        modelObject=element, namespace=importNamespace, schemaLocation=importSchemaLocation)
+                        modelObject=element, namespace=importNamespace, schemaLocation=importSchemaLocation, url=importSchemaLocation)
                 return
             doc = None
             importSchemaLocationBasename = os.path.basename(importNamespace)
@@ -741,8 +741,6 @@ class ModelDocument:
                             self.modelXbrl.error("xmlSchema:requiredAttribute",
                                     _("Linkbase reference for %(linkbaseRefElement)s href attribute missing or malformed"),
                                     modelObject=lbElement, linkbaseRefElement=lbLn)
-                        else:
-                            self.hrefObjects.append(href)
                         continue
                 if lbElement.get("{http://www.w3.org/1999/xlink}type") == "extended":
                     if isinstance(lbElement, ModelLink):
@@ -834,7 +832,8 @@ class ModelDocument:
                         if doc.type == Type.SCHEMA: # schema coming newly into DTS
                             doc.schemaDiscoverChildElements(doc.xmlRootElement)
             href = (element, doc, id if len(id) > 0 else None)
-            self.hrefObjects.append(href)
+            if doc is not None:  # if none, an error would have already been reported, don't multiply report it
+                self.hrefObjects.append(href)
             return href
         return None
     
