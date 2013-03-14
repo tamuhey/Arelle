@@ -884,6 +884,8 @@ class ModelXbrl:
                 extras["refs"] = refs
             elif argName == "results":
                 extras["results"] = argValue
+            elif argName == "assertionId":
+                extras["assertionId"] = argValue
             ### END PATCH: business-rule logging changes
             elif argName == "sourceLine":
                 if isinstance(argValue, _INT_TYPES):    # must be sortable with int's in logger
