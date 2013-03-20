@@ -4,6 +4,9 @@
        names="Middle Earth"
        names="Middle Earth/Rivendell"
        names="Middle Earth/The Shire"
+       
+       only last name is shown on command line help a the "index" keyword
+       
        path structures are presented in a tree view for selection, only leaf nodes can be selected
        
        the first alternative in names is the formal name, others (after "|" are aliases or short cuts)
@@ -24,12 +27,17 @@
        submission may include discoverable files in the directory tree of its grandparent directory.
        
        mappingsUrl (if provided) means that the indicated file is to be read instead of mappings.xml
-       for this disclosure system.
+       for this disclosure system.  If a relative pathname, it is relative to this this file's directory.
+       
+       utrUrl (if provided) means that the indicated file is to be read instead of http://www.xbrl.org/utr/utr.xml
+       for this disclosure system.  If a relative pathname, it is relative to this this file's directory.
+       utrUrl may be mapped by an entry in the mappings file.
+       
   -->
   <DisclosureSystem 
      names="Japan FSA|jp-fsa|fsa" 
      description="Japan FSA example entry\n
-     Default language 日本\n
+     Default language Japanese\n
      EDInet identifier patterns\n
      Allowed references TBD"
      defaultXmlLang="jp" 
@@ -158,6 +166,7 @@
      defaultXmlLang="en-US" 
      defaultLanguage="English" 
      standardTaxonomiesUrl="edgartaxonomies.xml"
+     utrUrl="http://www.xbrl.org/utr/2012-11-30/utr.xml"
      validateFileText="true"
      identifierSchemePattern="^http://www\.sec\.gov/CIK$"
      identifierValuePattern="^[0-9]{10}$" 
@@ -174,6 +183,7 @@
      deiFilerIdentifierElement="EntityCentralIndexKey" 
      deiFilerNameElement="EntityRegistrantName"
      logLevelFilter="(?!.*-semantic$)"
+     logCodeFilter="(?!EFM.6.05.28.linkrole|EFM.6.07.06|EFM.6.07.09.roleEnding|EFM.6.07.13.arcroleEnding|EFM.6.10.01.missingLabelLinkbase)"
      />
   <DisclosureSystem 
      names="US SEC (Global Filing Manual)|us-gfm|gfm-us" 

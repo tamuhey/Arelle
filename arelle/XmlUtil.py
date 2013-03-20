@@ -460,14 +460,21 @@ def addComment(parent, commentText):
     parent.append(child)
     
 def addQnameValue(modelDocument, qnameValue):
-    if isinstance(modelDocument, ModelObject): modelDocument = modelDocument.modelDocument
-    existingPrefix = xmlnsprefix(modelDocument.xmlRootElement, qnameValue.namespaceURI)
+    if not isinstance(qnameValue, QName):
+        return qnameValue # may be just a string
+    if hasattr(modelDocument, "modelDocument"): 
+        modelDocument = modelDocument.modelDocument
+        xmlRootElement = modelDocument.xmlRootElement
+    elif isinstance(modelDocument, etree._ElementTree):
+        xmlRootElement = modelDocument.getroot()
+        if xmlRootElement.tag == "nsmap": xmlRootElement = xmlRootElement[0]
+    existingPrefix = xmlnsprefix(xmlRootElement, qnameValue.namespaceURI)
     if existingPrefix is not None:  # namespace is already declared, use that for qnameValue's prefix
         return qnameValue.localName if len(existingPrefix) == 0 else existingPrefix + ':' + qnameValue.localName
     prefix = qnameValue.prefix
     dupNum = 2 # start with _2 being 'second' use of same prefix, etc.
     while (dupNum < 10000): # check if another namespace has prefix already (but don't die if running away)
-        if xmlns(modelDocument.xmlRootElement, prefix) is None:
+        if xmlns(xmlRootElement, prefix) is None:
             break   # ok to use this prefix
         prefix = "{0}_{1}".format(qnameValue.prefix if qnameValue.prefix else '', dupNum)
         dupNum += 1
@@ -475,8 +482,12 @@ def addQnameValue(modelDocument, qnameValue):
     return qnameValue.localName if len(prefix) == 0 else prefix + ':' + qnameValue.localName
 
 def setXmlns(modelDocument, prefix, namespaceURI):
-    elementTree = modelDocument.xmlDocument
-    root = elementTree.getroot()
+    if isinstance(modelDocument, etree._ElementTree):
+        elementTree = modelDocument
+        root = modelDocument.getroot()
+    else:
+        elementTree = modelDocument.xmlDocument
+        root = elementTree.getroot()
     if prefix == "":
         prefix = None  # default xmlns prefix stores as None
     if prefix not in root.nsmap:
@@ -668,7 +679,7 @@ def xmlstring(elt, stripXmlns=False, prettyPrint=False, contentsOnly=False):
     else:
         return xml
 
-def writexml(writer, node, encoding=None, indent='', parentNsmap=None):
+def writexml(writer, node, encoding=None, indent='', xmlcharrefreplace=False, parentNsmap=None):
     # customized from xml.minidom to provide correct indentation for data items
     if isinstance(node,etree._ElementTree):
         if encoding:
@@ -680,9 +691,9 @@ def writexml(writer, node, encoding=None, indent='', parentNsmap=None):
                 break   # stop depth first iteration after comment and root node
             if child.tag == 'nsmap':
                 for nsmapChild in child:
-                    writexml(writer, nsmapChild, indent=indent, parentNsmap={}) # force all xmlns in next element
+                    writexml(writer, nsmapChild, indent=indent, xmlcharrefreplace=xmlcharrefreplace, parentNsmap={}) # force all xmlns in next element
             else:
-                writexml(writer, child, indent=indent, parentNsmap={})
+                writexml(writer, child, indent=indent, xmlcharrefreplace=xmlcharrefreplace, parentNsmap={})
     elif isinstance(node,etree._Comment): # ok to use minidom implementation
         writer.write(indent+"<!--" + node.text + "-->\n")
     elif isinstance(node,etree._Element):
@@ -756,7 +767,13 @@ def writexml(writer, node, encoding=None, indent='', parentNsmap=None):
         firstChild = True
         text = node.text
         if text is not None:
-            text = text.replace("&","&amp;").replace("\u00A0","&nbsp;").strip().replace("<","&lt;").replace("\u00AD","&shy;")
+            text = ''.join("&amp;" if c == "&"
+                           else "&nbsp;" if c == "\u00A0" 
+                           else "&lt;" if c == "<"
+                           else "&shy;" if c == "\u00AD"
+                           else "&#x%x;" % ord(c) if c >= '\x80' and xmlcharrefreplace
+                           else c
+                           for c in text)
         for child in node.iterchildren():
             hasChildNodes = True
             if firstChild:
@@ -764,7 +781,7 @@ def writexml(writer, node, encoding=None, indent='', parentNsmap=None):
                 if text:
                     writer.write(text)
                 firstChild = False
-            writexml(writer, child, indent=indent+'    ')
+            writexml(writer, child, indent=indent+'    ', xmlcharrefreplace=xmlcharrefreplace)
         if hasChildNodes:
             writer.write("%s</%s>\n" % (indent, tag))
         elif text:
