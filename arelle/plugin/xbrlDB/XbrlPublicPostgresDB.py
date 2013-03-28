@@ -30,7 +30,8 @@ Information for the 'official' XBRL US-maintained database (this schema, contain
 import os, io, re, time
 from math import isnan, isinf
 from pg8000 import DBAPI
-from pg8000.errors import CursorClosedError, ConnectionClosedError
+from pg8000.errors import CursorClosedError, ConnectionClosedError, InterfaceError, ProgrammingError
+import socket
 from arelle.ModelDtsObject import ModelConcept, ModelResource
 from arelle.ModelValue import qname, datetime
 from arelle.ValidateXbrlCalcs import roundValue
@@ -42,19 +43,33 @@ TRACESQLFILE = None
 def insertIntoDB(modelXbrl, 
                  user=None, password=None, host=None, port=None, database=None,
                  rssItem=None):
-    db = None
+    xpgdb = None
     try:
-        db = XbrlPublicPostgresDatabaseConnection(modelXbrl, user, password, host, port, database)
-        db.verifyTables()
-        db.insertXbrl(rssItem=rssItem)
-        db.close()
+        xpgdb = XbrlPostgresDatabaseConnection(modelXbrl, user, password, host, port, database)
+        xpgdb.verifyTables()
+        xpgdb.insertXbrl(rssItem=rssItem)
+        xpgdb.close()
     except Exception as ex:
-        if db is not None:
+        if xpgdb is not None:
             try:
-                db.close(rollback=True)
+                xpgdb.close(rollback=True)
             except Exception as ex2:
                 pass
         raise # reraise original exception with original traceback    
+    
+def isDBPort(host, port, timeout=10):
+    # determine if postgres port
+    t = 2
+    while t < timeout:
+        try:
+            DBAPI.connect(user='', host=host, port=int(port) if port else None, socket_timeout=t)
+        except ProgrammingError:
+            return True # success, this is really a postgres socket, wants user name
+        except InterfaceError:
+            return False # something is there but not postgres
+        except socket.timeout:
+            t = t + 2  # relax - try again with longer timeout
+    return False
     
 XBRLDBTABLES = {
                 "fact", "fact_aug",
@@ -109,7 +124,7 @@ class XPDBException(Exception):
             
 
 
-class XbrlPublicPostgresDatabaseConnection():
+class XbrlPostgresDatabaseConnection():
     def __init__(self, modelXbrl, user, password, host, port, database):
         self.modelXbrl = modelXbrl
         self.disclosureSystem = modelXbrl.modelManager.disclosureSystem
@@ -168,7 +183,7 @@ class XbrlPublicPostgresDatabaseConnection():
             self.create()
             missingTables = XBRLDBTABLES - self.tablesInDB()
         if missingTables:
-            raise XPDBException("xpDB:MissingTables",
+            raise XPDBException("xpgDB:MissingTables",
                                 _("The following tables are missing: %(missingTableNames)s"),
                                 missingTableNames=', '.join(t for t in sorted(missingTables))) 
             
@@ -311,7 +326,7 @@ class XbrlPublicPostgresDatabaseConnection():
             colTypeCast = tuple(colTypeFunctions[colName][0] for colName in newCols)
             colTypeFunction = tuple(colTypeFunctions[colName][1] for colName in returningCols)
         except KeyError as err:
-            raise XPDBException("xpDB:MissingColumnDefinition",
+            raise XPDBException("xpgDB:MissingColumnDefinition",
                                 _("Table %(table)s column definition missing: %(missingColumnName)s"),
                                 table=table, missingColumnName=str(err)) 
         rowValues = []
@@ -530,7 +545,10 @@ WITH row_values (%(newCols)s) AS (
                               ('qname_id',), 
                               tuple((self.qnameId[concept.qname],
                                      self.qnameId.get(concept.typeQname), # may be None
-                                     self.qnameId.get(concept.baseXbrliTypeQname), # may be None
+                                     self.qnameId.get(concept.baseXbrliTypeQname
+                                                      if not isinstance(concept.baseXbrliTypeQname, list)
+                                                      else concept.baseXbrliTypeQname[0]
+                                                      ), # may be None or may be a list for a union
                                      {'debit':1, 'credit':2, None:None}[concept.balance],
                                      {'instant':1, 'duration':2, 'forever':3, None:0}[concept.periodType],
                                      self.qnameId.get(concept.substitutionGroupQname), # may be None

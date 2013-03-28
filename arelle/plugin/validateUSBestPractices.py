@@ -203,7 +203,7 @@ def final(val, conceptsUsed):
                                ]
     if extensionConceptsUnused:
         for concept in sorted(extensionConceptsUnused, key=lambda c: str(c.qname)):
-            val.modelXbrl.log('INFO-SEMANTIC', "US-BPG.1.7.1",
+            val.modelXbrl.log('INFO-SEMANTIC', "US-BPG.1.7.1.unusedExtensionConcept",
                 _("Company extension concept is unused: %(concept)s"),
                 modelObject=concept, concept=concept.qname)
         
@@ -243,7 +243,7 @@ def final(val, conceptsUsed):
               (concept.isDimensionItem and concept not in val.modelXbrl.dimensionDefaultConcepts) or
               # report a domain member which isn't default and isn't used
               (concept.type is not None and concept.type.isDomainItemType and concept not in dimensionDefaults)):
-            val.modelXbrl.log('INFO-SEMANTIC', "US-BPG.1.7.1",
+            val.modelXbrl.log('INFO-SEMANTIC', "US-BPG.1.7.1.unusedStandardConceptInExtensionRelationship",
                 _("Company extension relationships of unused standard concept: %(concept)s"),
                 modelObject=locs, concept=concept.qname) 
     for concept, locs in standardConceptsDeprecated.items():
