@@ -74,9 +74,9 @@ class Cntlr:
     """
     __version__ = "1.0.0"
     
-    def __init__(self, logFileName=None, logFileMode=None, logFileEncoding=None, logFormat=None):
+    def __init__(self, hasGui=False, logFileName=None, logFileMode=None, logFileEncoding=None, logFormat=None):
         self.hasWin32gui = False
-        self.hasGui = False
+        self.hasGui = hasGui
 
         self.moduleDir = os.path.dirname(__file__)
         # for python 3.2 remove __pycache__
@@ -137,7 +137,7 @@ class Cntlr:
                 self.userAppDir = os.path.expanduser("~") + "/Library/Application Support/Arelle"
             # note that cache is in ~/Library/Caches/Arelle
             self.contextMenuClick = "<Button-2>"
-            self.hasClipboard = True
+            self.hasClipboard = hasGui  # clipboard always only if Gui (not command line mode)
             self.updateURL = "http://arelle.org/downloads/8"
         elif sys.platform.startswith("win"):
             self.isMac = False
@@ -149,16 +149,19 @@ class Cntlr:
                 else:
                     impliedAppDir = tempDir
                 self.userAppDir = os.path.join( impliedAppDir, "Arelle")
-            try:
-                import win32clipboard
-                self.hasClipboard = True
-            except ImportError:
+            if hasGui:
+                try:
+                    import win32clipboard
+                    self.hasClipboard = True
+                except ImportError:
+                    self.hasClipboard = False
+                try:
+                    import win32gui
+                    self.hasWin32gui = True # active state for open file dialogs
+                except ImportError:
+                    pass
+            else:
                 self.hasClipboard = False
-            try:
-                import win32gui
-                self.hasWin32gui = True # active state for open file dialogs
-            except ImportError:
-                pass
             self.contextMenuClick = "<Button-3>"
             if "64 bit" in sys.version:
                 self.updateURL = "http://arelle.org/downloads/9"
@@ -169,10 +172,13 @@ class Cntlr:
             self.isMSW = False
             if not configHomeDir:
                 self.userAppDir = os.path.join( os.path.expanduser("~/.config"), "arelle")
-            try:
-                import gtk
-                self.hasClipboard = True
-            except ImportError:
+            if hasGui:
+                try:
+                    import gtk
+                    self.hasClipboard = True
+                except ImportError:
+                    self.hasClipboard = False
+            else:
                 self.hasClipboard = False
             self.contextMenuClick = "<Button-3>"
         try:
@@ -213,12 +219,20 @@ class Cntlr:
         # Cntlr.Init after logging started
         for pluginMethod in PluginManager.pluginClassMethods("Cntlr.Init"):
             pluginMethod(self)
-        
+            
     def setUiLanguage(self, lang, fallbackToDefault=False):
         try:
             gettext.translation("arelle", 
                                 self.localeDir, 
                                 getLanguageCodes(lang)).install()
+            if not isPy3: # 2.7 gettext provides string instead of unicode from .mo files
+                installedGettext = __builtins__['_']
+                def convertGettextResultToUnicode(msg):
+                    translatedMsg = installedGettext(msg)
+                    if isinstance(translatedMsg, _STR_UNICODE):
+                        return translatedMsg
+                    return translatedMsg.decode('utf-8')
+                __builtins__['_'] = convertGettextResultToUnicode
         except Exception:
             if fallbackToDefault or (lang and lang.lower().startswith("en")):
                 gettext.install("arelle", 
@@ -226,7 +240,7 @@ class Cntlr:
         
     def startLogging(self, logFileName=None, logFileMode=None, logFileEncoding=None, logFormat=None, 
                      logLevel=None, logHandler=None):
-        # add additional logging levels    
+        # add additional logging levels (for python 2.7, all of these are ints)
         logging.addLevelName(logging.INFO + 1, "INFO-SEMANTIC")
         logging.addLevelName(logging.WARNING + 1, "WARNING-SEMANTIC")
         logging.addLevelName(logging.WARNING + 2, "ASSERTION-SATISFIED")
@@ -263,15 +277,20 @@ class Cntlr:
                 self.addToLog(_("Unknown log level name: {0}, please choose from {1}").format(
                     logLevel, ', '.join(logging.getLevelName(l).lower()
                                         for l in sorted([i for i in logging._levelNames.keys()
-                                                         if isinstance(i,int) and i > 0]))),
+                                                         if isinstance(i,_INT_TYPES) and i > 0]))),
                               level=logging.ERROR, messageCode="arelle:logLevel")
             else:
                 self.logger.setLevel(logging.getLevelName((logLevel or "debug").upper()))
+            self.logger.messageCodeFilter = None
+            self.logger.messageLevelFilter = None
                 
-    def setLoggingFilters(self, logLevelFilter=None, logCodeFilter=None):
+    def setLogLevelFilter(self, logLevelFilter):
+        if self.logger:
+            self.logger.messageLevelFilter = re.compile(logLevelFilter) if logLevelFilter else None
+            
+    def setLogCodeFilter(self, logCodeFilter):
         if self.logger:
             self.logger.messageCodeFilter = re.compile(logCodeFilter) if logCodeFilter else None
-            self.logger.messageLevelFilter = re.compile(logLevelFilter) if logLevelFilter else None
                         
     def addToLog(self, message, messageCode="", file="", level=logging.INFO):
         """Add a simple info message to the default logger
@@ -440,8 +459,13 @@ class LogFormatter(logging.Formatter):
                                 for file, lines in sorted(fileLines.items()))
         try:
             formattedMessage = super(LogFormatter, self).format(record)
-        except KeyError as ex:
-            formattedMessage = "Message: " + record.args.get('error','') + " \nMessage log error: " + str(ex)
+        except (KeyError, ValueError) as ex:
+            formattedMessage = "Message: "
+            if getattr(record, "messageCode", ""):
+                formattedMessage += "[{0}] ".format(record.messageCode)
+            if getattr(record, "msg", ""):
+                formattedMessage += record.msg + " "
+            formattedMessage += record.args.get('error','') + " \nMessage log error: " + str(ex)
         del record.file
         return formattedMessage
 
@@ -464,14 +488,14 @@ class LogToPrintHandler(logging.Handler):
             self.logFile = None
         
     def emit(self, logRecord):
-        if isPy3:
-            logEntry = self.format(logRecord)
-        else:
-            logEntry = self.format(logRecord).encode("utf-8")
-        if self.logFile:
-            print(logEntry, file=sys.stderr)
-        else:
-            print(logEntry)
+        file = sys.stderr if self.logFile else None
+        logEntry = self.format(logRecord)
+        if not isPy3:
+            logEntry = logEntry.encode("utf-8", "replace")
+        try:
+            print(logEntry, file=file)
+        except UnicodeEncodeError:
+            print(logEntry.encode("ascii", "replace").decode("ascii"), file=file)
 
 class LogHandlerWithXml(logging.Handler):        
     def __init__(self):

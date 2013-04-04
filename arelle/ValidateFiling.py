@@ -48,14 +48,14 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
             self.qnSbrLinkroleorder = ModelValue.qname("http://www.nltaxonomie.nl/5.0/basis/sbr/xbrl/xbrl-syntax-extension","linkroleOrder")
 
             self.typedDomainQnames = set()
-            typedDomainElements = set()
+            self.typedDomainElements = set()
             for modelConcept in modelXbrl.qnameConcepts.values():
                 if modelConcept.isTypedDimension:
                     typedDomainElement = modelConcept.typedDomainElement
                     if typedDomainElement is not None:
                         self.typedDomainQnames.add(typedDomainElement.qname)
-                        typedDomainElements.add(typedDomainElement)
-        
+                        self.typedDomainElements.add(typedDomainElement)
+
         # note that some XFM tests are done by ValidateXbrl to prevent mulstiple node walks
         super(ValidateFiling,self).validate(modelXbrl, parameters)
         xbrlInstDoc = modelXbrl.modelDocument.xmlDocument.getroot()
@@ -290,9 +290,10 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                 contextIDs.discard(factContextID)
                     
                 context = f.context
-                factElementName = f.localName
+                factQname = f.qname # works for both inline and plain instances
+                factElementName = factQname.localName
                 if disclosureSystem.deiNamespacePattern is not None:
-                    factInDeiNamespace = disclosureSystem.deiNamespacePattern.match(f.namespaceURI)
+                    factInDeiNamespace = disclosureSystem.deiNamespacePattern.match(factQname.namespaceURI)
                 else:
                     factInDeiNamespace = None
                 # standard dei items from required context
@@ -756,7 +757,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                                             "10-KT": (	"10-K",
                                                 "10-KT",
                                                 "Other"),
-                                            "10-KT/A": (	"10-K",
+                                            "10-KT/A": (	"10-K", "10-KT",
                                                 "10-KT/A",
                                                 "Other"),
                                             "10-Q": (	"10-Q"),
@@ -765,7 +766,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                                             "10-QT": (	"10-Q",
                                                 "10-QT",
                                                 "Other"),
-                                            "10-QT/A": (	"10-Q",
+                                            "10-QT/A": (	"10-Q", "10-QT",
                                                 "10-QT/A",
                                                 "Other"),
                                             "20-F": (	"20-F"),
@@ -1220,43 +1221,9 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                     modelObject=modelRoleTypes, arcroleType=arcroleURI, numberOfDeclarations=len(modelRoleTypes) )
                     
 
-        if self.validateSBRNL:
-            for qname, modelType in modelXbrl.qnameTypes.items():
-                if qname.namespaceURI not in disclosureSystem.baseTaxonomyNamespaces:
-                    facets = modelType.facets
-                    if facets:
-                        lengthFacets = _DICT_SET(facets.keys()) & {"minLength", "maxLength", "length"}
-                        if lengthFacets:
-                            modelXbrl.error("SBR.NL.2.2.7.02",
-                                _("Type %(typename)s has length restriction facets %(facets)s"),
-                                modelObject=modelType, typename=modelType.qname, facets=", ".join(lengthFacets))
-                        if "enumeration" in facets and not modelType.isDerivedFrom(XbrlConst.qnXbrliStringItemType):
-                            modelXbrl.error("SBR.NL.2.2.7.04",
-                                _("Concept %(concept)s has enumeration and is not based on stringItemType"),
-                                modelObject=modelType, concept=modelType.qname)
-                        
         self.modelXbrl.profileActivity("... filer concepts checks", minTimeToShow=1.0)
 
         del defaultLangStandardLabels #dereference
-        
-        ''' removed RH 2011-12-23, corresponding use of nameWordsTable in ValidateFilingDTS
-        if self.validateSBRNL: # build camelCasedNamesTable
-            self.nameWordsTable = {}
-            for name in modelXbrl.nameConcepts.keys():
-                words = []
-                wordChars = []
-                lastchar = ""
-                for c in name:
-                    if c.isupper() and lastchar.islower(): # it's another word
-                        partialName = ''.join(wordChars)
-                        if partialName in modelXbrl.nameConcepts:
-                            words.append(partialName)
-                    wordChars.append(c)
-                    lastchar = c
-                if words:
-                    self.nameWordsTable[name] = words
-            self.modelXbrl.profileActivity("... build name words table", minTimeToShow=1.0)
-        '''
         
         # checks on all documents: instance, schema, instance
         ValidateFilingDTS.checkDTS(self, modelXbrl.modelDocument, [])
@@ -1304,7 +1271,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                                     conceptFrom=modelRel.fromModelObject.qname, conceptTo=modelRel.toModelObject.qname, 
                                     ineffectivity=modelRel.ineffectivity)
                     if arcrole == XbrlConst.parentChild:
-                        isStatementSheet = any(linkroleDefinitionStatementSheet.match(roleType.definition)
+                        isStatementSheet = any(linkroleDefinitionStatementSheet.match(roleType.definition or '')
                                                for roleType in self.modelXbrl.roleTypes.get(ELR,()))
                         conceptsPresented = set()
                         # 6.12.2 check for distinct order attributes
@@ -1419,7 +1386,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                                     if relFromAndTos in usedCalcFromTosELR:
                                         otherRels = usedCalcFromTosELR[relFromAndTos]
                                         otherELR = otherRels[0].linkrole
-                                        self.modelXbrl.warning(("EFM.6.15.04", "GFM.2.06.04"),
+                                        self.modelXbrl.log("WARNING-SEMANTIC", ("EFM.6.15.04", "GFM.2.06.04"),
                                             _("Calculation relationships should have a same set of targets in %(linkrole)s and %(linkrole2)s starting from %(concept)s"),
                                             modelObject=[relFrom] + rels + otherRels, linkrole=ELR, linkrole2=otherELR, concept=relFrom.qname)
                                     else:
@@ -1444,10 +1411,10 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                             for rel in rels:
                                 relTo = rel.toModelObject
     
-                                if not (relTo.type is not None and relTo.type.isDomainItemType) and not self.isStandardUri(rel.modelDocument.uri):
+                                if not (relTo is not None and relTo.type is not None and relTo.type.isDomainItemType) and not self.isStandardUri(rel.modelDocument.uri):
                                     self.modelXbrl.error(("EFM.6.16.03", "GFM.1.08.03"),
                                         _("Definition relationship from %(conceptFrom)s to %(conceptTo)s in role %(linkrole)s requires domain item target"),
-                                        modelObject=(rel, relFrom, relTo), conceptFrom=relFrom.qname, conceptTo=relTo.qname, linkrole=rel.linkrole)
+                                        modelObject=(rel, relFrom, relTo), conceptFrom=relFrom.qname, conceptTo=(relTo.qname if relTo is not None else None), linkrole=rel.linkrole)
 
                     elif self.validateSBRNL:
                         if arcrole == XbrlConst.dimensionDefault:
@@ -1553,6 +1520,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
         # 6 16 4, 1.16.5 Base sets of Domain Relationship Sets testing
         self.modelXbrl.profileActivity("... filer preferred label checks", minTimeToShow=1.0)
         
+        ''' try moving to plug-in
         if self.validateSBRNL:
             # check presentation link roles for generic linkbase order number
             ordersRelationshipSet = modelXbrl.relationshipSet("http://www.nltaxonomie.nl/2011/arcrole/linkrole-order")
@@ -1607,6 +1575,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                             modelObject=domainElt, concept=domainElt.qname)
                     
             self.modelXbrl.profileActivity("... SBR role types and type facits checks", minTimeToShow=1.0)
+        '''
 
         if self.validateEFM:
             for pluginXbrlMethod in pluginClassMethods("Validate.EFM.Finally"):
@@ -1825,7 +1794,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                                 totalFactUnit.isEqualTo(itemFact.unit)):
                                 compatibleItemConcepts.add(itemConcept)
                                 compatibleFacts.add(itemFact)
-                    if compatibleItemConcepts:
+                    if len(compatibleItemConcepts) >= 2: # 6.15.2 requires 2 or more line items along with their net or total
                         compatibleItemsFacts[frozenset(compatibleItemConcepts)].update(compatibleFacts)
             for compatibleItemConcepts, compatibleFacts in compatibleItemsFacts.items():
                 foundSummationItemSet = False 

@@ -5,6 +5,7 @@ Created on Dec 16, 2010
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
 import os, re
+from collections import defaultdict
 from lxml import etree
 from arelle import (UrlUtil)
 
@@ -47,6 +48,8 @@ class DisclosureSystem:
         self.mappingsUrl = os.path.join(self.modelManager.cntlr.configDir, "mappings.xml")
         self.mappedFiles = {}
         self.mappedPaths = []
+        self.utrUrl = "http://www.xbrl.org/utr/utr.xml"
+        self.utrTypeEntries = None
         self.identifierSchemePattern = None
         self.identifierValuePattern = None
         self.identifierValueName = None
@@ -66,15 +69,25 @@ class DisclosureSystem:
 
     @property
     def dir(self):
+        return self.dirlist("dir")
+    
+    def dirlist(self, listFormat):
         self.modelManager.cntlr.showStatus(_("parsing disclosuresystems.xml"))
         namepaths = []
         try:
             xmldoc = etree.parse(self.url)
             for dsElt in xmldoc.iter(tag="DisclosureSystem"):
                 if dsElt.get("names"):
-                    namepaths.append(
-                         (dsElt.get("names").partition("|")[0],
-                          dsElt.get("description")))
+                    names = dsElt.get("names").split("|")
+                    if listFormat == "help": # terse help
+                        namepaths.append('{0}: {1}'.format(names[-1],names[0]))
+                    elif listFormat == "help-verbose":
+                        namepaths.append('{0}: {1}\n{2}\n'.format(names[-1],
+                                                                  names[0], 
+                                                                  dsElt.get("description").replace('\\n','\n')))
+                    elif listFormat == "dir":
+                        namepaths.append((names[0],
+                                          dsElt.get("description")))
         except (EnvironmentError,
                 etree.LxmlError) as err:
             self.modelManager.cntlr.addToLog("disclosuresystems.xml: import error: {0}".format(err))
@@ -116,6 +129,10 @@ class DisclosureSystem:
                                 self.mappingsUrl = self.modelManager.cntlr.webCache.normalizeUrl(
                                              dsElt.get("mappingsUrl"),
                                              self.url)
+                            if dsElt.get("utrUrl"): # may be mapped by mappingsUrl entries, see below
+                                self.utrUrl = self.modelManager.cntlr.webCache.normalizeUrl(
+                                             dsElt.get("utrUrl"),
+                                             self.url)
                             self.identifierSchemePattern = compileAttrPattern(dsElt,"identifierSchemePattern")
                             self.identifierValuePattern = compileAttrPattern(dsElt,"identifierValuePattern")
                             self.identifierValueName = dsElt.get("identifierValueName")
@@ -135,9 +152,12 @@ class DisclosureSystem:
                             self.selection = self.name
                             break
             self.loadMappings()
+            self.utrUrl = self.mappedUrl(self.utrUrl) # utr may be mapped, change to its mapped entry
             self.loadStandardTaxonomiesDict()
-            self.modelManager.cntlr.setLoggingFilters(logLevelFilter=self.logLevelFilter,
-                                                      logCodeFilter=self.logCodeFilter)
+            self.utrTypeEntries = None # clear any prior loaded entries
+            # set log level filters (including resetting prior disclosure systems values if no such filter)
+            self.modelManager.cntlr.setLogLevelFilter(self.logLevelFilter)  # None or "" clears out prior filter if any
+            self.modelManager.cntlr.setLogCodeFilter(self.logCodeFilter)
             status = _("loaded")
             result = True
         except (EnvironmentError,
@@ -151,8 +171,8 @@ class DisclosureSystem:
     
     def loadStandardTaxonomiesDict(self):
         if self.selection:
-            self.standardTaxonomiesDict = {}
-            self.standardLocalHrefs = set()
+            self.standardTaxonomiesDict = defaultdict(set)
+            self.standardLocalHrefs = defaultdict(set)
             self.standardAuthorities = set()
             if not self.standardTaxonomiesUrl:
                 return
@@ -183,16 +203,15 @@ class DisclosureSystem:
                                 family = value
                         if href:
                             if namespaceUri and (attType == "SCH" or attType == "ENT"):
-                                if namespaceUri not in self.standardTaxonomiesDict:
-                                    self.standardTaxonomiesDict[namespaceUri] = (href, localHref)
+                                self.standardTaxonomiesDict[namespaceUri].add(href)
+                                if localHref:
+                                    self.standardLocalHrefs[namespaceUri].add(localHref)
                                 authority = UrlUtil.authority(namespaceUri)
                                 self.standardAuthorities.add(authority)
                                 if family == "BASE":
                                     self.baseTaxonomyNamespaces.add(namespaceUri)
                             if href not in self.standardTaxonomiesDict:
                                 self.standardTaxonomiesDict[href] = "Allowed" + attType
-                            if localHref:
-                                self.standardLocalHrefs.add(localHref)
                         elif attType == "SCH" and family == "BASE":
                             self.baseTaxonomyNamespaces.add(namespaceUri)
 
@@ -214,15 +233,30 @@ class DisclosureSystem:
                 etree.LxmlError) as err:
             self.modelManager.cntlr.addToLog("{0}: import error: {1}".format(basename,err))
             etree.clear_error_log()
+            
+    def mappedUrl(self, url):
+        if url in self.mappedFiles:
+            mappedUrl = self.mappedFiles[url]
+        else:  # handle mapped paths
+            mappedUrl = url
+            for mapFrom, mapTo in self.mappedPaths:
+                if url.startswith(mapFrom):
+                    mappedUrl = mapTo + url[len(mapFrom):]
+                    break
+        return mappedUrl
 
     def uriAuthorityValid(self, uri):
         return UrlUtil.authority(uri) in self.standardAuthorities
     
     def disallowedHrefOfNamespace(self, href, namespaceUri):
         if namespaceUri in self.standardTaxonomiesDict:
-            stdHref, localHref = self.standardTaxonomiesDict[namespaceUri]
-            return not (href == stdHref or
-                        (localHref and not href.startswith("http://") and href.replace("\\","/").endswith(localHref)))
+            if href in self.standardTaxonomiesDict[namespaceUri]:
+                return False
+        if namespaceUri in self.standardLocalHrefs and not href.startswith("http://"):
+            normalizedHref = href.replace("\\","/")
+            if any(normalizedHref.endswith(localHref)
+                   for localHref in self.standardLocalHrefs[namespaceUri]):
+                return False
         return False
 
     def hrefValid(self, href):

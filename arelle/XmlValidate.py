@@ -26,6 +26,12 @@ languagePattern = re.compile("[a-zA-Z]{1,8}(-[a-zA-Z0-9]{1,8})*$")
 NCNamePattern = re.compile("^[_A-Za-z\xC0-\xD6\xD8-\xF6\xF8-\xFF\u0100-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD]"
                             r"[_\-\." 
                                "\xB7A-Za-z0-9\xC0-\xD6\xD8-\xF6\xF8-\xFF\u0100-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\u0300-\u036F\u203F-\u2040]*$")
+QNamePattern = re.compile("^([_A-Za-z\xC0-\xD6\xD8-\xF6\xF8-\xFF\u0100-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD]"
+                             r"[_\-\." 
+                               "\xB7A-Za-z0-9\xC0-\xD6\xD8-\xF6\xF8-\xFF\u0100-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\u0300-\u036F\u203F-\u2040]*:)?"
+                          "[_A-Za-z\xC0-\xD6\xD8-\xF6\xF8-\xFF\u0100-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD]"
+                            r"[_\-\." 
+                               "\xB7A-Za-z0-9\xC0-\xD6\xD8-\xF6\xF8-\xFF\u0100-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\u0300-\u036F\u203F-\u2040]*$")
 namePattern = re.compile("^[_A-Za-z\xC0-\xD6\xD8-\xF6\xF8-\xFF\u0100-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD]"
                             r"[_\-\.:" 
                                "\xB7A-Za-z0-9\xC0-\xD6\xD8-\xF6\xF8-\xFF\u0100-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\u0300-\u036F\u203F-\u2040]*$")
@@ -48,7 +54,8 @@ baseXsdTypePatterns = {
                 "NCName": NCNamePattern,
                 "ID": NCNamePattern,
                 "IDREF": NCNamePattern,
-                "ENTITY": NCNamePattern,                
+                "ENTITY": NCNamePattern, 
+                "QName": QNamePattern,               
             }
 predefinedAttributeTypes = {
     qname("{http://www.w3.org/XML/1998/namespace}xml:lang"):("language",None),
@@ -278,13 +285,21 @@ def validateValue(modelXbrl, elt, attrTag, baseXsdType, value, isNillable=False,
                     if "fractionDigits" in facets and ( '.' in value and
                         len(value[value.index('.') + 1:]) > facets["fractionDigits"]):
                         raise ValueError("fraction digits facet {0}".format(facets["fractionDigits"]))
+                    if "maxInclusive" in facets and xValue > facets["maxInclusive"]:
+                        raise ValueError(" > maxInclusive {0}".format(facets["maxInclusive"]))
+                    if "maxExclusive" in facets and xValue >= facets["maxExclusive"]:
+                        raise ValueError(" >= maxInclusive {0}".format(facets["maxExclusive"]))
+                    if "minInclusive" in facets and xValue < facets["minInclusive"]:
+                        raise ValueError(" < minInclusive {0}".format(facets["minInclusive"]))
+                    if "minExclusive" in facets and xValue <= facets["minExclusive"]:
+                        raise ValueError(" <= minExclusive {0}".format(facets["minExclusive"]))
             elif baseXsdType in {"integer",
                                  "nonPositiveInteger","negativeInteger","nonNegativeInteger","positiveInteger",
                                  "long","unsignedLong",
                                  "int","unsignedInt",
                                  "short","unsignedShort",
                                  "byte","unsignedByte"}:
-                xValue = sValue = int(value)
+                xValue = sValue = _INT(value)
                 if ((baseXsdType in {"nonNegativeInteger","unsignedLong","unsignedInt"} 
                      and xValue < 0) or
                     (baseXsdType == "nonPositiveInteger" and xValue > 0) or
@@ -295,6 +310,20 @@ def validateValue(modelXbrl, elt, attrTag, baseXsdType, value, isNillable=False,
                     (baseXsdType == "unsignedShort" and not 0 <= xValue < 65535) or
                     (baseXsdType == "positiveInteger" and xValue <= 0)):
                     raise ValueError("{0} is not {1}".format(value, baseXsdType))
+                if facets:
+                    if "totalDigits" in facets and len(value.replace(".","")) > facets["totalDigits"]:
+                        raise ValueError("totalDigits facet {0}".format(facets["totalDigits"]))
+                    if "fractionDigits" in facets and ( '.' in value and
+                        len(value[value.index('.') + 1:]) > facets["fractionDigits"]):
+                        raise ValueError("fraction digits facet {0}".format(facets["fractionDigits"]))
+                    if "maxInclusive" in facets and xValue > facets["maxInclusive"]:
+                        raise ValueError(" > maxInclusive {0}".format(facets["maxInclusive"]))
+                    if "maxExclusive" in facets and xValue >= facets["maxExclusive"]:
+                        raise ValueError(" >= maxInclusive {0}".format(facets["maxExclusive"]))
+                    if "minInclusive" in facets and xValue < facets["minInclusive"]:
+                        raise ValueError(" < minInclusive {0}".format(facets["minInclusive"]))
+                    if "minExclusive" in facets and xValue <= facets["minExclusive"]:
+                        raise ValueError(" <= minExclusive {0}".format(facets["minExclusive"]))
             elif baseXsdType == "boolean":
                 if value in ("true", "1"):  
                     xValue = sValue = True
@@ -302,7 +331,7 @@ def validateValue(modelXbrl, elt, attrTag, baseXsdType, value, isNillable=False,
                     xValue = sValue = False
                 else: raise ValueError
             elif baseXsdType == "QName":
-                xValue = qname(elt, value, castException=ValueError)
+                xValue = qname(elt, value, castException=ValueError, prefixException=ValueError)
                 sValue = value
                 ''' not sure here, how are explicitDimensions validated, but bad units not?
                 if xValue.namespaceURI in modelXbrl.namespaceDocs:
@@ -313,9 +342,9 @@ def validateValue(modelXbrl, elt, attrTag, baseXsdType, value, isNillable=False,
                         raise ValueError("qname not defined " + str(xValue))
                 '''
             elif baseXsdType in ("XBRLI_DECIMALSUNION", "XBRLI_PRECISIONUNION"):
-                xValue = sValue = value if value == "INF" else int(value)
+                xValue = sValue = value if value == "INF" else _INT(value)
             elif baseXsdType in ("XBRLI_NONZERODECIMAL"):
-                xValue = sValue = int(value)
+                xValue = sValue = _INT(value)
                 if xValue == 0:
                     raise ValueError("invalid value")
             elif baseXsdType == "XBRLI_DATEUNION":

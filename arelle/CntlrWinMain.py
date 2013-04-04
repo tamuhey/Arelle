@@ -47,8 +47,7 @@ restartMain = True
 class CntlrWinMain (Cntlr.Cntlr):
 
     def __init__(self, parent):
-        super(CntlrWinMain, self).__init__()
-        self.hasGui = True
+        super(CntlrWinMain, self).__init__(hasGui=True)
         self.parent = parent
         self.filename = None
         self.dirty = False
@@ -83,8 +82,10 @@ class CntlrWinMain (Cntlr.Cntlr):
                 (_("Open Web..."), self.webOpen, "Shift+Alt+O", "<Shift-Alt-o>"),
                 (_("Import File..."), self.importFileOpen, None, None),
                 (_("Import Web..."), self.importWebOpen, None, None),
+                ("PLUG-IN", "CntlrWinMain.Menu.File.Open", None, None),
                 (_("Save..."), self.fileSave, "Ctrl+S", "<Control-s>"),
                 (_("Save DTS Package"), self.saveDTSpackage, None, None),
+                ("PLUG-IN", "CntlrWinMain.Menu.File.Save", None, None),
                 (_("Close"), self.fileClose, "Ctrl+W", "<Control-w>"),
                 (None, None, None, None),
                 (_("Quit"), self.quit, "Ctrl+Q", "<Control-q>"),
@@ -94,6 +95,9 @@ class CntlrWinMain (Cntlr.Cntlr):
                 ):
             if label is None:
                 self.fileMenu.add_separator()
+            elif label == "PLUG-IN":
+                for pluginMenuExtender in pluginClassMethods(command):
+                    pluginMenuExtender(self, self.fileMenu)
             else:
                 self.fileMenu.add_command(label=label, underline=0, command=command, accelerator=shortcut_text)
                 self.parent.bind(shortcut, command)
@@ -173,11 +177,16 @@ class CntlrWinMain (Cntlr.Cntlr):
         for label, command, shortcut_text, shortcut in (
                 (_("Check for updates"), lambda: Updater.checkForUpdates(self), None, None),
                 (_("Manage plug-ins"), lambda: DialogPluginManager.dialogPluginManager(self), None, None),
+                ("PLUG-IN", "CntlrWinMain.Menu.Help.Upper", None, None),
                 (None, None, None, None),
                 (_("About..."), self.helpAbout, None, None),
+                ("PLUG-IN", "CntlrWinMain.Menu.Help.Lower", None, None),
                 ):
             if label is None:
                 helpMenu.add_separator()
+            elif label == "PLUG-IN":
+                for pluginMenuExtender in pluginClassMethods(command):
+                    pluginMenuExtender(self, helpMenu)
             else:
                 helpMenu.add_command(label=label, underline=0, command=command, accelerator=shortcut_text)
                 self.parent.bind(shortcut, command)
@@ -635,8 +644,7 @@ class CntlrWinMain (Cntlr.Cntlr):
             self.parent.title(_("arelle - {0}").format(
                             os.path.basename(modelXbrl.modelDocument.uri)))
             self.setValidateTooltipText()
-            if modelXbrl.modelDocument.type in (ModelDocument.Type.TESTCASESINDEX, 
-                        ModelDocument.Type.TESTCASE, ModelDocument.Type.REGISTRY, ModelDocument.Type.REGISTRYTESTCASE):
+            if modelXbrl.modelDocument.type in ModelDocument.Type.TESTCASETYPES:
                 currentAction = "tree view of tests"
                 ViewWinTests.viewTests(modelXbrl, self.tabWinTopRt)
             elif modelXbrl.modelDocument.type == ModelDocument.Type.VERSIONINGREPORT:
@@ -734,13 +742,17 @@ class CntlrWinMain (Cntlr.Cntlr):
         self.setValidateTooltipText()
 
     def validate(self):
-        if self.modelManager.modelXbrl:
-            if (self.modelManager.modelXbrl.modelManager.validateDisclosureSystem and 
-                not self.modelManager.modelXbrl.modelManager.disclosureSystem.selection):
+        modelXbrl = self.modelManager.modelXbrl
+        if modelXbrl:
+            if (modelXbrl.modelManager.validateDisclosureSystem and 
+                not modelXbrl.modelManager.disclosureSystem.selection):
                 tkinter.messagebox.showwarning(_("arelle - Warning"),
                                 _("Validation - disclosure system checks is requested but no disclosure system is selected, please select one by validation - select disclosure system."),
                                 parent=self.parent)
             else:
+                if modelXbrl.modelDocument.type in ModelDocument.Type.TESTCASETYPES:
+                    for pluginXbrlMethod in pluginClassMethods("Testcases.Start"):
+                        pluginXbrlMethod(self, None, modelXbrl)
                 thread = threading.Thread(target=lambda: self.backgroundValidate())
                 thread.daemon = True
                 thread.start()
@@ -1137,13 +1149,26 @@ class CntlrWinMain (Cntlr.Cntlr):
                 callback(*args)
         widget.after(delayMsecs, lambda: self.uiThreadChecker(widget))
         
-    def uiFileDialog(self, action, title=None, initialdir=None, filetypes=[], defaultextension=None, owner=None):
-        if self.hasWin32gui:
+    def uiFileDialog(self, action, title=None, initialdir=None, filetypes=[], defaultextension=None, owner=None, multiple=False, parent=None):
+        if parent is None: parent = self.parent
+        if multiple and action == "open":  # return as simple list of file names
+            multFileNames = tkinter.filedialog.askopenfilename(
+                                    multiple=True,
+                                    title=title,
+                                    initialdir=initialdir,
+                                    filetypes=[] if self.isMac else filetypes,
+                                    defaultextension=defaultextension,
+                                    parent=parent)
+            if self.isMac:
+                return multFileNames
+            return re.findall("[{]([^}]+)[}]",  # multiple returns "{file1} {file2}..."
+                              multFileNames)
+        elif self.hasWin32gui:
             import win32gui
             try:
                 filename, filter, flags = {"open":win32gui.GetOpenFileNameW,
                                            "save":win32gui.GetSaveFileNameW}[action](
-                            hwndOwner=(owner if owner else self.parent).winfo_id(), 
+                            hwndOwner=(owner if owner else parent).winfo_id(), 
                             hInstance=win32gui.GetModuleHandle(None),
                             Filter='\0'.join(e for t in filetypes+['\0'] for e in t),
                             MaxFile=4096,
@@ -1160,7 +1185,7 @@ class CntlrWinMain (Cntlr.Cntlr):
                             initialdir=initialdir,
                             filetypes=[] if self.isMac else filetypes,
                             defaultextension=defaultextension,
-                            parent=self.parent)
+                            parent=parent)
 
 from arelle import DialogFormulaParameters
 

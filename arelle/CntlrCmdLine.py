@@ -11,7 +11,7 @@ This module is Arelle's controller in command line non-interactive mode
 from arelle import PythonUtil # define 2.x or 3.x string types
 import gettext, time, datetime, os, shlex, sys, traceback
 from optparse import OptionParser, SUPPRESS_HELP
-from arelle import (Cntlr, FileSource, ModelDocument, XmlUtil, Version,
+from arelle import (Cntlr, FileSource, ModelDocument, XmlUtil, Version, 
                     ViewFileDTS, ViewFileFactList, ViewFileFactTable, ViewFileConcepts, 
                     ViewFileFormulae, ViewFileRelationshipSet, ViewFileTests, ModelManager)
 from arelle.ModelValue import qname
@@ -89,17 +89,19 @@ def parseAndRun(args):
                       help=_("Specify calculation linkbase validation inferring precision."))
     parser.add_option("--calcprecision", action="store_true", dest="calcPrecision", help=SUPPRESS_HELP)
     parser.add_option("--efm", action="store_true", dest="validateEFM",
-                      help=_("Select Edgar Filer Manual (U.S. SEC) disclosure system validation."))
-    parser.add_option("--gfm", action="store", dest="gfmName",
-                      help=_("Specify a Global Filer Manual disclosure system name and"
-                             " select disclosure system validation."))
-    parser.add_option("--disclosureSystem", action="store", dest="gfmName",
+                      help=_("Select Edgar Filer Manual (U.S. SEC) disclosure system validation (strict)."))
+    parser.add_option("--gfm", action="store", dest="disclosureSystemName", help=SUPPRESS_HELP)
+    parser.add_option("--disclosureSystem", action="store", dest="disclosureSystemName",
                       help=_("Specify a disclosure system name and"
-                             " select disclosure system validation."))
+                             " select disclosure system validation.  "
+                             "Enter --disclosureSystem=help for list of names or help-verbose for list of names and descriptions. "))
     parser.add_option("--hmrc", action="store_true", dest="validateHMRC",
                       help=_("Select U.K. HMRC disclosure system validation."))
     parser.add_option("--utr", action="store_true", dest="utrValidate",
                       help=_("Select validation with respect to Unit Type Registry."))
+    parser.add_option("--utrUrl", action="store", dest="utrUrl",
+                      help=_("Override disclosure systems Unit Type Registry location (URL or file path)."))
+    parser.add_option("--utrurl", action="store", dest="utrUrl", help=SUPPRESS_HELP)
     parser.add_option("--infoset", action="store_true", dest="infosetValidate",
                       help=_("Select validation with respect testcase infosets."))
     parser.add_option("--labelLang", action="store", dest="labelLang",
@@ -204,6 +206,7 @@ def parseAndRun(args):
         parser.add_option("--webserver", action="store", dest="webserver",
                           help=_("start web server on host:port[:server] for REST and web access, e.g., --webserver locahost:8080, "
                                  "or specify nondefault a server name, such as cherrypy, --webserver locahost:8080:cherrypy"))
+    pluginOptionsIndex = len(parser.option_list)
     for optionsExtender in pluginClassMethods("CntlrCmdLine.Options"):
         optionsExtender(parser)
     parser.add_option("-a", "--about",
@@ -234,13 +237,20 @@ def parseAndRun(args):
                 "{1}"
                 ).format(Version.version,
                          _("\n   Bottle (c) 2011-2013 Marcel Hellkamp") if hasWebServer else ""))
+    elif options.disclosureSystemName in ("help", "help-verbose"):
+        text = _("Disclosure system choices: \n{0}").format(' \n'.join(cntlr.modelManager.disclosureSystem.dirlist(options.disclosureSystemName)))
+        try:
+            print(text)
+        except UnicodeEncodeError:
+            print(text.encode("ascii", "replace").decode("ascii"))
     elif len(leftoverArgs) != 0 or (options.entrypointFile is None and 
-                                    ((not options.proxy) and (not options.plugins)
-                                     and (not hasWebServer or options.webserver is None))):
-        parser.error(_("incorrect arguments, please try\n  python CntlrCmdLine.pyw --help"))
+                                    ((not options.proxy) and (not options.plugins) and
+                                     (not any(pluginOption for pluginOption in parser.option_list[pluginOptionsIndex:])) and
+                                     (not hasWebServer or options.webserver is None))):
+        parser.error(_("incorrect arguments, please try\n  python CntlrCmdLine.py --help"))
     elif hasWebServer and options.webserver:
         if any((options.entrypointFile, options.importFiles, options.diffFile, options.versReportFile,
-                options.validate, options.calcDecimals, options.calcPrecision, options.validateEFM, options.validateHMRC, options.gfmName,
+                options.validate, options.calcDecimals, options.calcPrecision, options.validateEFM, options.validateHMRC, options.disclosureSystemName,
                 options.utrValidate, options.infosetValidate, options.DTSFile, options.factsFile, options.factListCols, options.factTableFile,
                 options.conceptsFile, options.preFile, options.calFile, options.dimFile, options.formulaeFile,
                 options.logFile, options.logFormat, options.logLevel, options.logLevelFilter, options.logCodeFilter, options.formulaParamExprResult, options.formulaParamInputValue,
@@ -250,7 +260,7 @@ def parseAndRun(args):
                 options.formulaVarExpressionSource, options.formulaVarExpressionCode, options.formulaVarExpressionEvaluation,
                 options.formulaVarExpressionResult, options.formulaVarFiltersResult,
                 options.proxy, options.plugins)):
-            parser.error(_("incorrect arguments with --webserver, please try\n  python CntlrCmdLine.pyw --help"))
+            parser.error(_("incorrect arguments with --webserver, please try\n  python CntlrCmdLine.py --help"))
         else:
             cntlr.startLogging(logFileName='logToBuffer')
             from arelle import CntlrWebMain
@@ -272,7 +282,7 @@ class CntlrCmdLine(Cntlr.Cntlr):
     """
 
     def __init__(self, logFileName=None):
-        super(CntlrCmdLine, self).__init__()
+        super(CntlrCmdLine, self).__init__(hasGui=False)
         
     def run(self, options, sourceZipStream=None):
         """Process command line arguments or web service request, such as to load and validate an XBRL document, or start web server.
@@ -345,7 +355,15 @@ class CntlrCmdLine(Cntlr.Cntlr):
                               moduleItem[0], moduleInfo.get("author"), moduleInfo.get("version"), moduleInfo.get("status"),
                               moduleInfo.get("fileDate"), moduleInfo.get("description"), moduleInfo.get("license")),
                               messageCode="info", file=moduleInfo.get("moduleURL"))
-        if options.proxy or options.plugins:
+                
+        # run utility command line options that don't depend on entrypoint Files
+        hasUtilityPlugin = False
+        for pluginXbrlMethod in pluginClassMethods("CntlrCmdLine.Utility.Run"):
+            hasUtilityPlugin = True
+            pluginXbrlMethod(self, options)
+            
+        # if no entrypointFile is applicable, quit now
+        if options.proxy or options.plugins or hasUtilityPlugin:
             if not options.entrypointFile:
                 return True # success
         self.username = options.username
@@ -353,24 +371,28 @@ class CntlrCmdLine(Cntlr.Cntlr):
         self.entrypointFile = options.entrypointFile
         filesource = FileSource.openFileSource(self.entrypointFile, self, sourceZipStream)
         if options.validateEFM:
-            if options.gfmName:
-                self.addToLog(_("both --efm and --gfm validation are requested, proceeding with --efm only"),
+            if options.disclosureSystemName:
+                self.addToLog(_("both --efm and --disclosureSystem validation are requested, proceeding with --efm only"),
                               messageCode="info", file=self.entrypointFile)
             self.modelManager.validateDisclosureSystem = True
             self.modelManager.disclosureSystem.select("efm")
-        elif options.gfmName:
+        elif options.disclosureSystemName:
             self.modelManager.validateDisclosureSystem = True
-            self.modelManager.disclosureSystem.select(options.gfmName)
+            self.modelManager.disclosureSystem.select(options.disclosureSystemName)
         elif options.validateHMRC:
             self.modelManager.validateDisclosureSystem = True
             self.modelManager.disclosureSystem.select("hmrc")
         else:
             self.modelManager.disclosureSystem.select(None) # just load ordinary mappings
+        if options.utrUrl:  # override disclosureSystem utrUrl
+            self.modelManager.disclosureSystem.utrUrl = options.utrUrl
+            # can be set now because the utr is first loaded at validation time 
             
-        # disclosure system sets logging filters, override if specified by command line
-        if options.logLevelFilter or options.logCodeFilter:
-            self.setLoggingFilters(logLevelFilter=options.logLevelFilter,
-                                   logCodeFilter=options.logCodeFilter)
+        # disclosure system sets logging filters, override disclosure filters, if specified by command line
+        if options.logLevelFilter:
+            self.setLogLevelFilter(options.logLevelFilter)
+        if options.logCodeFilter:
+            self.setLogCodeFilter(options.logCodeFilter)
         if options.calcDecimals:
             if options.calcPrecision:
                 self.addToLog(_("both --calcDecimals and --calcPrecision validation are requested, proceeding with --calcDecimals only"),
@@ -460,8 +482,6 @@ class CntlrCmdLine(Cntlr.Cntlr):
                                         _("loaded in %.2f secs at %s"), 
                                         (loadTime, timeNow)), 
                                         messageCode="info", file=self.entrypointFile)
-            for pluginXbrlMethod in pluginClassMethods("CntlrCmdLine.Xbrl.Loaded"):
-                pluginXbrlMethod(self, options, modelXbrl)
             if options.importFiles:
                 for importFile in options.importFiles.split("|"):
                     fileName = importFile.strip()
@@ -476,6 +496,12 @@ class CntlrCmdLine(Cntlr.Cntlr):
                     modelXbrl.profileStat(_("import"), loadTime)
                 if modelXbrl.errors:
                     success = False    # loading errors, don't attempt to utilize loaded DTS
+            if modelXbrl.modelDocument.type in ModelDocument.Type.TESTCASETYPES:
+                for pluginXbrlMethod in pluginClassMethods("Testcases.Start"):
+                    pluginXbrlMethod(self, options, modelXbrl)
+            else: # not a test case, probably instance or DTS
+                for pluginXbrlMethod in pluginClassMethods("CntlrCmdLine.Xbrl.Loaded"):
+                    pluginXbrlMethod(self, options, modelXbrl)
         else:
             success = False
         if success and options.diffFile and options.versReportFile:
