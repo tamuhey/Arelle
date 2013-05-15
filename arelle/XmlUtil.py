@@ -104,6 +104,16 @@ def prefixedNameToClarkNotation(element, prefixedName):
 def encoding(xml, default="utf-8"):
     if isinstance(xml,bytes):
         s = xml[0:120]
+        if s.startswith(b'\xef\xbb\xbf'):
+            return 'utf-8-sig'
+        if s.startswith(b'\xff\xfe'):
+            return 'utf-16'
+        if s.startswith(b'\xfe\xff'):
+            return 'utf-16'
+        if s.startswith(b'\xff\xfe\x00\x00'):
+            return 'utf-32'
+        if s.startswith(b'\x00\x00\xfe\xff'):
+            return 'utf-32'
         if b"x\0m\0l" in s:
             str = s.decode("utf-16")
         else:
@@ -127,32 +137,51 @@ def textNotStripped(element):
         return ""
     return element.elementText  # allows embedded comment nodes, returns '' if None
 
-def innerText(element, ixExclude=False, strip=True):   
+def innerText(element, ixExclude=False, ixEscape=False, strip=True):   
     try:
-        text = "".join(text for text in innerTextNodes(element, ixExclude))
+        text = "".join(text for text in innerTextNodes(element, ixExclude, ixEscape))
         if strip:
             return text.strip()
         return text
     except TypeError:
         return ""
 
-def innerTextList(element, ixExclude=False):   
+def innerTextList(element, ixExclude=False, ixEscape=False):   
     try:
-        return ", ".join(text.strip() for text in innerTextNodes(element, ixExclude) if len(text.strip()) > 0)
+        return ", ".join(text.strip() for text in innerTextNodes(element, ixExclude, ixEscape) if len(text.strip()) > 0)
     except TypeError:
         return ""
 
-def innerTextNodes(element, ixExclude):
+def innerTextNodes(element, ixExclude, ixEscape):
     if element.text:
         yield element.text
     for child in element.iterchildren():
         if isinstance(child,ModelObject) and (
            not ixExclude or 
            (child.localName != "exclude" and child.namespaceURI != "http://www.xbrl.org/2008/inlineXBRL")):
-            for nestedText in innerTextNodes(child, ixExclude):
+            firstChild = True
+            for nestedText in innerTextNodes(child, ixExclude, ixEscape):
+                if firstChild and ixEscape:
+                    yield escapedNode(child, True, False)
+                    firstChild = False
                 yield nestedText
+            if ixEscape:
+                yield escapedNode(child, False, firstChild)
         if child.tail:
             yield child.tail
+            
+def escapedNode(elt, start, empty):
+    s = ['<']
+    if not start and not empty:
+        s.append('/')
+    s.append(str(elt.qname))
+    if start or empty:
+        for n,v in elt.items():
+            s.append(' {0}="{1}"'.format(qname(elt,n),v))
+    if not start and empty:
+        s.append('/')
+    s.append('>')
+    return ''.join(s)
 
 def parentId(element, parentNamespaceURI, parentLocalName):
     while element is not None:
@@ -346,11 +375,13 @@ def schemaFacets(element, facetTags, facets=None):
             schemaFacets(child, facetTags, facets)
     return facets
 
-def schemaAttributesGroups(element, attributes=None, attributeGroups=None):
-    if attributes is None: attributes = []; attributeGroups = []
+def schemaAttributesGroups(element, attributes=None, attributeWildcards=None, attributeGroups=None):
+    if attributes is None: attributes = []; attributeWildcards = []; attributeGroups = []
     for child in element.iterchildren():
         if child.tag == "{http://www.w3.org/2001/XMLSchema}attribute":
             attributes.append(child) 
+        elif child.tag == "{http://www.w3.org/2001/XMLSchema}anyAttribute":
+            attributeWildcards.append(child) 
         elif child.tag == "{http://www.w3.org/2001/XMLSchema}attributeGroup":
             attributeGroups.append(child) 
         elif child.tag in {"{http://www.w3.org/2001/XMLSchema}complexType",
@@ -360,8 +391,8 @@ def schemaAttributesGroups(element, attributes=None, attributeGroups=None):
                            "{http://www.w3.org/2001/XMLSchema}restriction",
                            "{http://www.w3.org/2001/XMLSchema}extension"
                            }:
-            schemaAttributesGroups(child, attributes=attributes, attributeGroups=attributeGroups)
-    return (attributes, attributeGroups)
+            schemaAttributesGroups(child, attributes, attributeWildcards, attributeGroups)
+    return (attributes, attributeWildcards, attributeGroups)
 
 def emptyContentModel(element):
     for child in element.iterchildren():
@@ -413,7 +444,7 @@ def addChild(parent, childName1, childName2=None, attributes=None, text=None, af
                 child.set(name.clarkNotation, str(value))
             else:
                 child.set(name, xsString(None, None, value) )
-    if text:
+    if text is not None:
         child.text = xsString(None, None, text)
     return child
 
@@ -768,9 +799,10 @@ def writexml(writer, node, encoding=None, indent='', xmlcharrefreplace=False, pa
         text = node.text
         if text is not None:
             text = ''.join("&amp;" if c == "&"
-                           else "&nbsp;" if c == "\u00A0" 
+                           else ("&nbsp;" if xmlcharrefreplace else "&#160;") if c == "\u00A0" 
                            else "&lt;" if c == "<"
-                           else "&shy;" if c == "\u00AD"
+                           else "&gt;" if c == ">"
+                           else ("&shy;" if xmlcharrefreplace else "&#173;") if c == "\u00AD"
                            else "&#x%x;" % ord(c) if c >= '\x80' and xmlcharrefreplace
                            else c
                            for c in text)

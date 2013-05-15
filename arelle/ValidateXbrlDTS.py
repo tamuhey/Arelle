@@ -22,6 +22,21 @@ link_loc_spec_sections = {"labelLink":"5.2.2.1",
                           "definitionLink":"5.2.6.1",
                           "presentationLink":"5.2.4.1",
                           "footnoteLink":"4.11.1.1"}
+standard_roles_for_ext_links = ("xbrl.3.5.3", (XbrlConst.defaultLinkRole,))
+standard_roles_definitions = {
+    "definitionLink": standard_roles_for_ext_links, 
+    "calculationLink": standard_roles_for_ext_links, 
+    "presentationLink": standard_roles_for_ext_links,
+    "labelLink": standard_roles_for_ext_links, 
+    "referenceLink": standard_roles_for_ext_links, 
+    "footnoteLink": standard_roles_for_ext_links,
+    "label": ("xbrl.5.2.2.2.2", XbrlConst.standardLabelRoles),
+    "reference": ("xbrl.5.2.3.2.1", XbrlConst.standardReferenceRoles),
+    "footnote": ("xbrl.4.11.1.2", (XbrlConst.footnote,)),
+    "linkbaseRef": ("xbrl.4.3.4", XbrlConst.standardLinkbaseRefRoles),
+    "loc": ("xbrl.3.5.3.7", ())
+    }
+standard_roles_other = ("xbrl.5.1.3", ())
 
 def arcFromConceptQname(arcElement):
     modelRelationship = baseSetRelationship(arcElement)
@@ -424,7 +439,9 @@ def checkElements(val, modelDocument, parent):
                                         val.referencedNamespaces.add(qn.namespaceURI)
                                 else: # not union type
                                     val.referencedNamespaces.add(qnameDerivedFrom.namespaceURI)
-                            
+                        elif localName == "attribute":
+                            if elt.typeQname is not None:
+                                val.referencedNamespaces.add(elt.typeQname.namespaceURI)
                     if localName == "redefine":
                         val.modelXbrl.error("xbrl.5.6.1:Redefine",
                             "Redefine is not allowed",
@@ -435,12 +452,13 @@ def checkElements(val, modelDocument, parent):
                             if qname(elt, ref) not in {"attribute":val.modelXbrl.qnameAttributes, 
                                                        "element":val.modelXbrl.qnameConcepts, 
                                                        "attributeGroup":val.modelXbrl.qnameAttributeGroups}[localName]:
-                                val.modelXbrl.error("xmlschema:refNotFound",
+                                val.modelXbrl.error("xmlSchema:refNotFound",
                                     _("%(element)s ref %(ref)s not found"),
                                     modelObject=elt, element=localName, ref=ref)
                         if val.validateSBRNL and localName == "attribute":
                             val.modelXbrl.error("SBR.NL.2.2.11.06",
                                 _('xs:attribute must not be used'), modelObject=elt)
+                        
                     if localName == "appinfo":
                         if val.validateSBRNL:
                             if (parent.localName != "annotation" or parent.namespaceURI != XbrlConst.xsd or
@@ -612,6 +630,12 @@ def checkElements(val, modelDocument, parent):
                                 modelObject=elt, element=elt.qname, refURI=refUri)
                         else:
                             refs[refUri] = hrefUri
+                            roleTypeElt = elt.resolveUri(uri=hrefAttr)
+                            if roleTypeElt not in roleTypeDefs[refUri]:
+                                val.modelXbrl.error("xbrl.3.5.2.4.5:{0}Mismatch".format(elt.localName),
+                                    _("%(element)s %(refURI)s defined with different URI"),
+                                    modelObject=(elt,roleTypeElt), element=elt.qname, refURI=refUri)
+                            
                         
                         if val.validateDisclosureSystem:
                             if elt.localName == "arcroleRef":
@@ -716,7 +740,14 @@ def checkElements(val, modelDocument, parent):
                         val.modelXbrl.error("xbrlgene:nonAbsoluteResourceRoleURI",
                             _("Generic resource role %(xlinkRole)s is not absolute"),
                             modelObject=elt, xlinkRole=xlinkRole)
-                elif not XbrlConst.isStandardRole(xlinkRole):
+                elif XbrlConst.isStandardRole(xlinkRole):
+                    if elt.namespaceURI == XbrlConst.link:
+                        errCode, definedRoles = standard_roles_definitions.get(elt.localName, standard_roles_other)
+                        if xlinkRole not in definedRoles:
+                            val.modelXbrl.error(errCode,
+                                _("Standard role %(xlinkRole)s is not defined for %(element)s"),
+                                modelObject=elt, xlinkRole=xlinkRole, element=elt.qname)
+                else:  # custom role
                     if xlinkRole not in val.roleRefURIs:
                         if XbrlConst.isStandardResourceOrExtLinkElement(elt):
                             val.modelXbrl.error("xbrl.3.5.2.4:missingRoleRef",
@@ -946,8 +977,8 @@ def checkElements(val, modelDocument, parent):
                             XbrlConst.qnLinkCalculationLink: tuple(),
                             XbrlConst.qnLinkDefinitionLink: tuple(),
                             XbrlConst.qnLinkFootnoteLink: (XbrlConst.qnLinkFootnote,),
-                            XbrlConst.qnGenLink: (XbrlConst.qnGenLabel, XbrlConst.qnGenReference, val.qnSbrLinkroleorder),
-                             }.get(val.extendedElementName,tuple()):
+                            # XbrlConst.qnGenLink: (XbrlConst.qnGenLabel, XbrlConst.qnGenReference, val.qnSbrLinkroleorder),
+                             }.get(val.extendedElementName,(elt.qname,)):  # allow non-2.1 to be ok regardless per RH 2013-03-13
                             val.modelXbrl.error("SBR.NL.2.3.0.11",
                                 _("Resource element %(element)s may not be contained in a linkbase with %(element2)s"),
                                 modelObject=elt, element=elt.qname, element2=val.extendedElementName)
@@ -1050,8 +1081,8 @@ def checkElements(val, modelDocument, parent):
                         XbrlConst.qnLinkCalculationLink: (XbrlConst.qnLinkCalculationArc,),
                         XbrlConst.qnLinkDefinitionLink: (XbrlConst.qnLinkDefinitionArc,),
                         XbrlConst.qnLinkFootnoteLink: (XbrlConst.qnLinkFootnoteArc,),
-                        XbrlConst.qnGenLink: (XbrlConst.qnGenArc,),
-                         }.get(val.extendedElementName, tuple()):
+                        # XbrlConst.qnGenLink: (XbrlConst.qnGenArc,),
+                         }.get(val.extendedElementName, (elt.qname,)):  # allow non-2.1 to be ok regardless per RH 2013-03-13
                         val.modelXbrl.error("SBR.NL.2.3.0.11",
                             _("Arc element %(element)s may not be contained in a linkbase with %(element2)s"),
                             modelObject=elt, element=elt.qname, element2=val.extendedElementName)

@@ -13,7 +13,8 @@ import gettext, time, datetime, os, shlex, sys, traceback
 from optparse import OptionParser, SUPPRESS_HELP
 from arelle import (Cntlr, FileSource, ModelDocument, XmlUtil, Version, 
                     ViewFileDTS, ViewFileFactList, ViewFileFactTable, ViewFileConcepts, 
-                    ViewFileFormulae, ViewFileRelationshipSet, ViewFileTests, ModelManager)
+                    ViewFileFormulae, ViewFileRelationshipSet, ViewFileTests, ViewFileRssFeed,
+                    ModelManager)
 from arelle.ModelValue import qname
 from arelle.Locale import format_string
 from arelle.ModelFormulaObject import FormulaOptions
@@ -95,6 +96,7 @@ def parseAndRun(args):
                       help=_("Specify a disclosure system name and"
                              " select disclosure system validation.  "
                              "Enter --disclosureSystem=help for list of names or help-verbose for list of names and descriptions. "))
+    parser.add_option("--disclosuresystem", action="store", dest="disclosureSystemName", help=SUPPRESS_HELP)
     parser.add_option("--hmrc", action="store_true", dest="validateHMRC",
                       help=_("Select U.K. HMRC disclosure system validation."))
     parser.add_option("--utr", action="store_true", dest="utrValidate",
@@ -128,12 +130,24 @@ def parseAndRun(args):
                       help=_("Write dimensions (of definition) linkbase into FILE"))
     parser.add_option("--formulae", "--htmlFormulae", action="store", dest="formulaeFile",
                       help=_("Write formulae linkbase into FILE"))
+    parser.add_option("--viewArcrole", action="store", dest="viewArcrole",
+                      help=_("Write linkbase relationships for viewArcrole into viewFile"))
+    parser.add_option("--viewarcrole", action="store", dest="viewArcrole", help=SUPPRESS_HELP)
+    parser.add_option("--viewFile", action="store", dest="viewFile",
+                      help=_("Write linkbase relationships for viewArcrole into viewFile"))
+    parser.add_option("--viewfile", action="store", dest="viewFile", help=SUPPRESS_HELP)
     parser.add_option("--testReport", "--csvTestReport", action="store", dest="testReport",
                       help=_("Write test report of validation (of test cases) into FILE"))
     parser.add_option("--testreport", "--csvtestreport", action="store", dest="testReport", help=SUPPRESS_HELP)
     parser.add_option("--testReportCols", action="store", dest="testReportCols",
                       help=_("Columns for test report file"))
     parser.add_option("--testreportcols", action="store", dest="testReportCols", help=SUPPRESS_HELP)
+    parser.add_option("--rssReport", action="store", dest="rssReport",
+                      help=_("Write RSS report into FILE"))
+    parser.add_option("--rssreport", action="store", dest="rssReport", help=SUPPRESS_HELP)
+    parser.add_option("--rssReportCols", action="store", dest="rssReportCols",
+                      help=_("Columns for RSS report file"))
+    parser.add_option("--rssreportcols", action="store", dest="rssReportCols", help=SUPPRESS_HELP)
     parser.add_option("--logFile", action="store", dest="logFile",
                       help=_("Write log messages into file, otherwise they go to standard output.  " 
                              "If file ends in .xml it is xml-formatted, otherwise it is text. "))
@@ -195,11 +209,16 @@ def parseAndRun(args):
                       help=_("Specify internet connection timeout in seconds (0 means unlimited)."))
     parser.add_option("--internettimeout", type="int", action="store", dest="internetTimeout", help=SUPPRESS_HELP)
     parser.add_option("--plugins", action="store", dest="plugins",
-                      help=_("Modify and re-save plug-in configuration.  " 
-                             "Enter 'show' to show current plug-in configuration, or '|' separated modules: "
+                      help=_("Modify plug-in configuration.  "
+                             "Re-save unless 'temp' is in the module list.  " 
+                             "Enter 'show' to show current plug-in configuration.  "
+                             "Commands show, and module urls are '|' separated: "
                              "+url to add plug-in by its url or filename, ~name to reload a plug-in by its name, -name to remove a plug-in by its name, "
+                             "relative URLs are relative to installation plug-in directory, "
                              " (e.g., '+http://arelle.org/files/hello_web.py', '+C:\Program Files\Arelle\examples\plugin\hello_dolly.py' to load, "
-                             "~Hello Dolly to reload, -Hello Dolly to remove)" ))
+                             "or +../examples/plugin/hello_dolly.py for relative use of examples directory, "
+                             "~Hello Dolly to reload, -Hello Dolly to remove).  "
+                             "If + is omitted from .py file nothing is saved (same as temp).  " ))
     parser.add_option("--abortOnMajorError", action="store_true", dest="abortOnMajorError", help=_("Abort process on major error, such as when load is unable to find an entry or discovered file."))
     parser.add_option("--collectProfileStats", action="store_true", dest="collectProfileStats", help=_("Collect profile statistics, such as timing of validation activities and formulae."))
     if hasWebServer:
@@ -209,10 +228,14 @@ def parseAndRun(args):
     pluginOptionsIndex = len(parser.option_list)
     for optionsExtender in pluginClassMethods("CntlrCmdLine.Options"):
         optionsExtender(parser)
+    pluginLastOptionIndex = len(parser.option_list)
     parser.add_option("-a", "--about",
                       action="store_true", dest="about",
                       help=_("Show product version, copyright, and license."))
     
+    if args is None and cntlr.isGAE:
+        args = ["--webserver=::gae"]
+        
     (options, leftoverArgs) = parser.parse_args(args)
     if options.about:
         print(_("\narelle(r) {0}\n\n"
@@ -245,14 +268,14 @@ def parseAndRun(args):
             print(text.encode("ascii", "replace").decode("ascii"))
     elif len(leftoverArgs) != 0 or (options.entrypointFile is None and 
                                     ((not options.proxy) and (not options.plugins) and
-                                     (not any(pluginOption for pluginOption in parser.option_list[pluginOptionsIndex:])) and
+                                     (not any(pluginOption for pluginOption in parser.option_list[pluginOptionsIndex:pluginLastOptionIndex])) and
                                      (not hasWebServer or options.webserver is None))):
         parser.error(_("incorrect arguments, please try\n  python CntlrCmdLine.py --help"))
     elif hasWebServer and options.webserver:
         if any((options.entrypointFile, options.importFiles, options.diffFile, options.versReportFile,
                 options.validate, options.calcDecimals, options.calcPrecision, options.validateEFM, options.validateHMRC, options.disclosureSystemName,
                 options.utrValidate, options.infosetValidate, options.DTSFile, options.factsFile, options.factListCols, options.factTableFile,
-                options.conceptsFile, options.preFile, options.calFile, options.dimFile, options.formulaeFile,
+                options.conceptsFile, options.preFile, options.calFile, options.dimFile, options.formulaeFile, options.viewArcrole, options.viewFile,
                 options.logFile, options.logFormat, options.logLevel, options.logLevelFilter, options.logCodeFilter, options.formulaParamExprResult, options.formulaParamInputValue,
                 options.formulaCallExprSource, options.formulaCallExprCode, options.formulaCallExprEval,
                 options.formulaCallExprResult, options.formulaVarSetExprEval, options.formulaVarSetExprResult,
@@ -320,41 +343,57 @@ class CntlrCmdLine(Cntlr.Cntlr):
         if options.plugins:
             from arelle import PluginManager
             resetPlugins = False
+            savePluginChanges = True
+            showPluginModules = False
             for pluginCmd in options.plugins.split('|'):
                 cmd = pluginCmd.strip()
-                if cmd != "show":
-                    if cmd.startswith("+"):
-                        moduleInfo = PluginManager.addPluginModule(cmd[1:])
-                        if moduleInfo:
-                            self.addToLog(_("Addition of plug-in {0} successful.").format(moduleInfo.get("name")), 
-                                          messageCode="info", file=moduleInfo.get("moduleURL"))
-                            resetPlugins = True
-                        else:
-                            self.addToLog(_("Unable to load plug-in."), messageCode="info", file=cmd[1:])
-                    elif cmd.startswith("~"):
-                        if PluginManager.reloadPluginModule(cmd[1:]):
-                            self.addToLog(_("Reload of plug-in successful."), messageCode="info", file=cmd[1:])
-                            resetPlugins = True
-                        else:
-                            self.addToLog(_("Unable to reload plug-in."), messageCode="info", file=cmd[1:])
-                    elif cmd.startswith("-"):
-                        if PluginManager.removePluginModule(cmd[1:]):
-                            self.addToLog(_("Deletion of plug-in successful."), messageCode="info", file=cmd[1:])
-                            resetPlugins = True
-                        else:
-                            self.addToLog(_("Unable to delete plug-in."), messageCode="info", file=cmd[1:])
+                if cmd == "show":
+                    showPluginModules = True
+                elif cmd == "temp":
+                    savePluginChanges = False
+                elif cmd.startswith("+"):
+                    moduleInfo = PluginManager.addPluginModule(cmd[1:])
+                    if moduleInfo:
+                        self.addToLog(_("Addition of plug-in {0} successful.").format(moduleInfo.get("name")), 
+                                      messageCode="info", file=moduleInfo.get("moduleURL"))
+                        resetPlugins = True
                     else:
-                        self.addToLog(_("Plug-in action not recognized (may need +uri or [~-]module."), messageCode="info", file=cmd)
+                        self.addToLog(_("Unable to load plug-in."), messageCode="info", file=cmd[1:])
+                elif cmd.startswith("~"):
+                    if PluginManager.reloadPluginModule(cmd[1:]):
+                        self.addToLog(_("Reload of plug-in successful."), messageCode="info", file=cmd[1:])
+                        resetPlugins = True
+                    else:
+                        self.addToLog(_("Unable to reload plug-in."), messageCode="info", file=cmd[1:])
+                elif cmd.startswith("-"):
+                    if PluginManager.removePluginModule(cmd[1:]):
+                        self.addToLog(_("Deletion of plug-in successful."), messageCode="info", file=cmd[1:])
+                        resetPlugins = True
+                    else:
+                        self.addToLog(_("Unable to delete plug-in."), messageCode="info", file=cmd[1:])
+                elif cmd.endswith(".py"):
+                    savePluginChanges = False
+                    moduleInfo = PluginManager.addPluginModule(cmd)
+                    if moduleInfo:
+                        self.addToLog(_("Activation of plug-in {0} successful.").format(moduleInfo.get("name")), 
+                                      messageCode="info", file=moduleInfo.get("moduleURL"))
+                        resetPlugins = True
+                    else:
+                        self.addToLog(_("Unable to load plug-in."), messageCode="info", file=cmd)
+                else:
+                    self.addToLog(_("Plug-in action not recognized (may need +uri or [~-]module."), messageCode="info", file=cmd)
                 if resetPlugins:
                     PluginManager.reset()
-                    PluginManager.save(self)
-            self.addToLog(_("Plug-in modules:"), messageCode="info")
-            for i, moduleItem in enumerate(sorted(PluginManager.pluginConfig.get("modules", {}).items())):
-                moduleInfo = moduleItem[1]
-                self.addToLog(_("Plug-in: {0}; author: {1}; version: {2}; status: {3}; date: {4}; description: {5}; license {6}.").format(
-                              moduleItem[0], moduleInfo.get("author"), moduleInfo.get("version"), moduleInfo.get("status"),
-                              moduleInfo.get("fileDate"), moduleInfo.get("description"), moduleInfo.get("license")),
-                              messageCode="info", file=moduleInfo.get("moduleURL"))
+                    if savePluginChanges:
+                        PluginManager.save(self)
+            if showPluginModules:
+                self.addToLog(_("Plug-in modules:"), messageCode="info")
+                for i, moduleItem in enumerate(sorted(PluginManager.pluginConfig.get("modules", {}).items())):
+                    moduleInfo = moduleItem[1]
+                    self.addToLog(_("Plug-in: {0}; author: {1}; version: {2}; status: {3}; date: {4}; description: {5}; license {6}.").format(
+                                  moduleItem[0], moduleInfo.get("author"), moduleInfo.get("version"), moduleInfo.get("status"),
+                                  moduleInfo.get("fileDate"), moduleInfo.get("description"), moduleInfo.get("license")),
+                                  messageCode="info", file=moduleInfo.get("moduleURL"))
                 
         # run utility command line options that don't depend on entrypoint Files
         hasUtilityPlugin = False
@@ -369,7 +408,10 @@ class CntlrCmdLine(Cntlr.Cntlr):
         self.username = options.username
         self.password = options.password
         self.entrypointFile = options.entrypointFile
-        filesource = FileSource.openFileSource(self.entrypointFile, self, sourceZipStream)
+        if self.entrypointFile:
+            filesource = FileSource.openFileSource(self.entrypointFile, self, sourceZipStream)
+        else:
+            filesource = None
         if options.validateEFM:
             if options.disclosureSystemName:
                 self.addToLog(_("both --efm and --disclosureSystem validation are requested, proceeding with --efm only"),
@@ -467,7 +509,8 @@ class CntlrCmdLine(Cntlr.Cntlr):
         success = True
         modelXbrl = None
         try:
-            modelXbrl = self.modelManager.load(filesource, _("views loading"))
+            if filesource:
+                modelXbrl = self.modelManager.load(filesource, _("views loading"))
         except ModelDocument.LoadingException:
             pass
         except Exception as err:
@@ -566,12 +609,11 @@ class CntlrCmdLine(Cntlr.Cntlr):
                                                 messageCode="info", file=self.entrypointFile)
                     
 
-                if (options.testReport and 
-                    self.modelManager.modelXbrl.modelDocument.type in 
-                        (ModelDocument.Type.TESTCASESINDEX, 
-                         ModelDocument.Type.TESTCASE, 
-                         ModelDocument.Type.REGISTRY)):
+                if options.testReport:
                     ViewFileTests.viewTests(self.modelManager.modelXbrl, options.testReport, options.testReportCols)
+                    
+                if options.rssReport:
+                    ViewFileRssFeed.viewRssFeed(self.modelManager.modelXbrl, options.rssReport, options.rssReportCols)
                     
                 if options.DTSFile:
                     ViewFileDTS.viewDTS(modelXbrl, options.DTSFile)
@@ -589,6 +631,8 @@ class CntlrCmdLine(Cntlr.Cntlr):
                     ViewFileRelationshipSet.viewRelationshipSet(modelXbrl, options.dimFile, "Dimensions", "XBRL-dimensions", labelrole=options.labelRole, lang=options.labelLang)
                 if options.formulaeFile:
                     ViewFileFormulae.viewFormulae(modelXbrl, options.formulaeFile, "Formulae", lang=options.labelLang)
+                if options.viewArcrole and options.viewFile:
+                    ViewFileRelationshipSet.viewRelationshipSet(modelXbrl, options.viewFile, os.path.basename(options.viewArcrole), options.viewArcrole, labelrole=options.labelRole, lang=options.labelLang)
                 for pluginXbrlMethod in pluginClassMethods("CntlrCmdLine.Xbrl.Run"):
                     pluginXbrlMethod(self, options, modelXbrl)
                                         
@@ -600,14 +644,15 @@ class CntlrCmdLine(Cntlr.Cntlr):
                             err,
                             traceback.format_tb(sys.exc_info()[2])))
                 success = False
-        modelXbrl.profileStat(_("total"), time.time() - firstStartedAt)
-        if options.collectProfileStats and modelXbrl:
-            modelXbrl.logProfileStats()
-        if not options.keepOpen:
-            if modelDiffReport:
-                self.modelManager.close(modelDiffReport)
-            elif modelXbrl:
-                self.modelManager.close(modelXbrl)
+        if modelXbrl:
+            modelXbrl.profileStat(_("total"), time.time() - firstStartedAt)
+            if options.collectProfileStats and modelXbrl:
+                modelXbrl.logProfileStats()
+            if not options.keepOpen:
+                if modelDiffReport:
+                    self.modelManager.close(modelDiffReport)
+                elif modelXbrl:
+                    self.modelManager.close(modelXbrl)
         self.username = self.password = None #dereference password
         return success
 

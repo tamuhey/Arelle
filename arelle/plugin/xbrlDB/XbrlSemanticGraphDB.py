@@ -13,19 +13,20 @@ Mark V copyright applies to this software, which is licensed according to the te
 to do:
 
 1) add AMTF cube regions (dimensions)
-2) add resources (labels, etc)
-3) check existence of (shared) documents and contained elements before adding
-4) tuple structure declaration (particles in elements of data dictionary?)
-5) tuple structure (instance facts)
-6) add footnote resources to relationships (and test with EDInet footnote references)
-7) test some filings with text blocks (shred them?)  (30mB - 50mB sized text blocks?)
-8) add mappings to, or any missing relationships, of Charlie's financial model
+    HF - don't believe this is either feasible or has a use case in a graph model
+2) check existence of (shared) documents and contained elements before adding
+3) tuple structure declaration (particles in elements of data dictionary?)
+4) tuple structure (instance facts)
+5) add footnote resources to relationships (and test with EDInet footnote references)
+6) test some filings with text blocks (shred them?)  (30mB - 50mB sized text blocks?)
+7) add mappings to, or any missing relationships, of Charlie's financial model
 
 '''
 
-import os, io, re, time, json, socket
+import os, io, re, time, json, socket, logging
 from math import isnan, isinf
-from arelle.ModelDtsObject import ModelConcept, ModelResource
+from arelle.ModelDtsObject import ModelConcept, ModelResource, ModelRelationship
+from arelle.ModelInstanceObject import ModelFact, ModelInlineFact
 from arelle.ModelDocument import Type
 from arelle.ModelValue import qname, datetime
 from arelle.ValidateXbrlCalcs import roundValue
@@ -59,6 +60,7 @@ def isDBPort(host, port, timeout=10):
     while t < timeout:
         try:
             conn = urllib.request.urlopen("http://{0}:{1}/graphs".format(host, port or '8182'))
+            return True # success but doesn't need password
         except HTTPError:
             return True # success, this is really a postgres socket, wants user name
         except URLError:
@@ -69,10 +71,8 @@ def isDBPort(host, port, timeout=10):
     
 XBRLDBGRAPHS = {
                 "accessions",    # filings (graph of documents)
-                "documents",    # graph of namespace->names->types/elts, datapoints
-                "data_dictionary",
-                "types", 
-                "instances"
+                "documents"      # graph of namespace->names->types/elts, datapoints
+                                 # any future root vertices go here
                 }
 
 HTTPHEADERS = {'User-agent':   'Arelle/1.0',
@@ -113,12 +113,13 @@ class XbrlSemanticGraphDatabaseConnection():
         self.url = connectionUrl + '/graphs/' + database
         # Create an OpenerDirector with support for Basic HTTP Authentication...
         auth_handler = urllib.request.HTTPBasicAuthHandler()
-        auth_handler.add_password(realm='rexster',
-                                  uri=connectionUrl,
-                                  user=user,
-                                  passwd=password)
+        if user:
+            auth_handler.add_password(realm='rexster',
+                                      uri=connectionUrl,
+                                      user=user,
+                                      passwd=password)
         self.conn = urllib.request.build_opener(auth_handler)
-        self.timeout = 20
+        self.timeout = 30
         self.verticePropTypes = {}
         
     def close(self, rollback=False):
@@ -137,17 +138,14 @@ class XbrlSemanticGraphDatabaseConnection():
         self.modelXbrl.modelManager.showStatus(msg, clearAfter)
         
     def verifyGraphs(self):
-        foundGraphs = self.load()
         # if no tables, initialize database
-        if XBRLDBGRAPHS - foundGraphs:  # some are missing
-            self.create()
-            missingGraphs = XBRLDBGRAPHS - self.load()
-            if missingGraphs:
-                raise XPDBException("xsgDB:MissingGraphs",
-                                    _("The following graphs are missing: %(missingGraphNames)s"),
-                                    missingGraphNames=', '.join(t for t in sorted(missingGraphs))) 
+        missingRoots = XBRLDBGRAPHS - self.loadGraphRootVertices()
+        if missingRoots:  # some are missing
+            raise XPDBException("xsgDB:MissingGraphs",
+                                _("The following graph roots are missing: %(missingRootNames)s"),
+                                missingRootNames=', '.join(t for t in sorted(missingRoots))) 
             
-    def execute(self, script, params=None, commit=False, close=True, fetch=True):
+    def execute(self, activity, script, params=None, commit=False, close=True, fetch=True):
         gremlin = {"script": script}
         if params:
             gremlin["params"] = params
@@ -168,43 +166,56 @@ class XbrlSemanticGraphDatabaseConnection():
         if TRACEGREMLINFILE:
             with io.open(TRACEGREMLINFILE, "a", encoding='utf-8') as fh:
                 fh.write("\n\n>>> received: \n{0}".format(str(results)))
+        if results['success'] == False:
+            raise XPDBException("xsgDB:DatabaseError",
+                                _("%(activity)s not successful: %(error)s"),
+                                activity=activity, error=results.get('error')) 
         return results
     
     def commit(self):
         pass # TBD  g.commit(), g.rollback() may be not working at least on tinkergraph
     
-    def create(self):
-        self.showStatus("Create graph nodes")
-        results = self.execute("""
-            g.clear()
-            root = g.addVertex(['class':'semantic_root'])
-            new_vertices.each{g.addEdge(root, g.addVertex(['class':it]), "model")}
-            [root.outE.inV] << [root]
+    def loadGraphRootVertices(self):
+        self.showStatus("Load/Create graph root vertices")
+        results = self.execute("Load/Create graph root vertices", """
+            // check if semantic_root vertex already exists
+            rIt = g.V('_class', 'semantic_root')  // iterator on semantic_root vertices
+            // if none, add it
+            r = (rIt.hasNext() ? rIt.next() : g.addVertex(['_class':'semantic_root']))
+            root_vertices = []
+            root_classes.each{
+                // check if class "it"'s vertex already exists
+                vIt = g.V('_class', it)
+                // if exists, use that vertex, if not, add it
+                v = (vIt.hasNext() ? vIt.next() : g.addVertex(['_class':it]) )
+                // check if class it's vertex has edge from semantic_root
+                vIn = v.in('model')
+                // if no edge then add edge
+                vIn.hasNext() && vIn.next() == r ?: g.addEdge(r, v, 'model')
+                // return vertex (so plug-in can refer to it by its id
+                root_vertices << v
+            }
+            root_vertices
             """, 
-            params={"new_vertices":list(XBRLDBGRAPHS)})["results"]
-        for vList in results:
-            for v in vList:
-                setattr(self, "root_" + v['class'] + "_id", v['_id'])
-            
-    def load(self):
-        self.showStatus("Load graph")
-        results = self.execute("""
-            found_vertices = []
-            expected_vertices.each{ found_vertices << g.V('class', it) }
-            found_vertices
-            """, 
-            params={"expected_vertices":list(XBRLDBGRAPHS)})["results"]
-        for vList in results:
-            for v in vList:
-                setattr(self, "root_" + v['class'] + "_id", int(v['_id']))
-        return set(v['class'] for vList in results for v in vList)
+            params={"root_classes":list(XBRLDBGRAPHS)})["results"]
+        for v in results:
+            setattr(self, "root_" + v['_class'] + "_id", int(v['_id']))
+        return set(v['_class'] for v in results)
         
+    def getDBsize(self):
+        self.showStatus("Get database size (slow operation for now)")
+        results = self.execute("Get database size", """
+            [g.V.count(), g.E.count()]
+            """)["results"]
+        return (results[0], results[1])
+
     def insertXbrl(self, rssItem):
         try:
             # must also have default dimensions loaded
             from arelle import ValidateXbrlDimensions
             ValidateXbrlDimensions.loadDimensionDefaults(self.modelXbrl)
             
+            initialVcount, initialEcount = self.getDBsize() # don't include in timing, very slow
             startedAt = time.time()
             # self.load()  this done in the verify step
             self.insertAccession(rssItem)
@@ -213,7 +224,6 @@ class XbrlSemanticGraphDatabaseConnection():
             #self.insertRelationshipTypeSets()
             #self.insertResourceRoleSets()
             #self.insertAspectValues()
-            #self.insertResources()
             self.modelXbrl.profileStat(_("XbrlPublicDB: DTS insertion"), time.time() - startedAt)
             startedAt = time.time()
             self.insertDataPoints()
@@ -221,9 +231,17 @@ class XbrlSemanticGraphDatabaseConnection():
             startedAt = time.time()
             self.insertRelationshipSets()
             self.modelXbrl.profileStat(_("XbrlPublicDB: Relationships insertion"), time.time() - startedAt)
+            self.insertValidationResults()
+            self.modelXbrl.profileStat(_("XbrlPublicDB: Validation results insertion"), time.time() - startedAt)
+            #startedAt = time.time()
+            #self.insertValidCombinations()
+            #self.modelXbrl.profileStat(_("XbrlPublicDB: Valid Combinations insertion"), time.time() - startedAt)
             self.showStatus("Committing entries")
             self.commit()
             self.modelXbrl.profileStat(_("XbrlPublicDB: insertion committed"), time.time() - startedAt)
+            finalVcount, finalEcount = self.getDBsize()
+            self.modelXbrl.modelManager.addToLog("added vertices: {0}, edges: {1}, total vertices: {2}, edges: {3}".format(
+                          finalVcount - initialVcount, finalEcount - initialEcount, finalVcount, finalEcount))
             self.showStatus("DB insertion completed", clearAfter=5000)
         except Exception as ex:
             self.showStatus("DB insertion failed due to exception", clearAfter=5000)
@@ -232,13 +250,16 @@ class XbrlSemanticGraphDatabaseConnection():
     def insertAccession(self, rssItem):
         self.showStatus("insert accession")
         # accession graph -> document vertices
-        new_accession = {'class':'accession',
+        new_accession = {'_class':'accession',
                          'is_most_current': True}
         if self.modelXbrl.modelDocument.creationSoftwareComment:
             new_accession['creation_software'] = self.modelXbrl.modelDocument.creationSoftwareComment
+        datetimeNow = datetime.datetime.now()
+        datetimeNowStr = XmlUtil.dateunionValue(datetimeNow)
         if rssItem is not None:  # sec accession
             # set self.
-            accessionType = "SEC_accession"
+            accessionType = "SEC_filing"
+            # for an RSS Feed entry from SEC, use rss item's accession information
             new_accession['accepted_timestamp'] = XmlUtil.dateunionValue(rssItem.acceptanceDatetime)
             new_accession['filing_date'] = XmlUtil.dateunionValue(rssItem.filingDate)
             new_accession['entity_id'] = rssItem.cikNumber
@@ -246,199 +267,369 @@ class XbrlSemanticGraphDatabaseConnection():
             new_accession['standard_industrial_classification'] = rssItem.assignedSic 
             new_accession['sec_html_url'] = rssItem.htmlUrl 
             new_accession['entry_url'] = rssItem.url
-            new_accession['filing_accession_number'] = rssItem.accessionNumber
+            new_accession['filing_accession_number'] = filing_accession_number = rssItem.accessionNumber
         else:
+            # not an RSS Feed item, make up our own accession ID (the time in seconds of epoch)
             self.accessionId = int(time.time())    # only available if entered from an SEC filing
-            datetimeNow = datetime.datetime.now()
             intNow = int(time.time())
             accessionType = "independent_filing"
-            new_accession['accepted_timestamp'] = XmlUtil.dateunionValue(datetimeNow)
-            new_accession['filing_date'] = XmlUtil.dateunionValue(datetimeNow)
+            new_accession['accepted_timestamp'] = datetimeNowStr
+            new_accession['filing_date'] = datetimeNowStr
             new_accession['entry_url'] = self.modelXbrl.fileSource.url
-            new_accession['filing_accession_number'] = str(intNow)
-        for v in self.execute("""
-            new_accession = g.addVertex(new_accession)
-            g.addEdge(g.v(root_accessions_id), new_accession, 'independent_filing')
-            new_accession
+            new_accession['filing_accession_number'] = filing_accession_number = str(intNow)
+        for id in self.execute("Insert accession " + accessionType, """
+            r = g.v(root_accessions_id)
+            // check if accession already has a vertex
+            vIt = g.V('filing_accession_number', new_accession.filing_accession_number)
+            // use prior vertex, or if none, create new vertex for it
+            accession = (vIt.hasNext() ? vIt.next() : g.addVertex(new_accession) )
+            // TBD: modify accession timestamp (last-updated-at, if it already existed)
+            // check if vertex has edge to root_accessions vertex
+            vIn = accession.in
+            // if no edge, add one
+            vIn.hasNext() && vIn.next() == r ?: g.addEdge(r, accession, accession_type)
+            accession.id
             """, 
             params={'root_accessions_id': self.root_accessions_id,
-                    'new_accession': new_accession
+                    'new_accession': new_accession,
+                    'accession_type': accessionType,
+                    'datetime_now': datetimeNowStr,
                    })["results"]:
-            self.accession_id = int(v['_id'])
+            self.accession_id = int(id)
+            
+        # relationshipSets are a dts property
+        self.relationshipSets = [(arcrole, ELR, linkqname, arcqname)
+                                 for arcrole, ELR, linkqname, arcqname in self.modelXbrl.baseSets.keys()
+                                 if ELR and (arcrole.startswith("XBRL-") or (linkqname and arcqname))]
         
     def insertDocuments(self):
         # accession->documents
         # 
         self.showStatus("insert documents")
-        results = self.execute("""
-            dts = g.addVertex(dts)
-            g.addEdge(g.v(root_accession_id), dts, "dts")
-            entry_doc = g.addVertex(entry_document)
-            ref_docs = []
-            g.addEdge(dts, entry_doc, "dts")
-            g.addEdge(g.v(root_documents_id), entry_doc, "filed_document")
-            g.addEdge(g.v(root_accession_id), entry_doc, "entry_document")
-            referenced_documents.each{ref_docs << g.addVertex(it)}
-            ref_docs.each{g.addEdge(entry_doc, it, "referenced_document")}
-            results = ref_docs
-            results << entry_doc
-            results << dts
-            results
+        documents = []
+        for modelDocument in self.modelXbrl.urlDocs.values():
+            doc = {'_class': 'document',
+                   'url': modelDocument.uri,
+                   'document_type': modelDocument.gettype()}
+            if modelDocument.type == Type.SCHEMA:
+                doc['aspect_vertices'] = {}
+            documents.append(doc)
+        results = self.execute("Insert documents", """
+            results = []
+            rDoc = g.v(root_documents_id)
+            vAccession = g.v(accession_id)
+            // add dts if it doesn't exist
+            vDtsIt = vAccession.out('dts')
+            vDts = (vDtsIt.hasNext() ? vDtsIt.next() : g.addVertex(dts) )
+            vDtsIn = vDts.in('dts').has('id',vAccession.id)
+            vDtsIn.hasNext() ?: g.addEdge(vAccession, vDts, 'dts')
+
+            urlV = [:]
+            urlV_id = [:]
+            isNew = [:]
+            documents.each{
+                vDocIt = rDoc.out(it.url)
+                isNew[it.url] = !vDocIt.hasNext()
+                vDoc = (vDocIt.hasNext() ? vDocIt.next() : g.addVertex(it))
+                // link doc to root doc
+                vDocIn = vDoc.in(it.url)
+                vDocIn.hasNext() && vDocIn.next() == rDoc ?: g.addEdge(rDoc, vDoc, it.url)
+                urlV[it.url] = vDoc
+                urlV_id[it.url] = vDoc.id
+            } 
+
+            // entry document edge to doc root and dts
+            documents.findAll{it.url == entry_url}.each{
+                vEntryDoc = urlV[it.url]
+                // link entryDoc to dts
+                vDocIn = vAccession.in('entry_document')
+                vDocIn.hasNext() && vDocIn.next() == vAccession ?: g.addEdge(vAccession, vEntryDoc, 'entry_document')
+                vDocIn = vEntryDoc.in('filed_document')
+                vDocIn.hasNext() && vDocIn.next() == rDoc ?: g.addEdge(vDts, vEntryDoc, 'filed_document')
+            }
+
+            // referenced document edge to entry document
+            documents.findAll{it.url != entry_url}.each{
+                vRefDoc = urlV[it.url]
+                // link refDoc to vEntryDoc
+                vDocIn = vRefDoc.in('referenced_document')
+                vDocIn.hasNext() && vDocIn.next() == vEntryDoc ?: g.addEdge(vEntryDoc, vRefDoc, 'referenced_document')
+            }
+            [vDts.id, urlV_id, isNew]
             """, 
-            params={'root_accession_id': self.accession_id,
-                    'root_documents_id': self.root_documents_id,
+            params={'root_documents_id': self.root_documents_id,
+                    'accession_id': self.accession_id,
+                    'entry_url': self.modelXbrl.modelDocument.uri,
                     'dts': {
-                        'class': 'dts'},
-                    'entry_document': {
-                        'class': 'document',
-                        'url': self.modelXbrl.modelDocument.uri,
-                        'document_type': self.modelXbrl.modelDocument.gettype(),
-                        },
-                    'referenced_documents': [{
-                        'class': 'document',
-                        'url': modelDocument.uri,
-                        'document_type': modelDocument.gettype()} 
-                         for modelDocument in self.modelXbrl.urlDocs.values()
-                         if modelDocument is not self.modelXbrl.modelDocument]
+                        '_class': 'dts'},
+                    'documents': documents
                     })["results"]
-        self.document_ids = {}
-        for v in results:
-            if v['class'] == 'dts':
-                self.dts_id = int(v['_id'])
-            elif v['class'] == 'document':
-                self.document_ids[v['url']] = int(v['_id'])
+        dts_id, doc_id_list, doc_isNew_list = results # unpack list
+        self.dts_id = int(dts_id)
+        self.document_ids = dict( (url, int(id)) for url, id in doc_id_list.items() )
+        self.document_isNew = dict( (url, isNew) for url,isNew in doc_isNew_list.items() )
+                
+    def conceptsUsed(self):
+        conceptsUsed = set(f.qname for f in self.modelXbrl.factsInInstance)
         
+        for cntx in self.modelXbrl.contexts.values():
+            for dim in cntx.qnameDims.values():
+                conceptsUsed.add(dim.dimensionQname)
+                if dim.isExplicit:
+                    conceptsUsed.add(dim.memberQname)
+                else:
+                    conceptsUsed.add(dim.typedMember.qname)
+        for defaultDim, defaultDimMember in self.modelXbrl.qnameDimensionDefaults.items():
+            conceptsUsed.add(defaultDim)
+            conceptsUsed.add(defaultDimMember)
+        for relationshipSetKey in self.relationshipSets:
+            relationshipSet = self.modelXbrl.relationshipSet(*relationshipSetKey)
+            for rel in relationshipSet.modelRelationships:
+                if isinstance(rel.fromModelObject, ModelConcept):
+                    conceptsUsed.add(rel.fromModelObject)
+                if isinstance(rel.toModelObject, ModelConcept):
+                    conceptsUsed.add(rel.toModelObject)
+        return conceptsUsed
+
     def insertDataDictionary(self):
         # separate graph
         # document-> dataTypeSet -> dataType
-        self.showStatus("insert DataDictionary")
-        
         # do all schema dataTypeSet vertices
             
         self.type_id = {}
         self.aspect_id = {}
+        self.aspect_proxy_id = {}
         self.roleType_id = {}
         self.arcroleType_id = {}
+            
+        if any((not self.document_isNew[modelDocument.uri])
+               for modelDocument in self.modelXbrl.urlDocs.values()):
+            conceptsUsed = self.conceptsUsed()
+            
         for modelDocument in self.modelXbrl.urlDocs.values():
+            self.showStatus("insert DataDictionary " + modelDocument.basename)
+        
+            # don't re-output existing documents
             if modelDocument.type == Type.SCHEMA:
-                modelTypes = [modelType
-                              for modelType in self.modelXbrl.qnameTypes.values()
-                              if modelType.modelDocument is modelDocument]
                 modelConcepts = [modelConcept
                                  for modelConcept in self.modelXbrl.qnameConcepts.values()
                                  if modelConcept.modelDocument is modelDocument]
-                roleTypes = [modelRoleType
-                             for modelRoleTypes in self.modelXbrl.roleTypes.values()
-                             for modelRoleType in modelRoleTypes]
-                arcroleTypes = [modelRoleType
-                             for modelRoleTypes in self.modelXbrl.arcroleTypes.values()
-                             for modelRoleType in modelRoleTypes]
-                results = self.execute("""
-                    results = []
-                    docV = g.v(document_id)
-                    dictV = g.addVertex(dict)
-                    g.addEdge(docV, dictV, "data_dictionary")
-                    types.each{results << g.addEdge(dictV, g.addVertex(it), "data_type")}
-                    aspects.each{results << g.addEdge(dictV, g.addVertex(it), "aspect")}
-                    roletypes.each{results << g.addEdge(dictV, g.addVertex(it), "role_type")}
-                    arcroletypes.each{results << g.addEdge(dictV, g.addVertex(it), "arcrole_type")}
-                    results << dictV
-                    """, 
-                    params={'document_id': self.document_ids[modelDocument.uri],
-                    'dict': {
-                        'class': 'data_dictionary',
-                        'namespace': modelDocument.targetNamespace},
-                    'types': [{
-                        'class': 'data_type',
-                        'name': modelType.name
-                          } for modelType in modelTypes],
-                    'aspects': [{
-                        'class': 'aspect',
-                        'name': modelConcept.name
-                          } for modelConcept in modelConcepts],
-                    'roletypes': [{
-                        'class': 'role_type',
-                        'uri': modelRoleType.roleURI,
-                        'definition': modelRoleType.definition or ''
-                          } for modelRoleType in roleTypes],
-                    'arcroletypes': [{
-                        'class': 'arcrole_type',
-                        'uri': modelRoleType.arcroleURI,
-                        'definition': modelRoleType.definition or ''
-                          } for modelRoleType in arcroleTypes],
-                    })["results"]
-                iT = iC = iRT = iAT = 0
-                for e in results: # results here are edges, and vertices
-                    if e['_type'] == 'edge':
-                        if e['_label'] == 'data_type':
-                            self.type_id[modelTypes[iT].qname] = int(e['_inV'])
-                            iT += 1
-                        elif e['_label'] == 'aspect':
-                            self.aspect_id[modelConcepts[iC].qname] = int(e['_inV'])
-                            iC += 1
-                        elif e['_label'] == 'role_type':
-                            self.roleType_id[roleTypes[iRT].roleURI] = int(e['_inV'])
-                            iRT += 1
-                        elif e['_label'] == 'arcrole_type':
-                            self.arcroleType_id[arcroleTypes[iAT].arcroleURI] = int(e['_inV'])
-                            iAT += 1
+                if self.document_isNew[modelDocument.uri]:
+                    # adding document as new
+                    modelTypes = [modelType
+                                  for modelType in self.modelXbrl.qnameTypes.values()
+                                  if modelType.modelDocument is modelDocument]
+                    conceptAspects = []
+                    for modelConcept in modelConcepts:
+                        conceptAspect = {'_class': 'aspect',
+                                         'name': modelConcept.name}
+                        if modelConcept.isAbstract:
+                            conceptAspect['isAbstract'] = True
+                        if modelConcept.periodType:
+                            conceptAspect['periodType'] = modelConcept.periodType
+                        if modelConcept.balance:
+                            conceptAspect['balance'] = modelConcept.balance
+                        for propertyName in ('isItem', 'isTuple', 'isLinkPart', 'isNumeric', 'isMonetary', 
+                                             'isExplicitDimension', 'isTypedDimension', 'isDomainMember', 'isHypercubeItem',
+                                             'isShares', 'isTextBlock'):
+                            propertyValue = getattr(modelConcept, propertyName, None)
+                            if propertyValue:
+                                conceptAspect[propertyName] = propertyValue
+                        conceptAspects.append(conceptAspect)
+                    roleTypes = [modelRoleType
+                                 for modelRoleTypes in self.modelXbrl.roleTypes.values()
+                                 for modelRoleType in modelRoleTypes]
+                    arcroleTypes = [modelRoleType
+                                 for modelRoleTypes in self.modelXbrl.arcroleTypes.values()
+                                 for modelRoleType in modelRoleTypes]
+                    results = self.execute("Insert data dictionary types, aspects, roles, and arcroles for " + 
+                                           modelDocument.uri, """
+                        dtsV = g.v(dts_id)
+                        docV = g.v(document_id)
+                        // add dictV if it doesn't exist
+                        dictIt = docV.out('doc_data_dictionary')
+                        dictV = (dictIt.hasNext() ? dictIt.next() : g.addVertex(dict) )
+                        // add edge from dtsV to dictV if not present
+                        vDtsIn = dtsV.in('dts_data_dictionary').has('id',dtsV.id)
+                        vDtsIn.hasNext() ?: g.addEdge(dtsV, dictV, 'dts_data_dictionary')
+                        // add edge from docV to dictV if not present
+                        vDictIn = dictV.in('doc_data_dictionary').has('id',docV.id)
+                        vDictIn.hasNext() ?: g.addEdge(docV, dictV, 'doc_data_dictionary')
+                        type_ids = []
+                        types.each{
+                            typeV = g.addVertex(it)
+                            type_ids << typeV.id
+                            g.addEdge(dictV, typeV, 'data_type')
+                        }
+                        aspectsV = g.addVertex(['_class':'aspects'])
+                        g.addEdge(dictV, aspectsV, 'aspects')
+                        aspect_ids = []
+                        aspects.each{
+                            aspectV = g.addVertex(it)
+                            aspect_ids << aspectV.id
+                            g.addEdge(dictV, aspectV, 'aspect')
+                            g.addEdge(aspectsV, aspectV, '_' + it.name)
+                        }
+                        role_type_ids = []
+                        roletypes.each{
+                            roleTypeV = g.addVertex(it)
+                            role_type_ids << roleTypeV.id
+                            g.addEdge(docV, roleTypeV, 'role_type')
+                        }
+                        arcrole_type_ids = []
+                        arcroletypes.each{
+                            arcroleTypeV = g.addVertex(it)
+                            arcrole_type_ids << arcroleTypeV.id
+                            g.addEdge(docV, arcroleTypeV, 'arcrole_type')
+                        }
+                        [dictV.id, type_ids, aspect_ids, role_type_ids, arcrole_type_ids]
+                        """, 
+                        params={
+                        'dts_id': self.dts_id,
+                        'document_id': self.document_ids[modelDocument.uri],
+                        'dict': {
+                            '_class': 'data_dictionary',
+                            'namespace': modelDocument.targetNamespace},
+                        'types': [{
+                            '_class': 'data_type',
+                            'name': modelType.name
+                              } for modelType in modelTypes],
+                        'aspects': conceptAspects,
+                        'roletypes': [{
+                            '_class': 'role_type',
+                            'uri': modelRoleType.roleURI,
+                            'definition': modelRoleType.definition or ''
+                              } for modelRoleType in roleTypes],
+                        'arcroletypes': [{
+                            '_class': 'arcrole_type',
+                            'uri': modelRoleType.arcroleURI,
+                            'definition': modelRoleType.definition or '',
+                            'cyclesAllowed': modelRoleType.cyclesAllowed
+                              } for modelRoleType in arcroleTypes],
+                        })["results"]
+                    dict_id, type_ids, aspect_ids, role_type_ids, arcrole_type_ids = results
+                    self.dict_id = int(dict_id)
+                    for iT, type_id in enumerate(type_ids):
+                        self.type_id[modelTypes[iT].qname] = int(type_id)
+                    for iC, aspect_id in enumerate(aspect_ids):
+                        self.aspect_id[modelConcepts[iC].qname] = int(aspect_id)
+                    for iRT, roleType_id in enumerate(role_type_ids):
+                        self.roleType_id[roleTypes[iRT].roleURI] = int(roleType_id)
+                    for iAT, arcroleType_id in enumerate(arcrole_type_ids):
+                        self.arcroleType_id[arcroleTypes[iAT].arcroleURI] = int(arcroleType_id)
+                else: # not new, just get aspect (concept) id's 
+                    results = self.execute("Access existing data dictionary types, aspects, roles, and arcroles for " + 
+                                           modelDocument.uri, """
+                        aspect_ids = []
+                        g.v(document_id).out('doc_data_dictionary').out('aspects').each {
+                            aspectsV = it // dereference vertex from pipeline
+                            aspect_names.each{
+                                aspectsV.out('_' + it).id.each{
+                                    aspect_ids << it
+                                }
+                            }
+                        }
+                        aspect_ids
+                        """, 
+                        params={'document_id': self.document_ids[modelDocument.uri],
+                            'aspect_names': [modelConcept.name for modelConcept in modelConcepts],
+                        })["results"]
+                    for iC, aspect_id in enumerate(results):
+                        self.aspect_id[modelConcepts[iC].qname] = int(aspect_id) if aspect_id is not None else None
                 
         typeDerivationEdges = []
         for modelType in self.modelXbrl.qnameTypes.values():
-            qnamesDerivedFrom = modelType.qnameDerivedFrom
-            if not isinstance(qnamesDerivedFrom, (list,tuple)): # list if a union
-                qnamesDerivedFrom = (qnamesDerivedFrom,)
-            for qnameDerivedFrom in qnamesDerivedFrom:
-                if modelType.qname in self.type_id and qnameDerivedFrom in self.type_id:
-                    typeDerivationEdges.append({
-                            'from_id': self.type_id[modelType.qname],
-                            'to_id': self.type_id[qnameDerivedFrom],
-                            'rel': "derived_from"})
-        self.execute("""
-            e.each{g.addEdge(g.v(it.from_id), g.v(it.to_id), it.rel)}
+            if self.document_isNew[modelType.modelDocument.uri]:
+                qnamesDerivedFrom = modelType.qnameDerivedFrom
+                if not isinstance(qnamesDerivedFrom, (list,tuple)): # list if a union
+                    qnamesDerivedFrom = (qnamesDerivedFrom,)
+                for qnameDerivedFrom in qnamesDerivedFrom:
+                    if modelType.qname in self.type_id and qnameDerivedFrom in self.type_id:
+                        typeDerivationEdges.append({
+                                'from_id': self.type_id[modelType.qname],
+                                'to_id': self.type_id[qnameDerivedFrom],
+                                'rel': "derived_from"})
+        ### was ### g.addEdge(g.v(it.from_id), g.v(it.to_id), it.rel)
+        self.execute("Insert type derivation edges", """
+            e.each{
+                fromV = g.v(it.from_id)
+                toV = g.v(it.to_id)
+                vOutIt = fromV.out(it.rel).has('id',toV.id)
+                vOutIt.hasNext() ?: g.addEdge(fromV, toV, it.rel)
+            }
             """, 
             params={'e': typeDerivationEdges})
         aspectEdges = []
         for modelConcept in self.modelXbrl.qnameConcepts.values():
-            if modelConcept.qname in self.aspect_id:
-                if modelConcept.typeQname in self.type_id:
-                    aspectEdges.append({'from_id': self.aspect_id[modelConcept.qname],
-                                        'to_id': self.type_id[modelConcept.typeQname],
-                                        'rel': "data_type"})
-                if modelConcept.substitutesForQname in self.type_id:
-                    aspectEdges.append({'from_id': self.aspect_id[modelConcept.qname],
-                                        'to_id': self.type_id[modelConcept.substitutesForQname.typeQname],
-                                        'rel': "substitutes_for"})
-                baseXbrliTypeQnames = modelConcept.baseXbrliTypeQname # may be union or single
-                if not isinstance(baseXbrliTypeQnames, (list,tuple)):
-                    baseXbrliTypeQnames = (baseXbrliTypeQnames,) # was single base type
-                for baseXbrliTypeQname in baseXbrliTypeQnames:
-                    if baseXbrliTypeQname in self.type_id:
+            if self.document_isNew[modelConcept.modelDocument.uri]:
+                if modelConcept.qname in self.aspect_id:
+                    if modelConcept.typeQname in self.type_id:
                         aspectEdges.append({'from_id': self.aspect_id[modelConcept.qname],
-                                            'to_id': self.type_id[baseXbrliTypeQname],
-                                            'rel': "base_xbrli_type"})
-        self.execute("""
-        e.each{g.addEdge(g.v(it.from_id), g.v(it.to_id), it.rel)}
+                                            'to_id': self.type_id[modelConcept.typeQname],
+                                            'rel': "data_type"})
+                    if modelConcept.substitutesForQname in self.type_id:
+                        aspectEdges.append({'from_id': self.aspect_id[modelConcept.qname],
+                                            'to_id': self.type_id[modelConcept.substitutesForQname.typeQname],
+                                            'rel': "substitutes_for"})
+                    baseXbrliTypeQnames = modelConcept.baseXbrliTypeQname # may be union or single
+                    if not isinstance(baseXbrliTypeQnames, (list,tuple)):
+                        baseXbrliTypeQnames = (baseXbrliTypeQnames,) # was single base type
+                    for baseXbrliTypeQname in baseXbrliTypeQnames:
+                        if baseXbrliTypeQname in self.type_id:
+                            aspectEdges.append({'from_id': self.aspect_id[modelConcept.qname],
+                                                'to_id': self.type_id[baseXbrliTypeQname],
+                                                'rel': "base_xbrli_type"})
+        self.execute("Insert aspect edges for data type, substitutes for, and base xbrli type", """
+            e.each{
+                fromV = g.v(it.from_id)
+                toV = g.v(it.to_id)
+                vOutIt = fromV.out(it.rel).has('id',toV.id)
+                vOutIt.hasNext() ?: g.addEdge(fromV, toV, it.rel)
+            }
         """, 
         params={'e': aspectEdges})
         
-    def insertResources(self):
-        self.showStatus("insert resources")
-        table = self.getTable('resource', 'resource_id', 
-                              ('role_uri_id', 'qname_id', 'document_id', 'document_line_number', 'document_column_number'), 
-                              ('role_uri_id', 'qname_id', 'document_id', 'document_line_number', 'document_column_number'), 
-                              tuple((self.uriId[resource.role],
-                                     self.qnameId[resource.qname],
-                                     self.documentIds[resource.modelDocument.uri],
-                                     resource.sourceline,
-                                     0)
-                                    for arcrole in (XbrlConst.conceptLabel, XbrlConst.conceptReference)
-                                    for rel in self.modelXbrl.relationshipSet(arcrole).modelRelationships
-                                    for resource in (rel.fromModelObject, rel.toModelObject)
-                                    if isinstance(resource, ModelResource)))
-        self.resourceId = dict(((roleId, qnId, docId, line, offset), id)
-                               for id, roleId, qnId, docId, line, offset in table)
-    
+    '''
+    def insertValidCombinations(self):
+        # document-> validCombinationsSet-> cubes
+        self.showStatus("insert ValidCombinations")
+        
+        drsELRs = set(ELR
+                      for arcrole, ELR, linkqname, arcqname in self.modelXbrl.baseSets.values()
+                      if arcrole == XbrlConst.all)
+        hasHcRels = self.modelXbrl.relationshipSet(XbrlConst.all).modelRelationships
+        hcConcepts = set(hasHcRel.toModelObject for hasHcRel in hasHcRels)
+        
+        # one cube region per head pri item with multiple cube regions
+        for hcConcept in hcConcepts:
+            # include any other concepts in this pri item with clean inheritance
+            for drsELR in drsELRs:
+                # each ELR is another cube region
+         
+        for allRel in val.modelXbrl.relationshipSet(XbrlConst.all, ELR)
+        drsPriItems(val, fromELR, fromPriItem
+        
+        ... this becomes an unweildly large model, don't see a use case for compiling it out
+'''
+    def insertAspectProxies(self, qnames):
+        aspectQnames = [qname for qname in qnames if qname not in self.aspect_proxy_id]
+        results = self.execute("Insert aspect proxies", """
+            dtsV = g.v(dts_id)
+            aspectProxyV_ids = []
+            aspect_ids.each{
+                aspectV = g.v(it)
+                aspectProxyV = g.addVertex(['_class':'aspect_proxy'])
+                aspectProxyV_ids << aspectProxyV.id
+                g.addEdge(aspectV, aspectProxyV, 'proxy')
+                g.addEdge(dtsV, aspectProxyV, 'dts_aspect_proxy')
+            }
+            aspectProxyV_ids
+            """, 
+            params={'dts_id': self.dts_id,
+                    'aspect_ids': [self.aspect_id[qname] for qname in aspectQnames]}
+            )["results"]
+        for i, proxy_id in enumerate(results):
+            self.aspect_proxy_id[aspectQnames[i]] = proxy_id
         
     def periodAspectValue(self, context):
         if context.isForeverPeriod:
@@ -453,26 +644,23 @@ class XbrlSemanticGraphDatabaseConnection():
         self.showStatus("insert DataPoints")
         
         # do all schema element vertices
-        self.conceptAspectId = []
+        dataPointObjectIndices = []
+        aspectQnamesUsed = {XbrlConst.qnXbrliIdentifier, XbrlConst.qnXbrliPeriod, XbrlConst.qnXbrliUnit}
+        dimensions = [] # index by hash of dimension
         if self.modelXbrl.modelDocument.type in (Type.INSTANCE, Type.INLINEXBRL):
             instanceDocument = self.modelXbrl.modelDocument
             dataPoints = []
-            dataPointObjectIndices = []
-            dataPointVertexIds = []
             entityIdentifiers = [] # index by (scheme, identifier)
-            entityIdentifierVertexIds = []
             periods = []  # index by (instant,) or (start,end) dates
-            periodVertexIds = []
-            dimensions = [] # index by hash of dimension
-            dimensionVertexIds = []
             units = []  # index by measures (qnames set) 
-            unitVertexIds = []
             for fact in self.modelXbrl.factsInInstance:
+                aspectQnamesUsed.add(fact.concept.qname)
                 dataPointObjectIndices.append(fact.objectIndex)
-                datapoint = {'class': 'data_point',
-                             'name': str(fact.qname)}
+                datapoint = {'_class': 'data_point',
+                             'name': str(fact.qname),
+                             'source_line': fact.sourceline}
                 if fact.id is not None:
-                    datapoint['id'] = fact.id
+                    datapoint['xml_id'] = fact.id
                 if fact.context is not None:
                     datapoint['context'] = fact.contextID
                     context = fact.context
@@ -483,131 +671,171 @@ class XbrlSemanticGraphDatabaseConnection():
                     if e not in entityIdentifiers:
                         entityIdentifiers.append(e)
                     for dimVal in context.qnameDims.values():
-                        key = (dimVal.dimensionQname, dimVal.isExplicit,
-                               dimVal.memberQname if dimVal.isExplicit else dimVal.typedMember.innerText)
+                        aspectQnamesUsed.add(dimVal.dimensionQname)
+                        if dimVal.isExplicit:
+                            aspectQnamesUsed.add(dimVal.memberQname)
+                            key = (dimVal.dimensionQname, True, dimVal.memberQname)
+                        else:
+                            key = (dimVal.dimensionQname, False, dimVal.typedMember.innerText)
                         if key not in dimensions:
                             dimensions.append(key)
                     if fact.isNumeric:
                         datapoint['effective_value'] = str(fact.effectiveValue)
-                        u = str(fact.unit.measures)  # string for now
-                        if u not in units:
-                            units.append(u)
-                        datapoint['unit']= fact.unitID
-                    datapoint['value'] = str(fact.value),
-                    if fact.isNumeric and fact.precision:
-                        datapoint['precision'] = fact.precision
-                    if fact.isNumeric and fact.decimals:
-                        datapoint['decimals'] = fact.decimals
-                    if fact.id:
-                        datapoint['id'] = fact.id
-                    if fact.precision:
-                        datapoint['presision'] = fact.precision
-                    if fact.decimals:
-                        datapoint['decimals'] = fact.decimals
+                        if fact.unit is not None:
+                            u = str(fact.unit.measures)  # string for now
+                            if u not in units:
+                                units.append(u)
+                            datapoint['unit']= fact.unitID
+                        if fact.precision:
+                            datapoint['precision'] = fact.precision
+                        if fact.decimals:
+                            datapoint['decimals'] = fact.decimals
+                    datapoint['value'] = str(fact.value)
                 dataPoints.append(datapoint)
-            results = self.execute("""
-                results = []
+            results = self.execute("Insert data points", """
                 docV = g.v(document_id)
-                datapointsV = g.addVertex(datapoints_set)
-                g.addEdge(docV, datapointsV, "data_points")
-                datapoints.each{results << g.addEdge(datapointsV, g.addVertex(it), "data_point")}
-                results << datapointsV
+                dpIt = docV.out('data_points')
+                datapointsV = (dpIt.hasNext() ? dpIt.next() : g.addVertex(datapoints_set) )
+                dpE = docV.out('data_points').has('id', datapointsV.id)
+                dpE.hasNext() ?: g.addEdge(docV, datapointsV, 'data_points')
+                datapointV_ids = []
+                datapoints.each{
+                    dpV = g.addVertex(it)
+                    datapointV_ids << dpV.id
+                    g.addEdge(datapointsV, dpV, 'data_point')
+                }
+                [datapointsV.id, datapointV_ids]
                 """, 
                 params={'document_id': self.document_ids[instanceDocument.uri],
                         'datapoints_set': {
-                            'class': 'datapoints_set'},
+                            '_class': 'datapoints_set'},
                         'datapoints': dataPoints}
                 )["results"]
-            for e in results: # returns edges and vertices
-                if e['_type'] == 'edge' and e['_label'] == 'data_point':
-                    dataPointVertexIds.append(int(e['_inV']))
+            datapointsV_id, datapointVids_list = results
+            dataPointVertexIds = [int(id) for id in datapointVids_list]
                     
-            for e in self.execute("""
-                results = []
+            results = self.execute("Insert entity identifiers", """
                 aspectV = g.v(aspect_id)
-                entityIdentifiers.each{results << g.addEdge(g.addVertex(it), aspectV, 'entity_identifier_aspects')}
-                results
+                entIdentV_ids = []
+                entityIdentifiers.each{
+                    entIdentV = g.addVertex(it)
+                    entIdentV_ids << entIdentV.id
+                    g.addEdge(entIdentV, aspectV, 'entity_identifier_aspects')
+                }
+                [aspectV.id, entIdentV_ids]
                 """, 
                 params={'aspect_id': self.aspect_id[XbrlConst.qnXbrliIdentifier],
-                        'entityIdentifiers': [{'scheme': e[0], 'identifier': e[1]} 
+                        'entityIdentifiers': [{'_class':'entity_identifier',
+                                               'scheme': e[0], 
+                                               'identifier': e[1]} 
                                               for e in entityIdentifiers]}
-                )["results"]:
-                if e['_type'] == 'edge':
-                    entityIdentifierVertexIds.append(int(e['_outV']))
+                )["results"]
+            entIdentAspectV_id, entIdentV_ids_list = results
+            entityIdentifierVertexIds = [int(entIdent_id) for entIdent_id in entIdentV_ids_list]
                     
             p = []
             for period in periods:
                 if period == 'forever':
-                    p.append({'forever': 'forever'})
+                    p.append({'_class': 'period',
+                              'forever': 'forever'})
                 elif len(period) == 1:
-                    p.append({'instant': period[0]})
+                    p.append({'_class': 'period',
+                              'instant': period[0]})
                 else:
-                    p.append({'start': period[0], 'end': period[1]})
-            for e in self.execute("""
-                results = []
+                    p.append({'_class': 'period',
+                              'start_date': period[0], 
+                              'end_date': period[1]})
+            results = self.execute("Insert periods", """
                 aspectV = g.v(aspect_id)
-                periods.each{results << g.addEdge(g.addVertex(it), aspectV, 'period_aspects')}
-                results
+                periodV_ids = []
+                periods.each{
+                    periodV = g.addVertex(it)
+                    periodV_ids << periodV.id
+                    g.addEdge(periodV, aspectV, 'period_aspects')
+                }
+                [aspectV.id, periodV_ids]
                 """, 
                 params={'aspect_id': self.aspect_id[XbrlConst.qnXbrliPeriod],
                         'periods': p}
-                )["results"]:
-                if e['_type'] == 'edge':
-                    periodVertexIds.append(int(e['_outV']))
+                )["results"]
+            periodAsepctV_id, periodV_ids_list = results
+            periodVertexIds = [int(period_id) for period_id in periodV_ids_list]
                     
-            for e in self.execute("""
-                results = []
+            results = self.execute("Insert units", """
                 aspectV = g.v(aspect_id)
-                units.each{results << g.addEdge(g.addVertex(it), aspectV, 'unit_aspects')}
-                results
+                unitV_ids = []
+                units.each{
+                    unitV = g.addVertex(it)
+                    unitV_ids << unitV.id
+                    g.addEdge(unitV, aspectV, 'unit_aspects')}
+                [aspectV.id, unitV_ids]
                 """, 
                 params={'aspect_id': self.aspect_id[XbrlConst.qnXbrliUnit],
-                        'units': [{'measures': u} for u in units]}
-                )["results"]:
-                if e['_type'] == 'edge':
-                    unitVertexIds.append(int(e['_outV']))
+                        'units': [{'_class':'unit', 
+                                   'measures': u} 
+                                  for u in units]}
+                )["results"]
+            unitV_id, unitV_ids_list = results
+            unitVertexIds = [int(unit_id) for unit_id in unitV_ids_list]
                     
-            if dimensions:
-                    
-                dims = []
+            if dimensions:                    
+                aspValSels = []
                 for dimQn, isExplicit, value in dimensions:
                     if isExplicit:
-                        dims.append({'name':dimQn.localName + '-' + value.localName})
+                        aspValSels.append({'_class': 'aspect_value_selection',
+                                           'name':dimQn.localName + '-' + value.localName})
                     else:
-                        dims.append({'name':dimQn.localName + '-' + str(len(dims)+1),
-                                     'typed_value': value})
+                        aspValSels.append({'_class': 'aspect_value_selection',
+                                           'name': dimQn.localName + '-' + str(len(aspValSels)+1),
+                             '             typed_value': value})
                 
-                for e in self.execute("""
-                    results = []
-                    dimsV = g.addVertex(dim_aspect)
-                    dims.each{results << g.addEdge(dimsV, g.addVertex(it), 'dimension_aspect')}
-                    results
+                results = self.execute("Insert aspect value selection groups", """
+                    aspectValSelGroupV = g.addVertex(aspect_val_sel_group)
+                    aspectValSelV_ids = []
+                    aspect_val_sels.each{
+                        aspectValSelV = g.addVertex(it)
+                        aspectValSelV_ids << aspectValSelV.id
+                        g.addEdge(aspectValSelGroupV, aspectValSelV, 'aspect_value_selection_group')
+                    }
+                    [aspectValSelGroupV.id, aspectValSelV_ids]
                     """, 
-                    params={'dim_aspect': {'name': 'dimensions'},
-                            'dims': dims}
-                    )["results"]:
-                    if e['_type'] == 'edge':
-                        dimensionVertexIds.append(int(e['_outV']))
+                    params={'aspect_val_sel_group': {'_class': 'aspect_value_selection_group'},
+                            'aspect_val_sels': aspValSels}
+                    )["results"]
+                aspValSelGrpV_id, aspValSelV_ids_list = results
+                aspValSelVertexIds = [int(aspValSel_id) for aspValSel_id in aspValSelV_ids_list]
 
-                # connect dimensions to dimension and member concepts   
-                self.execute("""
-                    dims.each{g.addEdge(g.v(it.aspect_id), g.v(it.dimension_id), 'dimension')}
-                    mems.each{g.addEdge(g.v(it.aspect_id), g.v(it.member_id), 'member')}
-                    []
-                    """, 
-                    params={'dims': [{
-                                'aspect_id': aspect_id,
-                                'dimension_id': self.aspect_id[dimQn]}
-                                for i, aspect_id in enumerate(dimensionVertexIds) 
-                                for dimQn,isExplicit,memQn in dimensions[i:i+1]],
-                            'mems': [{
-                                'aspect_id': aspect_id,
-                                'member_id': self.aspect_id[memQn]}
-                                for i, aspect_id in enumerate(dimensionVertexIds) 
-                                for dimQn,isExplicit,memQn in dimensions[i:i+1]
-                                if isExplicit]}
-                    )["results"]    
-                      
+            else:
+                aspValSelVertexIds = []
+            dimValAspValSelVertexIds = dict((dimensions[i], aspValSel_id)
+                                            for i, aspValSel_id in enumerate(aspValSelVertexIds))
+              
+        self.insertAspectProxies(aspectQnamesUsed)
+
+        if dimensions:                    
+            # connect aspectValueSelection to concept dimension and member concepts   
+            self.execute("Insert dimension member edges", """
+                aspects.each{
+                    g.addEdge(g.v(it.aspValSel_id), g.v(it.dimension_id), 'aspect')
+                }
+                aspect_values.each{
+                    g.addEdge(g.v(it.aspValSel_id), g.v(it.member_id), 'aspect_value')
+                }
+                []
+                """, 
+                params={'aspects': [{
+                            'aspValSel_id': aspValSel_id,
+                            'dimension_id': self.aspect_proxy_id[dimQn]}
+                            for i, aspValSel_id in enumerate(aspValSelVertexIds) 
+                            for dimQn,isExplicit,memQn in dimensions[i:i+1]],
+                        'aspect_values': [{
+                            'aspValSel_id': aspValSel_id,
+                            'member_id': self.aspect_proxy_id[memQn]}
+                            for i, aspValSel_id in enumerate(aspValSelVertexIds) 
+                            for dimQn,isExplicit,memQn in dimensions[i:i+1]
+                            if isExplicit]}
+                )["results"]    
+        
         # add aspect relationships
         edges = []
         for i, factObjectIndex in enumerate(dataPointObjectIndices):
@@ -616,134 +844,257 @@ class XbrlSemanticGraphDatabaseConnection():
             # fact concept aspect
             edges.append({
                 'from_id': dataPoint_id,
-                'to_id': self.aspect_id[fact.qname],
-                'rel': "fact_concept"})
+                'to_id': self.aspect_proxy_id[fact.qname],
+                'rel': "base_item"})
             context = fact.context
             if context is not None:
                 # entityIdentifier aspect
                 edges.append({
                     'from_id': dataPoint_id,
                     'to_id': entityIdentifierVertexIds[entityIdentifiers.index(context.entityIdentifier)],
-                    'rel': "fact_entityIdentifier"})
+                    'rel': "entity_identifier"})
                 # period aspect
                 edges.append({
                     'from_id': dataPoint_id,
                     'to_id': periodVertexIds[periods.index(self.periodAspectValue(context))],
-                    'rel': "fact_period"})
-                # explicit dimension aspects
-                '''
-                for dimVal in context.qnameDims.items():
-                    key = (dimVal.dimensionQname, dimVal.memberQname)
-                    if key not in dimensions:
-                        dimensions.append(key)
+                    'rel': "period"})
+                # dimension aspectValueSelections
+                for dimVal in context.qnameDims.values():
+                    key = (dimVal.dimensionQname, dimVal.isExplicit,
+                           dimVal.memberQname if dimVal.isExplicit else dimVal.typedMember.innerText)
                     edges.append({
                         'from_id': dataPoint_id,
-                        'to_id': dimensionVertexIds[dimensions.index(key)],
-                        'rel': "fact_period"})
-                '''
+                        'to_id': dimValAspValSelVertexIds[key],
+                        'rel': "aspect_value_selection"})
             if fact.isNumeric and fact.unit is not None:
                 # unit aspect
                 u = str(fact.unit.measures)  # string for now
                 edges.append({
                     'from_id': dataPoint_id,
                     'to_id': unitVertexIds[units.index(u)],
-                    'rel': "fact_unit"})
+                    'rel': "_unit"})
 
-        results = self.execute("""
+        results = self.execute("Insert aspect relationship edges", """
             e.each{g.addEdge(g.v(it.from_id), g.v(it.to_id), it.rel)}
+            []
             """, 
             params={'e': edges})["results"]
         
     def insertRelationshipSets(self):
         self.showStatus("insert relationship sets")
-        relationshipSets = [(arcrole, ELR, linkqname, arcqname)
-                            for arcrole, ELR, linkqname, arcqname in self.modelXbrl.baseSets.keys()
-                            if ELR and linkqname and arcqname and not arcrole.startswith("XBRL-")]
-        relationshipSetIDs = []
-        results = self.execute("""
-            results = []
+        results = self.execute("Insert relationship sets", """
             dtsV = g.v(dts_id)
             relSetsV = g.addVertex(relSets)
-            g.addEdge(dtsV, relSetsV, "relationship_sets")
-            relSet.each{results << g.addEdge(relSetsV, g.addVertex(it), "relationship_set")}
-            results << relSetsV
+            g.addEdge(dtsV, relSetsV, 'relationship_sets')
+            relSetV_ids = []
+            relSet.each{
+                relSetV = g.addVertex(it)
+                relSetV_ids << relSetV.id
+                g.addEdge(relSetsV, relSetV, 'relationship_set')}
+            [relSetsV.id, relSetV_ids]
             """, 
             params={
                 'dts_id': self.dts_id,
                 'relSets': {
-                    'class': 'relationship_sets'},
+                    '_class': 'relationship_sets'},
                 'relSet': [{
-                    'class': 'relationship_set',
+                    '_class': 'relationship_set',
                     'arcrole': arcrole,
                     'linkrole': linkrole,
+                    'linkdefinition': self.modelXbrl.roleTypeDefinition(linkrole) or '',
                     'linkname': str(linkqname),
                     'arcname': str(arcqname)
-                    } for arcrole, linkrole, linkqname, arcqname in relationshipSets]
+                    } for arcrole, linkrole, linkqname, arcqname in self.relationshipSets]
             })["results"]
-        for e in results: # results here are edges, and vertices
-            if e['_type'] == 'edge':
-                if e['_label'] == 'relationship_set':
-                    relationshipSetIDs.append(int(e['_inV']))
+        relSetsV_id, relSetV_ids_list = results
+        relationshipSetIDs = [int(relSet_id) for relSet_id in relSetV_ids_list]
         
         # do tree walk to build relationships with depth annotated, no targetRole navigation
         relV = [] # parentID, seq, order
+        relVseq = [0]
         vIDs = [] # in same order as relV
         relE = [] # fromV, toV, label
+        resources = set()
+        aspectQnamesUsed = set()
+        resourceIDs = {} # index by object
         
-        def walkTree(rels, seq, depth, relationshipSet, visited, parentRelID, doVertices):
+        def walkTree(rels, seq, depth, relationshipSet, visited, parentRelID, relationshipSetId, doVertices):
             for rel in rels:
                 if rel not in visited:
                     visited.add(rel)
                     
+                    if doVertices:
+                        _relV = {'seq':seq,'depth':depth, '_class':'relationship'}
                     if isinstance(rel.fromModelObject, ModelConcept):
-                        sourceId = self.aspect_id[rel.fromModelObject.qname]
+                        if doVertices:
+                            aspectQnamesUsed.add(rel.fromModelObject.qname)
+                            sourceId = True
+                        else:
+                            sourceId = self.aspect_proxy_id[rel.fromModelObject.qname]
                     else:
                         sourceId = None # tbd
-                    if isinstance(rel.toModelObject, ModelConcept):
-                        targetId = self.aspect_id[rel.toModelObject.qname]
+                    toModelObject = rel.toModelObject
+                    if isinstance(toModelObject, ModelConcept):
+                        if doVertices:
+                            aspectQnamesUsed.add(toModelObject.qname)
+                            targetId = True
+                            if rel.preferredLabel:
+                                _relV['preferred_label'] = rel.preferredLabel
+                            if rel.targetRole:
+                                _relV['target_linkrole'] = rel.targetRole
+                            if rel.arcrole in (XbrlConst.all, XbrlConst.notAll):
+                                _relV['cube_closed'] = rel.closed
+                            elif rel.arcrole in (XbrlConst.dimensionDomain, XbrlConst.domainMember):
+                                _relV['aspect_value_usable'] = rel.usable
+                            elif rel.arcrole == XbrlConst.summationItem:
+                                _relV['weight'] = rel.weight
+                            if relationshipSet.arcrole == "XBRL-dimensions":
+                                _relV['arcrole'] = os.path.basename(rel.arcrole)
+                        else:
+                            targetId = self.aspect_proxy_id[toModelObject.qname]
+                    elif isinstance(toModelObject, ModelResource):
+                        if doVertices:
+                            resources.add(toModelObject)
+                            targetId = 0 # just can't be None, but doesn't matter on doVertices pass
+                            if toModelObject.role:
+                                _relV['resource_role'] = toModelObject.role
+                        else:
+                            targetId = resourceIDs[toModelObject]
                     else:
                         targetId = None # tbd
                     if sourceId is not None and targetId is not None:
                         if doVertices:
-                            relV.append({'seq':seq,'depth':depth})
+                            relV.append(_relV)
                             thisRelId = 0
                         else:
-                            thisRelId = vIDs[seq-1]
-                            relE.append({'from_id': parentRelID, 
-                                         'to_id': thisRelId,
-                                         'label': 'root' if depth == 1 else 'child'})
-                            relE.append({'from_id': thisRelId, 
-                                         'to_id': sourceId,
-                                         'label': 'source'})
-                            relE.append({'from_id': thisRelId, 
-                                         'to_id': targetId,
-                                         'label': 'target'})
+                            prevSeq = relVseq[0] # fake reference to count in enclosing function
+                            thisRelId = vIDs[prevSeq]
+                            relVseq[0] = prevSeq + 1
+                            relE.append({'from_id': parentRelID, 'to_id': thisRelId, 'label': 'root' if depth == 1 else 'child'})
+                            relE.append({'from_id': relationshipSetId, 'to_id': thisRelId, 'label': 'relationship'})
+                            relE.append({'from_id': thisRelId, 'to_id': sourceId, 'label': 'source'})
+                            relE.append({'from_id': thisRelId, 'to_id': targetId, 'label': 'target'})
                         seq += 1
-                        seq = walkTree(relationshipSet.fromModelObject(rel.toModelObject), seq, depth+1, relationshipSet, visited, thisRelId, doVertices)
+                        if relationshipSet.arcrole == "XBRL-dimensions" and rel.targetRole:
+                            targetRelSet = self.modelXbrl.relationshipSet(relationshipSet.arcrole, rel.targetRole)
+                        else:
+                            targetRelSet = relationshipSet
+                        seq = walkTree(targetRelSet.fromModelObject(toModelObject), seq, depth+1, relationshipSet, visited, thisRelId, relationshipSetId, doVertices)
                     visited.remove(rel)
             return seq
         
         for doVertices in range(1,-1,-1):  # pass 0 = vertices, pass 1 = edges
-            for i, relationshipSetKey in enumerate(relationshipSets):
+            for i, relationshipSetKey in enumerate(self.relationshipSets):
                 arcrole, ELR, linkqname, arcqname = relationshipSetKey
                 relationshipSetId = relationshipSetIDs[i]
                 relationshipSet = self.modelXbrl.relationshipSet(arcrole, ELR, linkqname, arcqname)
                 seq = 1               
                 for rootConcept in relationshipSet.rootConcepts:
-                    seq = walkTree(relationshipSet.fromModelObject(rootConcept), seq, 1, relationshipSet, set(), relationshipSetId, doVertices)
+                    if doVertices:
+                        relV.append({'_class':'root'})
+                        rootId = 0
+                    else:
+                        prevSeq = relVseq[0] # fake reference to count in enclosing function
+                        rootId = vIDs[prevSeq]
+                        relVseq[0] = prevSeq + 1
+                        aspectId = self.aspect_proxy_id[rootConcept.qname]
+                        relE.append({'from_id': relationshipSetId, 'to_id': rootId, 'label': 'root'})
+                        relE.append({'from_id': rootId, 'to_id': aspectId, 'label': 'aspect'})
+                    seq = walkTree(relationshipSet.fromModelObject(rootConcept), seq, 1, relationshipSet, set(), rootId, relationshipSetId, doVertices)
             if doVertices:
-                for v in self.execute("""
-                    results = []
-                    relV.each{results << g.addVertex(it)}
-                    results
+                for relV_id in self.execute("Insert relationship set resources", """
+                    relV_ids = []
+                    relV.each{relV_ids << g.addVertex(it).id}
+                    relV_ids
                     """, 
                     params={'relV': relV}
                     )["results"]:
-                    vIDs.append(int(v['_id']))
+                    vIDs.append(int(relV_id))
+                    
+                if resources:
+                    resourceV = []
+                    resourceObjs = []
+                    for resource in resources:
+                        resourceParam = {'_class': resource.localName,
+                                         'value': resource.innerText}
+                        if resource.role:
+                            resourceParam['role'] = resource.role
+                        resourceV.append(resourceParam)
+                        resourceObjs.append(resource) # need these in a list in same order as resoureV
+                    for i, v_id in enumerate(self.execute("Insert relationship set concept-to-resource relationships", """
+                        resourceV_ids = []
+                        resourceV.each{resourceV_ids << g.addVertex(it).id}
+                        resourceV_ids
+                        """, 
+                        params={'resourceV': resourceV}
+                        )["results"]):
+                        resourceIDs[resourceObjs[i]] = int(v_id)
+                    
+                self.insertAspectProxies(aspectQnamesUsed)
             else:
-                self.execute("""
+                self.execute("Insert relationship edges", """
                     relE.each{g.addEdge(g.v(it.from_id), g.v(it.to_id), it.label)}
+                    []
                     """, 
                     params={'relE': relE}
                     )["results"]
-
+                
+                # TBD: do we want to link resources to the dts (by role, class, or otherwise?)
+                    
+        resourceIDs.clear() # dereferemce objects
+        resources = None
+        
+    def insertValidationResults(self):
+        logEntries = []
+        for handler in logging.getLogger("arelle").handlers:
+            if hasattr(handler, "dbHandlerLogEntries"):
+                logEntries = handler.dbHandlerLogEntries()
+                break
+        
+        messages = []
+        messageRefs = [] # direct link to objects
+        for i, logEntry in enumerate(logEntries):
+            # capture message ref's
+            msgRefIds = []
+            for ref in logEntry['refs']:
+                modelObject = self.modelXbrl.modelObject(ref.get('objectId',''))
+                # for now just find a concept
+                aspectQname = None
+                if isinstance(modelObject, (ModelConcept, ModelFact)):
+                    aspectQname = modelObject.qname
+                elif isinstance(modelObject, ModelRelationship):
+                    if isinstance(modelObject.toModelObject, ModelConcept):
+                        aspectQname = modelObject.toModelObject.qname
+                    elif isinstance(modelObject.fromModelObject, ModelConcept):
+                        aspectQname = modelObject.fromModelObject.qname
+                if aspectQname is not None and aspectQname in self.aspect_proxy_id:
+                    msgRefIds.append(self.aspect_proxy_id[aspectQname])
+                        
+                    
+            messages.append({'_class': 'message',
+                             'seq': i + 1,
+                             'code': logEntry['code'],
+                             'level': logEntry['level'],
+                             'text': logEntry['message']['text'],
+                             'refs': msgRefIds})
+        if messages:
+            self.showStatus("insert validation messages")
+            results = self.execute("Insert validation messages", """
+                accessionV = g.v(accession_id)
+                msgsV = g.addVertex(['_class':'messages'])
+                g.addEdge(accessionV, msgsV, 'validation_messages')
+                msgV_ids = []
+                messages.each{
+                    msgV = g.addVertex(it.subMap(['_class','seq','code','level','text']))
+                    msgV_ids << msgV.id
+                    g.addEdge(msgsV, msgV, 'message')
+                    it['refs'].each{
+                        g.addEdge(msgV, g.v(it), 'message_ref')
+                    }}
+                msgV_ids
+                """, 
+                params={
+                    'accession_id': self.accession_id,
+                    'messages': messages
+                })["results"]
+            relationshipSetIDs = [int(msg_id) for msg_id in results]

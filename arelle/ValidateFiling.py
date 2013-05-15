@@ -1251,6 +1251,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
         drsELRs = set()
         
         # do calculation, then presentation, then other arcroles
+        self.summationItemRelsSetAllELRs = modelXbrl.relationshipSet(XbrlConst.summationItem)
         for arcroleFilter in (XbrlConst.summationItem, XbrlConst.parentChild, "*"):
             for baseSetKey, baseSetModelLinks  in modelXbrl.baseSets.items():
                 arcrole, ELR, linkqname, arcqname = baseSetKey
@@ -1462,6 +1463,8 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
 
         del localPreferredLabels # dereference
         del usedCalcFromTosELR
+        del self.summationItemRelsSetAllELRs
+
         self.modelXbrl.profileActivity("... filer relationships checks", minTimeToShow=1.0)
 
                                 
@@ -1696,9 +1699,29 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                     hasDefaultLang = True
         except Exception as err:
             pass
-        
+
     # check if concept is behaving as a total based on role, deed, or circumstances
     def presumptionOfTotal(self, rel, siblingRels, iSibling, isStatementSheet, nestedInTotal, checkLabelRoleOnly):
+        """
+        A numeric concept target of a parent-child relationship is presumed total if:
+        
+        (i) its preferredLabel role is a total role (pre XbrlConst static function of 
+        current such total roles) or
+        
+        (ii) if not in a nested total (abstract child relationship to a known total's 
+        contributing siblings):
+        
+        the parent is not SupplementalCashFlowInformationAbstract and the preceding 
+        sibling relationship is monetary and it's on a statement sheet and it's the 
+        last of more than one monetary item
+        
+        (a) Last monetary parented by an abstract or non-monetary and not in a nested 
+        (breakdown) total, or 
+        (b) effective label (en-US of preferred role) has "Total" in its wording.
+        (c) (commented out for now due to false positives: Concept name has "Total" 
+        in its name)
+        (d) last monetary (may be sub level) whose immediate sibling is a calc LB child
+        """
         concept = rel.toModelObject
         if concept is not None and concept.isNumeric:
             preferredLabel = rel.preferredLabel
@@ -1718,30 +1741,98 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                 parent = rel.fromModelObject
                 if (len(siblingRels) > 1 and
                     iSibling == len(siblingRels) - 1 and 
+                    parent is not None and
                     parent.name not in {
                         "SupplementalCashFlowInformationAbstract"
-                    } and
-                    siblingRels[iSibling - 1].toModelObject.isMonetary):
-                    # last fact, may be total
-                    if isStatementSheet:
-                        # check if facts add up??
-                        if (parent.isAbstract or not parent.isMonetary) and not nestedInTotal:
-                            return _("last monetary item in statement sheet monetary line items parented by nonMonetary concept")
-                        elif effectiveLabel and 'Total' in effectiveLabel: 
-                            return _("last monetary item in statement sheet monetary line items with word 'Total' in effective label {0}").format(effectiveLabel)
-                        elif 'Total' in concept.name:
-                            return _("last monetary item in statement sheet monetary line items with word 'Total' in concept name {0}").format(concept.name)
-                    ''' for now unreliable to use total words for notes
-                    else:
-                        if 'Total' in effectiveLabel: # also check for Net ???
-                            return _("last monetary item in note with word 'Total' in effective label {0}").format(effectiveLabel)
-                        if 'Total' in concept.name: # also check for Net ???
-                            return _("last monetary item in note with word 'Total' in concept name {0}").format(concept.name)
-                    '''
+                    }):
+                    preceedingSibling = siblingRels[iSibling - 1].toModelObject
+                    if preceedingSibling is not None and preceedingSibling.isMonetary:
+                        # last fact, may be total
+                        if isStatementSheet:
+                            # check if facts add up??
+                            if (parent.isAbstract or not parent.isMonetary) and not nestedInTotal:
+                                return _("last monetary item in statement sheet monetary line items parented by nonMonetary concept")
+                            elif effectiveLabel and 'Total' in effectiveLabel: 
+                                return _("last monetary item in statement sheet monetary line items with word 'Total' in effective label {0}").format(effectiveLabel)
+                            elif 'Total' in concept.name:
+                                return _("last monetary item in statement sheet monetary line items with word 'Total' in concept name {0}").format(concept.name)
+                            elif self.summationItemRelsSetAllELRs.isRelated(concept, "child", preceedingSibling):
+                                return _("last monetary item in statement sheet monetary line items is calc sum of previous line item")
+                        ''' for now unreliable to use total words for notes
+                        else:
+                            if 'Total' in effectiveLabel: # also check for Net ???
+                                return _("last monetary item in note with word 'Total' in effective label {0}").format(effectiveLabel)
+                            if 'Total' in concept.name: # also check for Net ???
+                                return _("last monetary item in note with word 'Total' in concept name {0}").format(concept.name)
+                        '''
         return None
 
     # 6.15.02, 6.15.03
     def checkCalcsTreeWalk(self, parentChildRels, concept, isStatementSheet, inNestedTotal, conceptsUsed, visited):
+        """
+        -  EFM-strict validation 6.15.2/3: finding presumed totals in presentation and inspecting for 
+           equivalents in calculation (noted as error-semantic, in efm-strict mode).
+        
+        -  Best practice approach: inspecting for calcuations in the UGT calculations that would hint 
+           that like filing constructs should have presentation (noted as warning-semantic in best practices plug-in, when loaded and enabled)
+        
+        EFM-strict missing-calcs
+        
+        a. Presumption of total
+        
+        The presentation linkbase is tree-walked to find items presumed to be totals and their contributing 
+        items.  (see description of presumptionOfTotal, above)
+        
+        b. Finding calculation link roles with least mis-fit to presumed total and its contributing items 
+        (presumptionOfTotal in ValidateFiling.py).
+        
+        For each presumed total (checkForCalculations in ValidateFiling.py):
+        
+        b.1 Contributing items are found for the presumed total as follows:
+        
+        From the presumed total, walking back through its preceding sibilings (with caution to avoid 
+        looping on allowed direct cycles), a preceding sibling is a contributing item if it has facts, 
+        same period type, and numeric.  If a preceding sibling is abstract, the abstract's children are 
+        likewise recursively checked (as they often represent a breakdown, and such children of an 
+        abstract sibling to the total are also contributing items (except for such children preceding 
+        a total at the child level).  
+        
+        If a preceding sibling is presumed total (on same level), it is a running subtotal (in subsequent
+        same-level total) unless it's independent in the calc LB (separate totaled stuff preceding these
+        siblings) or related to grandparent sum.
+        
+        b.2 Finding the facts of these total/contributing item sets
+        
+        Sets of total and compatible contributing facts that match the sets of total concept and 
+        contributing concept must next be found, because each of these different sets (of total 
+        and compatible contributing facts) may fit different calculation link roles (according to 
+        which compatible contributing facts are present for each total).  This is particularly 
+        important when totals and contributing items exist both on face statements and notes, but 
+        the contributing compatible fact population is different).
+        
+        For each fact of the total concept, that has a specified end/instant datetime and unit, if 
+        (i) it's not on a statement or 
+        (ii) required context is absent or 
+        (iii) the fact's end/instant is within the required context's duration, the contributing 
+        item facts are those unit and context equivalent to such total fact.
+        
+        b.3 Finding least-mis-matched calculation link role
+        
+        Each link role in calculation produces a different set of summation-item arc-sets, and 
+        each set of presumed-total facts and compatible contributing item facts is separately 
+        considered to find the least-mismatched calculation summation-item arc-set.
+        
+        The link roles are not intermixed or aggregated, each link role produces independent 
+        summation-item arc-sets (XBRL 2.1 section 5.2.5.2).
+        
+        For each total fact and compatible contributing item facts, the calculation link roles 
+        are examined one-by-one for that link-role where the total has children missing the 
+        least of the compatible contributing item fact children, and reported either as 6.15.02 
+        (for statement sheet presentation link roles) or 6.15.03 (for non-statement link roles).  
+        The determination of statement sheet is according to the presentation tree walk.  The 
+        search for least-misfit calculation link role does not care or consider the value of the 
+        calculation link role, just the summation-item arc-set from the presumed-total concept.
+        """
         if concept not in visited:
             visited.add(concept)
             siblingRels = parentChildRels.fromModelObject(concept)
@@ -1765,7 +1856,17 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
             if siblingConcept is not None:
                 if siblingConcept is totalConcept: # direct cycle loop likely, possibly among children of abstract sibling
                     break
+                if self.summationItemRelsSetAllELRs.isRelated(totalConcept, 'ancestral-sibling', siblingConcept):
+                    break # sibling independently contributes as sibling of totalConcept to grandfather total
+                if any(self.summationItemRelsSetAllELRs.isRelated(contributingItem, 'child', siblingConcept)
+                       for contributingItem in contributingItems):
+                    break # this subtotal is a breakdown of something already being considered
                 isContributingTotal = self.presumptionOfTotal(contributingRel, siblingRels, iContributingRel, isStatementSheet, True, False)
+                # contributing total may actually be separate non-running subtotal, if so don't include it here
+                if isContributingTotal:
+                    if (self.summationItemRelsSetAllELRs.fromModelObject(siblingConcept) and not
+                        self.summationItemRelsSetAllELRs.toModelObject(siblingConcept)):
+                        break # sibling independently contributes as sibling of totalConcept as a root in another hierarchy
                 if siblingConcept.isAbstract:
                     childRels = parentChildRels.fromModelObject(siblingConcept)
                     self.checkForCalculations(parentChildRels, childRels, len(childRels), totalConcept, totalRel, reasonPresumedTotal, isStatementSheet, conceptsUsed, True, contributingItems) 
@@ -1799,7 +1900,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
             for compatibleItemConcepts, compatibleFacts in compatibleItemsFacts.items():
                 foundSummationItemSet = False 
                 leastMissingItemsSet = compatibleItemConcepts
-                for ELR in self.modelXbrl.relationshipSet(XbrlConst.summationItem).linkRoleUris:
+                for ELR in self.summationItemRelsSetAllELRs.linkRoleUris:
                     relSet = self.modelXbrl.relationshipSet(XbrlConst.summationItem,ELR)
                     missingItems = (compatibleItemConcepts - 
                                     frozenset(r.toModelObject 
@@ -1814,11 +1915,23 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                             leastMissingItemsSet = missingItems
                     else: 
                         foundSummationItemSet = True
+                '''
+                # testing with DH (merge all calc ELRs instead of isolating calc ELRs)...
+                relSet = self.modelXbrl.relationshipSet(XbrlConst.summationItem)
+                missingItems = (compatibleItemConcepts - 
+                                frozenset(r.toModelObject 
+                                          for r in relSet.fromModelObject(totalConcept)))
+                foundSummationItemSet = len(missingItems) == 0
+                '''
                 if not foundSummationItemSet:
+                    linkroleDefinition = self.modelXbrl.roleTypeDefinition(contributingRel.linkrole)
+                    reasonIssueIsWarning = ""
+                    msgCode = "ERROR-SEMANTIC"
                     if isStatementSheet:
                         errs = ("EFM.6.15.02,6.13.02,6.13.03", "GFM.2.06.02,2.05.02,2.05.03")
                         msg = _("Financial statement calculation relationship missing from total concept to item concepts, based on required presentation of line items and totals.  "
-                                "\n\nPresentation link role: \n%(linkrole)s. "
+                                "%(reasonIssueIsWarning)s"
+                                "\n\nPresentation link role: \n%(linkrole)s \n%(linkroleDefinition)s. "
                                 "\n\nTotal concept: \n%(conceptSum)s.  "
                                 "\n\nReason presumed total: \n%(reasonPresumedTotal)s.  "
                                 "\n\nSummation items missing: \n%(missingConcepts)s.  "
@@ -1827,21 +1940,32 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                     else:
                         errs = ("EFM.6.15.03,6.13.02,6.13.03", "GFM.2.06.03,2.05.02,2.05.03")
                         msg = _("Notes calculation relationship missing from total concept to item concepts, based on required presentation of line items and totals. "
-                                "\n\nPresentation link role: \n%(linkrole)s. "
+                                "%(reasonIssueIsWarning)s"
+                                "\n\nPresentation link role: \n%(linkrole)s \n%(linkroleDefinition)s."
                                 "\n\nTotal concept: \n%(conceptSum)s.  "
                                 "\n\nReason presumed total: \n%(reasonPresumedTotal)s.  "
                                 "\n\nSummation items missing \n%(missingConcepts)s.  "
                                 "\n\nExpected item concepts \n%(itemConcepts)s.  "
                                 "\n\nCorresponding facts in contexts: \n%(contextIDs)s\n")
-                    self.modelXbrl.log("ERROR-SEMANTIC", errs, msg,
+                    # cases causing this issue to be a warning instead of an error
+                    if all(f.isNil for f in compatibleFacts if f.concept in leastMissingItemsSet):
+                        reasonIssueIsWarning = _("\n\nMissing items are nil, which doesn't affect validity but may impair analysis of concept semantics from calculation relationships.  ")
+                        msgCode = "WARNING-SEMANTIC"
+                        errs = tuple(e + '.missingItemsNil' for e in errs)
+                    if "parenthetical" in linkroleDefinition.lower():
+                        reasonIssueIsWarning += _("\n\nLink role is parenthetical.  ")
+                        msgCode = "WARNING-SEMANTIC"
+                        errs = tuple(e + '.parenthetical' for e in errs)
+                    self.modelXbrl.log(msgCode, errs, msg,
                         modelObject=[totalConcept, totalRel, siblingConcept, contributingRel] + [f for f in compatibleFacts], 
-                        conceptSum=totalConcept.qname, linkrole=contributingRel.linkrole,
+                        reasonIssueIsWarning=reasonIssueIsWarning,
+                        conceptSum=totalConcept.qname, linkrole=contributingRel.linkrole, linkroleDefinition=linkroleDefinition,
                         reasonPresumedTotal=reasonPresumedTotal,
                         itemConcepts=', \n'.join(sorted(set(str(c.qname) for c in compatibleItemConcepts))),
                         missingConcepts = ', \n'.join(sorted(set(str(c.qname) for c in leastMissingItemsSet))),
                         contextIDs=', '.join(sorted(set(f.contextID for f in compatibleFacts))))
+                leastMissingItemsSet = None #dereference, can't delete with Python 3.1
                 del foundSummationItemSet 
-                del leastMissingItemsSet
             del compatibleItemsFacts # dereference object references
         
 # for SBR 2.3.4.01

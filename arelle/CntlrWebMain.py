@@ -7,7 +7,7 @@ Use this module to start Arelle in web server mode
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
 from arelle.webserver.bottle import route, get, post, request, response, run, static_file
-import os, io, sys, time, threading
+import os, io, sys, time, threading, uuid
 from arelle import Version, XmlUtil
 from arelle.FileSource import FileNamedStringIO
 _os_pid = os.getpid()
@@ -25,9 +25,9 @@ def startWebserver(_cntlr, options):
     host, sep, portServer = options.webserver.partition(":")
     port, sep, server = portServer.partition(":")
     if server:
-        run(host=host, port=port, server=server)
+        run(host=host, port=port or 80, server=server)
     else:
-        run(host=host, port=port)
+        run(host=host, port=port or 80)
     
 @get('/rest/login')
 def login_form():
@@ -140,6 +140,7 @@ def validation(file=None):
     requestPathParts = request.urlparts[2].split('/')
     isValidation = 'validation' == requestPathParts[-1] or 'validation' == requestPathParts[-2]
     view = request.query.view
+    viewArcrole = request.query.viewArcrole
     if request.method == 'POST':
         sourceZipStream = request.body
         mimeType = request.get_header("Content-Type")
@@ -147,15 +148,15 @@ def validation(file=None):
             errors.append(_("POST must provide a zip file, Content-Type '{0}' not recognized as a zip file.").format(mimeType))
     else:
         sourceZipStream = None
-    if not view:
+    if not view and not viewArcrole:
         if requestPathParts[-1] in supportedViews:
             view = requestPathParts[-1]
     if isValidation:
-        if view:
+        if view or viewArcrole:
             errors.append(_("Only validation or one view can be specified in one requested."))
         if media not in ('xml', 'xhtml', 'html', 'json', 'text'):
             errors.append(_("Media '{0}' is not supported for validation (please select xhtml, html, xml, json or text)").format(media))
-    elif view:
+    elif view or viewArcrole:
         if media not in ('xml', 'xhtml', 'html', 'csv', 'json'):
             errors.append(_("Media '{0}' is not supported for view (please select xhtml, html, xml, csv, or json)").format(media))
     elif requestPathParts[-1] not in ("open", "close"):                
@@ -184,7 +185,7 @@ def validation(file=None):
                 setattr(options, "formulaAction", "run")
             elif value == "standard-except-formula":
                 setattr(options, "formulaAction", "none")
-        elif key in("media", "view"):
+        elif key in("media", "view", "viewArcrole"):
             pass
         elif key in validationOptions:
             optionKey, optionValue = validationOptions[key]
@@ -203,6 +204,10 @@ def validation(file=None):
     elif view:
         viewFile = FileNamedStringIO(media)
         setattr(options, view + "File", viewFile)
+    elif viewArcrole:
+        viewFile = FileNamedStringIO(media)
+        setattr(options, "viewArcrole", viewArcrole)
+        setattr(options, "viewFile", viewFile)
     return runOptionsAndGetResult(options, media, viewFile, sourceZipStream)
     
 def runOptionsAndGetResult(options, media, viewFile, sourceZipStream=None):
@@ -431,14 +436,29 @@ def help():
 
 <tr><th colspan="2">Validation</th></tr>
 <tr><td>/rest/xbrl/{file}/validation/xbrl</td><td>Validate document at {file}.</td></tr>
-<tr><td>\u00A0</td><td>For a browser request or http GET request, {file} may be local or web url, and may have "/" characters replaced by ";" characters (but that is not
-necessary).</td></tr>
+''' +
+('''
+<tr><td>\u00A0</td><td>For an http POST of a zip file (mime type application/zip), {file} is the relative file path inside the zip file.</td></tr>
+<tr><td>\u00A0</td><td>For an http GET request, {file} may be a web url, and may have "/" characters replaced by ";" characters 
+(but that is not necessary).</td></tr>
+<tr><td style="text-align=right;">Example:</td><td><code>/rest/xbrl/c.xbrl/validation/xbrl?media=xml</code>: Validate entry instance
+document in the POSTed zip archived file c.xbrl and return structured xml results.</td></tr>
+<tr><td>/rest/xbrl/validation</td><td>(Alternative syntax) Validate document, file is provided as a parameter (see below).</td></tr>
+<tr><td style="text-align=right;">Example:</td><td><code>/rest/xbrl/validation?file=c.xbrl&amp;media=xml</code>: Validate entry instance
+document c.xbrl (in POSTed zip) and return structured xml results.</td></tr>
+'''
+if cntlr.isGAE else
+'''
+<tr><td>\u00A0</td><td>For a browser request or http GET request, {file} may be local or web url, and may have "/" characters replaced by ";" characters 
+(but that is not necessary).</td></tr>
 <tr><td style="text-align=right;">Example:</td><td><code>/rest/xbrl/c:/a/b/c.xbrl/validation/xbrl?media=xml</code>: Validate entry instance
 document at c:/a/b/c.xbrl (on local drive) and return structured xml results.</td></tr>
 <tr><td>\u00A0</td><td>For an http POST of a zip file (mime type application/zip), {file} is the relative file path inside the zip file.</td></tr>
 <tr><td>/rest/xbrl/validation</td><td>(Alternative syntax) Validate document, file is provided as a parameter (see below).</td></tr>
 <tr><td style="text-align=right;">Example:</td><td><code>/rest/xbrl/validation?file=c:/a/b/c.xbrl&amp;media=xml</code>: Validate entry instance
 document at c:/a/b/c.xbrl (on local drive) and return structured xml results.</td></tr>
+''') +
+'''
 <tr><td></td><td>Parameters are optional after "?" character, and are separated by "&amp;" characters, 
 as follows:</td></tr>
 <tr><td style="text-indent: 1em;">flavor</td><td><code>standard</code>: XBRL 2.1 and XDT validation.  (If formulas are present they will also be compiled and run.)  (default)
@@ -476,6 +496,7 @@ formulaVarExpressionSource, formulaVarExpressionCode, formulaVarExpressionEvalua
 </td></tr>
 <tr><td style="text-indent: 1em;">abortOnMajorError</td><td>Abort process on major error, such as when load is unable to find an entry or discovered file.</td></tr> 
 <tr><td style="text-indent: 1em;">collectProfileStats</td><td>Collect profile statistics, such as timing of validation activities and formulae.</td></tr> 
+<tr><td style="text-indent: 1em;">plugins</td><td>Activate plug-ins, specify  '|' separated .py modules (relative to plug-in directory).</td></tr>
 
 <tr><th colspan="2">Versioning Report (diff of two DTSes)</th></tr>
 <tr><td>/rest/xbrl/diff</td><td>Diff two DTSes, producing an XBRL versioning report relative to report directory.</td></tr>
@@ -503,6 +524,7 @@ as follows:</td></tr>
 <br/><code>json</code>: JSON text results.</td></tr> 
 <tr><td style="text-indent: 1em;">file</td><td>Alternate way to specify file name or url by a parameter.</td></tr> 
 <tr><td style="text-indent: 1em;">view</td><td>Alternate way to specify view by a parameter.</td></tr> 
+<tr><td style="text-indent: 1em;">viewArcrole</td><td>Alternate way to specify view by indicating arcrole desired.</td></tr> 
 <tr><td style="text-indent: 1em;">import</td><td>A list of files to import to the DTS, such as additional formula 
 or label linkbases.  Multiple file names are separated by a '|' character.</td></tr> 
 <tr><td style="text-indent: 1em;">factListCols</td><td>A list of column names for facts list.  Multiple names are separated by a space or comma characters.
@@ -573,12 +595,15 @@ Enter 'show' to view current setting, 'system' to configure to use system proxy 
 </td></tr>
 <tr><td style="text-indent: 1em;">plugins</td><td>Show or modify and re-save plug-ins configuration:<br/>
 Enter 'show' to view plug-ins configuration, , or '|' separated modules: 
-+url to add plug-in by its url or filename, ~name to reload a plug-in by its name, -name to remove a plug-in by its name, 
++url to add plug-in by its url or filename (relative to plug-in directory else absolute), ~name to reload a plug-in by its name, -name to remove a plug-in by its name, 
  (e.g., '+http://arelle.org/files/hello_web.py', '+C:\Program Files\Arelle\examples\plugin\hello_dolly.py' to load,
-~Hello Dolly to reload, -Hello Dolly to remove)
+~Hello Dolly to reload, -Hello Dolly to remove).  (Note that plug-ins are transient on Google App Engine, specify with &amp;plugin to other rest commands.) 
 </td></tr>
+''' +
+('''
 <tr><td>/rest/stopWebServer</td><td>Shut down (terminate process after 2.5 seconds delay).</td></tr>
-</table>'''))
+''' if cntlr.isGAE else '') +
+'</table>'))
 
 @route('/about')
 def about():
@@ -602,7 +627,7 @@ See the License for the specific language governing permissions and limitations 
 <tr><td style="text-indent: 2.0em;">Python&reg; &copy; 2001-2010 Python Software Foundation</td></tr>
 <tr><td style="text-indent: 2.0em;">PyParsing &copy; 2003-2010 Paul T. McGuire</td></tr>
 <tr><td style="text-indent: 2.0em;">lxml &copy; 2004 Infrae, ElementTree &copy; 1999-2004 by Fredrik Lundh</td></tr>
-<tr><td style="text-indent: 2.0em;">xlrd &copy; 2005-2009 Stephen J. Machin, Lingfo Pty Ltd, \u00a9 2001 D. Giffin, &copy; 2000 A. Khan</td></tr>
+<tr><td style="text-indent: 2.0em;">xlrd &copy; 2005-2009 Stephen J. Machin, Lingfo Pty Ltd, &copy; 2001 D. Giffin, &copy; 2000 A. Khan</td></tr>
 <tr><td style="text-indent: 2.0em;">xlwt &copy; 2007 Stephen J. Machin, Lingfo Pty Ltd, &copy; 2005 R. V. Kiseliov</td></tr>
 <tr><td style="text-indent: 2.0em;">Bottle &copy; 2011 Marcel Hellkamp</td></tr>
 </table>''') % (cntlr.__version__, Version.version) )
@@ -678,3 +703,21 @@ def errorReport(errors, media="html"):
     else:
         response.content_type = 'text/html; charset=UTF-8'
         return htmlBody(tableRows(errors, header=_("Messages")))
+    
+def multipartResponse(parts):
+    # call with ( (filename, contentType, content), ...)
+    boundary='----multipart-boundary-%s----' % (uuid.uuid1(),)
+    response.content_type = 'multipart/mixed; boundary=%s' % (boundary,)
+    buf = []
+    
+    for filename, contentType, content in parts:
+        buf.append("\r\n" + boundary + "\r\n")
+        buf.append('Content-Disposition: attachment; filename="{0}";\r\n'.format(filename))
+        buf.append('Content-Type: {0};\r\n'.format(contentType))
+        buf.append('Content-Length: {0}\r\n'.format(len(content)))
+        buf.append('\r\n')
+        buf.append(content)
+    buf.append("\r\n" + boundary + "\r\n")
+    s = ''.join(buf)
+    response.content_length = len(s)
+    return s

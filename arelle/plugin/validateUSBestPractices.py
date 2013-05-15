@@ -1,97 +1,118 @@
 from arelle import PluginManager
 from arelle.ModelValue import qname
 from arelle import Locale, ModelXbrl, XbrlConst
-from arelle.FileSource import openFileSource
+from arelle.FileSource import openFileSource, openFileStream, saveFile
 import os, io, re, json, time
 from collections import defaultdict
 
-ugtNamespace = "http://fasb.org/us-gaap/2012-01-31"
+# ((year, ugtNamespace, ugtDocLB, ugtEntryPoint) ...)
+ugtDocs = ({"year": 2012, 
+            "namespace": "http://fasb.org/us-gaap/2012-01-31",
+            "docLB": "http://xbrl.fasb.org/us-gaap/2012/us-gaap-2012-01-31.zip/us-gaap-2012-01-31/elts/us-gaap-doc-2012-01-31.xml",
+            "entryXsd": "http://xbrl.fasb.org/us-gaap/2012/us-gaap-2012-01-31.zip/us-gaap-2012-01-31/entire/us-gaap-entryPoint-std-2012-01-31.xsd",
+            },
+           {"year": 2013, 
+            "namespace": "http://fasb.org/us-gaap/2013-01-31",
+            "docLB": "http://xbrl.fasb.org/us-gaap/2013/us-gaap-2013-01-31.zip/us-gaap-2013-01-31/elts/us-gaap-doc-2013-01-31.xml",
+            "entryXsd": "http://xbrl.fasb.org/us-gaap/2013/us-gaap-2013-01-31.zip/us-gaap-2013-01-31/entire/us-gaap-entryPoint-std-2013-01-31.xsd",
+            },
+           )
 
 def setup(val):
     val.linroleDefinitionIsDisclosure = re.compile(r"-\s+Disclosure\s+-\s",
                                                    re.IGNORECASE)
     val.linkroleDefinitionStatementSheet = re.compile(r"[^-]+-\s+Statement\s+-\s+.*", # no restriction to type of statement
                                                       re.IGNORECASE)
+    val.ugtNamespace = None
     cntlr = val.modelXbrl.modelManager.cntlr
-    # load deprecated concepts for 2012 us-gaap
-    if ugtNamespace in val.modelXbrl.namespaceDocs:
-        usgaapDoc = val.modelXbrl.namespaceDocs[ugtNamespace][0]
-        deprecationsJsonFile = usgaapDoc.filepathdir + os.sep + "deprecated-concepts.json"
-        try:
-            with io.open(deprecationsJsonFile, 'rt', encoding='utf-8') as f:
-                val.usgaapDeprecations = json.load(f)
-        except Exception:
-            val.modelXbrl.modelManager.addToLog(_("loading us-gaap deprecated concepts in cache"))
-            startedAt = time.time()
-            val.usgaapDeprecations = {}
-            # load without SEC/EFM validation (doc file would not be acceptable)
-            priorValidateDisclosureSystem = val.modelXbrl.modelManager.validateDisclosureSystem
-            val.modelXbrl.modelManager.validateDisclosureSystem = False
-            deprecationsInstance = ModelXbrl.load(val.modelXbrl.modelManager, 
-                  # "http://xbrl.fasb.org/us-gaap/2012/elts/us-gaap-doc-2012-01-31.xml",
-                  # load from zip (especially after caching) is incredibly faster
-                  openFileSource("http://xbrl.fasb.org/us-gaap/2012/us-gaap-2012-01-31.zip/us-gaap-2012-01-31/elts/us-gaap-doc-2012-01-31.xml", cntlr), 
-                  _("built deprecations table in cache"))
-            val.modelXbrl.modelManager.validateDisclosureSystem = priorValidateDisclosureSystem
-            if deprecationsInstance is None:
-                val.modelXbrl.error("arelle:notLoaded",
-                    _("US-GAAP documentation not loaded: %(file)s"),
-                    modelXbrl=val, file="us-gaap-doc-2012-01-31.xml")
-            else:   # load deprecations
-                for labelRel in deprecationsInstance.relationshipSet(XbrlConst.conceptLabel).modelRelationships:
-                    modelDocumentation = labelRel.toModelObject
-                    conceptName = labelRel.fromModelObject.name
-                    if modelDocumentation.role == 'http://www.xbrl.org/2009/role/deprecatedLabel':
-                        val.usgaapDeprecations[conceptName] = (val.usgaapDeprecations.get(conceptName, ('',''))[0], modelDocumentation.text)
-                    elif modelDocumentation.role == 'http://www.xbrl.org/2009/role/deprecatedDateLabel':
-                        val.usgaapDeprecations[conceptName] = (modelDocumentation.text, val.usgaapDeprecations.get(conceptName, ('',''))[1])
-                with io.open(deprecationsJsonFile, 'wt', encoding='utf-8') as f:
+    # load deprecated concepts for filed year of us-gaap
+    for ugtYear, ugtNamespace, ugtDocLB, ugtEntryXsd in ugtDocs:
+        if ugtNamespace in val.modelXbrl.namespaceDocs and len(val.modelXbrl.namespaceDocs[ugtNamespace]) > 0:
+            val.ugtNamespace = ugtNamespace
+            usgaapDoc = val.modelXbrl.namespaceDocs[ugtNamespace][0]
+            deprecationsJsonFile = usgaapDoc.filepathdir + os.sep + "deprecated-concepts.json"
+            file = None
+            try:
+                file = openFileStream(cntlr, deprecationsJsonFile, 'rt', encoding='utf-8')
+                val.usgaapDeprecations = json.load(file)
+                file.close()
+            except Exception:
+                if file:
+                    file.close()
+                val.modelXbrl.modelManager.addToLog(_("loading us-gaap deprecated concepts in cache"))
+                startedAt = time.time()
+                val.usgaapDeprecations = {}
+                # load without SEC/EFM validation (doc file would not be acceptable)
+                priorValidateDisclosureSystem = val.modelXbrl.modelManager.validateDisclosureSystem
+                val.modelXbrl.modelManager.validateDisclosureSystem = False
+                deprecationsInstance = ModelXbrl.load(val.modelXbrl.modelManager, 
+                      # "http://xbrl.fasb.org/us-gaap/2012/elts/us-gaap-doc-2012-01-31.xml",
+                      # load from zip (especially after caching) is incredibly faster
+                      openFileSource(ugtDocLB, cntlr), 
+                      _("built deprecations table in cache"))
+                val.modelXbrl.modelManager.validateDisclosureSystem = priorValidateDisclosureSystem
+                if deprecationsInstance is None:
+                    val.modelXbrl.error("arelle:notLoaded",
+                        _("US-GAAP documentation not loaded: %(file)s"),
+                        modelXbrl=val, file=os.path.basename(ugtDocLB))
+                else:   # load deprecations
+                    for labelRel in deprecationsInstance.relationshipSet(XbrlConst.conceptLabel).modelRelationships:
+                        modelDocumentation = labelRel.toModelObject
+                        conceptName = labelRel.fromModelObject.name
+                        if modelDocumentation.role == 'http://www.xbrl.org/2009/role/deprecatedLabel':
+                            val.usgaapDeprecations[conceptName] = (val.usgaapDeprecations.get(conceptName, ('',''))[0], modelDocumentation.text)
+                        elif modelDocumentation.role == 'http://www.xbrl.org/2009/role/deprecatedDateLabel':
+                            val.usgaapDeprecations[conceptName] = (modelDocumentation.text, val.usgaapDeprecations.get(conceptName, ('',''))[1])
                     jsonStr = _STR_UNICODE(json.dumps(val.usgaapDeprecations, ensure_ascii=False, indent=0)) # might not be unicode in 2.7
-                    f.write(jsonStr)  # 2.7 gets unicode this way
-                deprecationsInstance.close()
-                del deprecationsInstance # dereference closed modelXbrl
-            val.modelXbrl.profileStat(_("build us-gaap deprecated concepts cache"), time.time() - startedAt)
-        ugtCalcsJsonFile = usgaapDoc.filepathdir + os.sep + "ugt-calculations.json"
-        try:
-            with io.open(ugtCalcsJsonFile, 'rt', encoding='utf-8') as f:
-                val.usgaapCalculations = json.load(f)
-        except Exception:
-            val.modelXbrl.modelManager.addToLog(_("loading us-gaap calculations in cache"))
-            startedAt = time.time()
-            val.usgaapCalculations = {}
-            # load without SEC/EFM validation (doc file would not be acceptable)
-            priorValidateDisclosureSystem = val.modelXbrl.modelManager.validateDisclosureSystem
-            val.modelXbrl.modelManager.validateDisclosureSystem = False
-            calculationsInstance = ModelXbrl.load(val.modelXbrl.modelManager, 
-                  # "http://xbrl.fasb.org/us-gaap/2012/entire/us-gaap-entryPoint-std-2012-01-31.xsd",
-                  # load from zip (especially after caching) is incredibly faster
-                  openFileSource("http://xbrl.fasb.org/us-gaap/2012/us-gaap-2012-01-31.zip/us-gaap-2012-01-31/entire/us-gaap-entryPoint-std-2012-01-31.xsd", cntlr), 
-                  _("built us-gaap calculations cache"))
-            val.modelXbrl.modelManager.validateDisclosureSystem = priorValidateDisclosureSystem
-            if calculationsInstance is None:
-                val.modelXbrl.error("arelle:notLoaded",
-                    _("US-GAAP calculations not loaded: %(file)s"),
-                    modelXbrl=val, file="http://xbrl.fasb.org/us-gaap/2012/entire/us-gaap-entryPoint-std-2012-01-31.xsd")
-            else:   # load calculations
-                for ELR in calculationsInstance.relationshipSet(XbrlConst.summationItem).linkRoleUris:
-                    elrRelSet = calculationsInstance.relationshipSet(XbrlConst.summationItem, ELR)
-                    definition = ""
-                    for roleType in calculationsInstance.roleTypes.get(ELR,()):
-                        definition = roleType.definition
-                        break
-                    isStatementSheet = bool(val.linkroleDefinitionStatementSheet.match(definition))
-                    elrUgtCalcs = {"#roots": [c.name for c in elrRelSet.rootConcepts],
-                                   "#definition": definition,
-                                   "#isStatementSheet": isStatementSheet}
-                    for relFrom, rels in elrRelSet.fromModelObjects().items():
-                        elrUgtCalcs[relFrom.name] = [rel.toModelObject.name for rel in rels]
-                    val.usgaapCalculations[ELR] = elrUgtCalcs
-                with io.open(ugtCalcsJsonFile, 'wt', encoding='utf-8') as f:
+                    saveFile(cntlr, deprecationsJsonFile, jsonStr)  # 2.7 gets unicode this way
+                    deprecationsInstance.close()
+                    del deprecationsInstance # dereference closed modelXbrl
+                val.modelXbrl.profileStat(_("build us-gaap deprecated concepts cache"), time.time() - startedAt)
+            ugtCalcsJsonFile = usgaapDoc.filepathdir + os.sep + "ugt-calculations.json"
+            file = None
+            try:
+                file = openFileStream(cntlr, ugtCalcsJsonFile, 'rt', encoding='utf-8')
+                val.usgaapCalculations = json.load(file)
+                file.close()
+            except Exception:
+                if file:
+                    file.close()
+                val.modelXbrl.modelManager.addToLog(_("loading us-gaap calculations in cache"))
+                startedAt = time.time()
+                val.usgaapCalculations = {}
+                # load without SEC/EFM validation (doc file would not be acceptable)
+                priorValidateDisclosureSystem = val.modelXbrl.modelManager.validateDisclosureSystem
+                val.modelXbrl.modelManager.validateDisclosureSystem = False
+                calculationsInstance = ModelXbrl.load(val.modelXbrl.modelManager, 
+                      # "http://xbrl.fasb.org/us-gaap/2012/entire/us-gaap-entryPoint-std-2012-01-31.xsd",
+                      # load from zip (especially after caching) is incredibly faster
+                      openFileSource(ugtEntryXsd, cntlr), 
+                      _("built us-gaap calculations cache"))
+                val.modelXbrl.modelManager.validateDisclosureSystem = priorValidateDisclosureSystem
+                if calculationsInstance is None:
+                    val.modelXbrl.error("arelle:notLoaded",
+                        _("US-GAAP calculations not loaded: %(file)s"),
+                        modelXbrl=val, file=os.path.basename(ugtEntryXsd))
+                else:   # load calculations
+                    for ELR in calculationsInstance.relationshipSet(XbrlConst.summationItem).linkRoleUris:
+                        elrRelSet = calculationsInstance.relationshipSet(XbrlConst.summationItem, ELR)
+                        definition = ""
+                        for roleType in calculationsInstance.roleTypes.get(ELR,()):
+                            definition = roleType.definition
+                            break
+                        isStatementSheet = bool(val.linkroleDefinitionStatementSheet.match(definition))
+                        elrUgtCalcs = {"#roots": [c.name for c in elrRelSet.rootConcepts],
+                                       "#definition": definition,
+                                       "#isStatementSheet": isStatementSheet}
+                        for relFrom, rels in elrRelSet.fromModelObjects().items():
+                            elrUgtCalcs[relFrom.name] = [rel.toModelObject.name for rel in rels]
+                        val.usgaapCalculations[ELR] = elrUgtCalcs
                     jsonStr = _STR_UNICODE(json.dumps(val.usgaapCalculations, ensure_ascii=False, indent=0)) # might not be unicode in 2.7
-                    f.write(jsonStr)  # 2.7 gets unicode this way
-                calculationsInstance.close()
-                del calculationsInstance # dereference closed modelXbrl
-            val.modelXbrl.profileStat(_("build us-gaap calculations cache"), time.time() - startedAt)
+                    saveFile(cntlr, ugtCalcsJsonFile, jsonStr)  # 2.7 gets unicode this way
+                    calculationsInstance.close()
+                    del calculationsInstance # dereference closed modelXbrl
+                val.modelXbrl.profileStat(_("build us-gaap calculations cache"), time.time() - startedAt)
+            break
     val.deprecatedFactConcepts = defaultdict(list)
     val.deprecatedDimensions = defaultdict(list)
     val.deprecatedMembers = defaultdict(list)
@@ -141,14 +162,14 @@ def factCheck(val, fact):
                             modelObject=fact, fact=fact.qname, contextID=fact.contextID, value=fact.value)
                     
         # deprecated concept
-        if concept.qname.namespaceURI == ugtNamespace:
+        if concept.qname.namespaceURI == val.ugtNamespace:
             if concept.name in val.usgaapDeprecations:
                 val.deprecatedFactConcepts[concept].append(fact)
         elif concept.get("{http://fasb.org/us-gaap/attributes}deprecatedDate"):
             val.deprecatedFactConcepts[concept].append(fact)
         if fact.isItem and fact.context is not None:
             for dimConcept, modelDim in fact.context.segDimValues.items():
-                if dimConcept.qname.namespaceURI == ugtNamespace:
+                if dimConcept.qname.namespaceURI == val.ugtNamespace:
                     if dimConcept.name in val.usgaapDeprecations:
                         val.deprecatedDimensions[dimConcept].append(fact)
                 elif dimConcept.get("{http://fasb.org/us-gaap/attributes}deprecatedDate"):
@@ -156,7 +177,7 @@ def factCheck(val, fact):
                 if modelDim.isExplicit:
                     member = modelDim.member
                     if member is not None:
-                        if member.qname.namespaceURI == ugtNamespace:
+                        if member.qname.namespaceURI == val.ugtNamespace:
                             if member.name in val.usgaapDeprecations:
                                 val.deprecatedMembers[member].append(fact)
                         elif member.get("{http://fasb.org/us-gaap/attributes}deprecatedDate"):
@@ -168,6 +189,7 @@ def factCheck(val, fact):
             value=fact.effectiveValue, err=err)
 
 def final(val, conceptsUsed):
+    ugtNamespace = val.ugtNamespace
     startedAt = time.time()
     for depType, depItems in (("Concept", val.deprecatedFactConcepts),
                               ("Dimension", val.deprecatedDimensions),
@@ -195,11 +217,14 @@ def final(val, conceptsUsed):
                                if concept.isItem and 
                                qn.namespaceURI not in val.disclosureSystem.standardTaxonomiesDict
                                if concept not in conceptsUsed and
-                               (not concept.isAbstract or 
-                                # report a dimension which has no default and not used
-                                (concept.isDimensionItem and concept not in val.modelXbrl.dimensionDefaultConcepts) or
-                                # report a domain member which isn't default and isn't used
-                                (concept.type is not None and concept.type.isDomainItemType and concept not in dimensionDefaults))
+                                  # don't report dimension that has a default member
+                                  concept not in val.modelXbrl.dimensionDefaultConcepts and
+                                  # don't report default members
+                                  concept not in dimensionDefaults and
+                                  (concept.isDimensionItem or 
+                                   (concept.type is not None and concept.type.isDomainItemType) or
+                                   # this or branch only pertains to fact concepts
+                                   not concept.isAbstract)
                                ]
     if extensionConceptsUnused:
         for concept in sorted(extensionConceptsUnused, key=lambda c: str(c.qname)):
@@ -214,7 +239,7 @@ def final(val, conceptsUsed):
     for rel in standardRelationships.modelRelationships:
         for concept in (rel.fromModelObject, rel.toModelObject):
             if (concept is not None and
-                concept.namespaceURI in val.disclosureSystem.standardTaxonomiesDict and
+                concept.qname.namespaceURI in val.disclosureSystem.standardTaxonomiesDict and
                 concept not in conceptsUsed):
                 if (not concept.isAbstract or 
                     concept.isDimensionItem or 
@@ -238,11 +263,12 @@ def final(val, conceptsUsed):
                 _("Unused concept %(concept)s has extension relationships was deprecated on %(date)s"),
                 modelObject=locs, concept=concept.qname,
                 date=concept.get("{http://fasb.org/us-gaap/attributes}deprecatedDate"))
-        elif (not concept.isAbstract or 
-              # report a dimension which has no default and not used
-              (concept.isDimensionItem and concept not in val.modelXbrl.dimensionDefaultConcepts) or
-              # report a domain member which isn't default and isn't used
-              (concept.type is not None and concept.type.isDomainItemType and concept not in dimensionDefaults)):
+        elif (concept not in val.modelXbrl.dimensionDefaultConcepts and # don't report dimension that has a default member
+              concept not in dimensionDefaults and # don't report default members
+              (concept.isDimensionItem or 
+              (concept.type is not None and concept.type.isDomainItemType) or
+              # this or branch only pertains to fact concepts
+              not concept.isAbstract)):
             val.modelXbrl.log('INFO-SEMANTIC', "US-BPG.1.7.1.unusedStandardConceptInExtensionRelationship",
                 _("Company extension relationships of unused standard concept: %(concept)s"),
                 modelObject=locs, concept=concept.qname) 
@@ -266,6 +292,28 @@ def final(val, conceptsUsed):
     del val.deprecatedMembers
 
     if hasattr(val, 'usgaapCalculations'):
+        """
+        The UGT calcuations are loaded and cached from the 2012 US-GAAP.  
+        (This has to be updated!!!)
+        
+        UGT calculation link roles are presumed to (and do) reflect the statement sheets they 
+        correspond to, and therefore each set of UGT summation-item arc-sets are cached and 
+        identified as to whether a statement sheet or other. 
+        
+        A concept that has facts in the instance and is a total concept with summation-item 
+        arc-sets in UGT is examined if it appears on any submission face statement 
+        parent-child link role.  (No examination is made if the concept is only on 
+        non-face statements of the submission, even if on some UGT face statement.)
+        
+        Each UGT link role that has facts reported with a total concept has its 
+        summation-item arc-sets examained to see if any compatible pair of UGT total 
+        and item facts in the instance document do not have any submission calculation 
+        sibling or descendant relationship.  (Compatible here only means context and unit 
+        equivalence.)  Addition of descendancy in the submission was needed to avoid 
+        excessive false positives.  Each such issue is reported by filing parent-child 
+        link role, UGT calculation link role, contributing item, and total item.  The 
+        report of these items is sorted by contributing item.
+        """
         startedAt = time.time()
         # check for usgaap calculations missing from extension
         ugtTotalConceptNames = set(totalConceptName 
@@ -277,8 +325,8 @@ def final(val, conceptsUsed):
             if (totalConcept.qname.namespaceURI == ugtNamespace and
                 totalConcept.qname.localName in ugtTotalConceptNames and
                 any(val.linkroleDefinitionStatementSheet.match(roleType.definition)
-                   for rel in val.modelXbrl.relationshipSet(XbrlConst.parentChild).toModelObject(totalConcept)
-                   for roleType in val.modelXbrl.roleTypes.get(rel.linkrole,()))):
+                    for rel in val.modelXbrl.relationshipSet(XbrlConst.parentChild).toModelObject(totalConcept)
+                    for roleType in val.modelXbrl.roleTypes.get(rel.linkrole,()))):
                 # is it a total in usgaap-calculations on a statement
                 for ugtELR, ugtRels in val.usgaapCalculations.items():
                     if ugtRels["#isStatementSheet"] and totalConcept.name in ugtRels:
@@ -368,6 +416,7 @@ def final(val, conceptsUsed):
 
     del val.linroleDefinitionIsDisclosure
     del val.linkroleDefinitionStatementSheet
+    del val.ugtNamespace
     if hasattr(val, 'usgaapDeprecations'):
         del val.usgaapDeprecations
     if hasattr(val, 'usgaapCalculations'):
@@ -384,5 +433,5 @@ __pluginInfo__ = {
     # classes of mount points (required)
     'Validate.EFM.Start': setup,
     'Validate.EFM.Fact': factCheck,
-    'Validate.EFM.Finally': final,
+    'Validate.EFM.Finally': final
 }

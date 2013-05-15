@@ -7,6 +7,10 @@ qnXsdAppinfo = qname("{http://www.w3.org/2001/XMLSchema}xsd:appinfo")
 qnXsdDefaultType = qname("{http://www.w3.org/2001/XMLSchema}xsd:anyType")
 xsi = "http://www.w3.org/2001/XMLSchema-instance"
 qnXsiNil = qname(xsi,"xsi:nil") # need default prefix in qname
+builtinAttributes = {qnXsiNil,
+                     qname(xsi,"xsi:type"),
+                     qname(xsi,"xsi:schemaLocation")
+                     ,qname(xsi,"xsi:noNamespaceSchemaLocation")}
 xml = "http://www.w3.org/XML/1998/namespace"
 xbrli = "http://www.xbrl.org/2003/instance"
 qnXbrliXbrl = qname("{http://www.xbrl.org/2003/instance}xbrli:xbrl")
@@ -76,6 +80,9 @@ qnIXbrlTuple = qname("{http://www.xbrl.org/2008/inlineXBRL}tuple")
 qnIXbrlNonNumeric = qname("{http://www.xbrl.org/2008/inlineXBRL}nonNumeric")
 qnIXbrlNonFraction = qname("{http://www.xbrl.org/2008/inlineXBRL}nonFraction")
 qnIXbrlFraction = qname("{http://www.xbrl.org/2008/inlineXBRL}fraction")
+ixAttributes = set(qname(n, noPrefixIsNoNamespace=True)
+                   for n in ("escape", "footnoteRefs", "format", "name", "order", "scale", "sign", 
+                             "target", "tupleRef"))
 conceptLabel = "http://www.xbrl.org/2003/arcrole/concept-label"
 conceptReference = "http://www.xbrl.org/2003/arcrole/concept-reference"
 footnote = "http://www.xbrl.org/2003/role/footnote"
@@ -111,16 +118,17 @@ xlinkLinkbase = "http://www.w3.org/1999/xlink/properties/linkbase"
 
 utr = "http://www.xbrl.org/2009/utr"
 
-ver = "http://xbrl.org/2010/versioning-base"
+ver10 = "http://xbrl.org/2010/versioning-base"
 # 2010 names
 vercb = "http://xbrl.org/2010/versioning-concept-basic"
 verce = "http://xbrl.org/2010/versioning-concept-extended"
 verrels = "http://xbrl.org/2010/versioning-relationship-sets"
 veria = "http://xbrl.org/2010/versioning-instance-aspects"
-# 2012 names
-vercu = "http://xbrl.org/2010/versioning-concept-use"
-vercd = "http://xbrl.org/2010/versioning-concept-details"
-verdim = "http://xbrl.org/2010/versioning-dimensions"
+# 2013 names
+ver = "http://xbrl.org/2013/versioning-base"
+vercu = "http://xbrl.org/2013/versioning-concept-use"
+vercd = "http://xbrl.org/2013/versioning-concept-details"
+verdim = "http://xbrl.org/2013/versioning-dimensions"
 verPrefixNS = {"ver":ver,
                "vercu":vercu,
                "vercd":vercd,
@@ -368,11 +376,11 @@ def isNumericXsdType(xsdType):
     return xsdType in {"integer", "positiveInteger", "negativeInteger", "nonNegativeInteger", "nonPositiveInteger",
                        "long", "unsignedLong", "int", "unsignedInt", "short", "unsignedShort",
                        "byte", "unsignedByte", "decimal", "float", "double"}
-
-standardRoles = {   "http://www.xbrl.org/2003/role/label",
+    
+standardLabelRoles = {
+                    "http://www.xbrl.org/2003/role/label",
                     "http://www.xbrl.org/2003/role/terseLabel",
                     "http://www.xbrl.org/2003/role/verboseLabel",
-                    "http://www.xbrl.org/2003/role/link",
                     "http://www.xbrl.org/2003/role/positiveLabel",
                     "http://www.xbrl.org/2003/role/positiveTerseLabel",
                     "http://www.xbrl.org/2003/role/positiveVerboseLabel",
@@ -391,7 +399,9 @@ standardRoles = {   "http://www.xbrl.org/2003/role/label",
                     "http://www.xbrl.org/2003/role/presentationGuidance",
                     "http://www.xbrl.org/2003/role/measurementGuidance",
                     "http://www.xbrl.org/2003/role/commentaryGuidance",
-                    "http://www.xbrl.org/2003/role/exampleGuidance",
+                    "http://www.xbrl.org/2003/role/exampleGuidance"}
+
+standardReferenceRoles = {
                     "http://www.xbrl.org/2003/role/reference",
                     "http://www.xbrl.org/2003/role/definitionRef",
                     "http://www.xbrl.org/2003/role/disclosureRef",
@@ -401,12 +411,17 @@ standardRoles = {   "http://www.xbrl.org/2003/role/label",
                     "http://www.xbrl.org/2003/role/presentationRef",
                     "http://www.xbrl.org/2003/role/measurementRef",
                     "http://www.xbrl.org/2003/role/commentaryRef",
-                    "http://www.xbrl.org/2003/role/exampleRef",
+                    "http://www.xbrl.org/2003/role/exampleRef"}
+
+standardLinkbaseRefRoles = {
                     "http://www.xbrl.org/2003/role/calculationLinkbaseRef",
                     "http://www.xbrl.org/2003/role/definitionLinkbaseRef",
                     "http://www.xbrl.org/2003/role/labelLinkbaseRef",
                     "http://www.xbrl.org/2003/role/presentationLinkbaseRef",
-                    "http://www.xbrl.org/2003/role/referenceLinkbaseRef",
+                    "http://www.xbrl.org/2003/role/referenceLinkbaseRef"}
+
+standardRoles = standardLabelRoles | standardReferenceRoles | standardLinkbaseRefRoles | {   
+                    "http://www.xbrl.org/2003/role/link",
                     "http://www.xbrl.org/2003/role/footnote"}
 
 def isStandardRole(role):

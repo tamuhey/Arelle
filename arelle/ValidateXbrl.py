@@ -64,7 +64,7 @@ class ValidateXbrl:
         self.validateUTR = (modelXbrl.modelManager.validateUtr or
                             (self.parameters and self.parameters.get(qname("forceUtrValidation",noPrefixIsNoNamespace=True),(None,"false"))[1] == "true") or
                             (self.validateEFM and 
-                             any((concept.namespaceURI in self.disclosureSystem.standardTaxonomiesDict) 
+                             any((concept.qname.namespaceURI in self.disclosureSystem.standardTaxonomiesDict) 
                                  for concept in self.modelXbrl.nameConcepts.get("UTR",()))))
         
         for pluginXbrlMethod in pluginClassMethods("Validate.XBRL.Start"):
@@ -268,20 +268,21 @@ class ValidateXbrl:
             elif arcrole == XbrlConst.parentChild:
                 for modelRel in relsSet.modelRelationships:
                     preferredLabel = modelRel.preferredLabel
+                    fromConcept = modelRel.fromModelObject
                     toConcept = modelRel.toModelObject
-                    if preferredLabel is not None and toConcept is not None:
+                    if preferredLabel is not None and fromConcept is not None and toConcept is not None:
                         label = toConcept.label(preferredLabel=preferredLabel,fallbackToQname=False,strip=True)
                         if label is None:
                             modelXbrl.error("xbrl.5.2.4.2.1:preferredLabelMissing",
                                 _("Presentation relationship from %(source)s to %(target)s in link role %(linkrole)s missing preferredLabel %(preferredLabel)s"),
                                 modelObject=modelRel,
-                                source=modelRel.fromModelObject.qname, target=toConcept.qname, linkrole=ELR, 
+                                source=fromConcept.qname, target=toConcept.qname, linkrole=ELR, 
                                 preferredLabel=preferredLabel)
                         elif not label: # empty string
                             modelXbrl.info("arelle:info.preferredLabelEmpty",
                                 _("(Info xbrl.5.2.4.2.1) Presentation relationship from %(source)s to %(target)s in link role %(linkrole)s has empty preferredLabel %(preferredLabel)s"),
                                 modelObject=modelRel,
-                                source=modelRel.fromModelObject.qname, target=toConcept.qname, linkrole=ELR, 
+                                source=fromConcept.qname, target=toConcept.qname, linkrole=ELR, 
                                 preferredLabel=preferredLabel)
             # check essence-alias relationships
             elif arcrole == XbrlConst.essenceAlias:

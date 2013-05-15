@@ -4,12 +4,15 @@ Created on Oct 20, 2010
 @author: Mark V Systems Limited
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
-import zipfile, os, io, base64, gzip, zlib, re, struct
+import zipfile, os, io, base64, gzip, zlib, re, struct, random, time
 from lxml import etree
 from arelle import XmlUtil
 
 archivePathSeparators = (".zip" + os.sep, ".eis" + os.sep, ".xml" + os.sep, ".xfd" + os.sep, ".frm" + os.sep) + \
                         ((".zip/", ".eis/", ".xml/", ".xfd/", ".frm/") if os.sep != "/" else ()) #acomodate windows and http styles
+
+POST_UPLOADED_ZIP = os.sep + "POSTupload.zip"
+SERVER_WEB_CACHE = os.sep + "_HTTP_CACHE"
 
 XMLdeclaration = re.compile(r"<\?xml[^><\?]*\?>", re.DOTALL)
 
@@ -17,7 +20,7 @@ TAXONOMY_PACKAGE_FILE_NAME = '.taxonomyPackage.xml'
 
 def openFileSource(filename, cntlr=None, sourceZipStream=None, checkIfXmlIsEis=False):
     if sourceZipStream:
-        filesource = FileSource(os.sep + "POSTupload.zip", cntlr)
+        filesource = FileSource(POST_UPLOADED_ZIP, cntlr)
         filesource.openZipStream(sourceZipStream)
         filesource.select(filename)
         return filesource
@@ -36,7 +39,8 @@ def openFileSource(filename, cntlr=None, sourceZipStream=None, checkIfXmlIsEis=F
 def archiveFilenameParts(filename, checkIfXmlIsEis=False):
     # check if path has an archive file plus appended in-archive content reference
     for archiveSep in archivePathSeparators:
-        if (archiveSep in filename and
+        if (filename and 
+            archiveSep in filename and
             (not archiveSep.startswith(".xml") or checkIfXmlIsEis)):
             filenameParts = filename.partition(archiveSep)
             fileDir = filenameParts[0] + archiveSep[:-1]
@@ -83,7 +87,7 @@ class FileSource:
             self.type == ".xml" and
             checkIfXmlIsEis):
             try:
-                file = open(self.cntlr.webCache.getfilename(self.url), 'r')
+                file = open(self.cntlr.webCache.getfilename(self.url), 'r', errors='replace')
                 l = file.read(128)
                 file.close()
                 if re.match(r"\s*(<[?]xml[^?]+[?]>)?\s*<cor[a-z]*:edgarSubmission", l):
@@ -108,7 +112,7 @@ class FileSource:
                 return  # an error should have been logged
             if self.isZip:
                 try:
-                    self.fs = zipfile.ZipFile(self.basefile, mode="r")
+                    self.fs = zipfile.ZipFile(openFileStream(self.cntlr, self.basefile, 'rb'), mode="r")
                     self.isOpen = True
                 except EnvironmentError as err:
                     self.logError(err)
@@ -227,7 +231,6 @@ class FileSource:
             self.baseurl = self.url # url gets changed by selection
             self.fs = zipfile.ZipFile(sourceZipStream, mode="r")
             self.isOpen = True    
-                    
             
     def close(self):
         if self.referencedFileSources:
@@ -366,27 +369,9 @@ class FileSource:
                                     encoding)
                 raise ArchiveFileIOError(self, archiveFileName)
         if binary:
-            return (io.open(filepath, 'rb'), )
-        # check encoding
-        with open(filepath, 'rb') as fb:
-            hdrBytes = fb.read(512)
-            encoding = XmlUtil.encoding(hdrBytes)
-            if encoding.lower() in ('utf-8','utf8'):
-                text = None
-            else:
-                fb.seek(0)
-                text = fb.read().decode(encoding)
-            # allow filepath to close
-        # this may not be needed for Mac or Linux, needs confirmation!!!
-        if text is None:  # ok to read as utf-8
-            return io.open(filepath, 'rt', encoding='utf-8'), encoding
+            return (openFileStream(self.cntlr, filepath, 'rb'), )
         else:
-            # strip XML declaration
-            xmlDeclarationMatch = XMLdeclaration.search(text)
-            if xmlDeclarationMatch: # remove it for lxml
-                start,end = xmlDeclarationMatch.span()
-                text = text[0:start] + text[end:]
-            return (io.StringIO(initial_value=text), encoding)
+            return openXmlFileStream(self.cntlr, filepath)
 
     
     @property
@@ -456,3 +441,140 @@ class FileSource:
             self.url = self.baseurl + "/" + selection
         else: # MSFT os.sep == '\\'
             self.url = self.baseurl + os.sep + selection.replace("/", os.sep)
+            
+def openFileStream(cntlr, filepath, mode='r', encoding=None):
+    if filepath.startswith("http://") and cntlr:
+        filepath = cntlr.webCache.getfilename(filepath)
+    # file path may be server (or memcache) or local file system
+    if filepath.startswith(SERVER_WEB_CACHE) and cntlr:
+        filestream = None
+        cacheKey = filepath[len(SERVER_WEB_CACHE) + 1:].replace("\\","/")
+        if cntlr.isGAE: # check if in memcache
+            cachedBytes = gaeGet(cacheKey)
+            if cachedBytes:
+                filestream = io.BytesIO(cachedBytes)
+        if filestream is None:
+            filestream = io.BytesIO()
+            cntlr.webCache.retrieve(cntlr.webCache.cacheFilepathToUrl(filepath),
+                                    filestream=filestream)
+            if cntlr.isGAE:
+                gaeSet(cacheKey, filestream.getvalue())
+        if mode.endswith('t') or encoding:
+            contents = filestream.getvalue()
+            filestream.close()
+            filestream = io.StringIO(contents.decode(encoding or 'utf-8'))
+        return filestream
+    else:
+        # local file system
+        return io.open(filepath, mode=mode, encoding=encoding)
+    
+def openXmlFileStream(cntlr, filepath, stripDeclaration=False):
+    # returns tuple: (fileStream, encoding)
+    openedFileStream = openFileStream(cntlr, filepath, 'rb')
+    # check encoding
+    hdrBytes = openedFileStream.read(512)
+    encoding = XmlUtil.encoding(hdrBytes)
+    if encoding.lower() in ('utf-8','utf8') and (cntlr is None or not cntlr.isGAE) and not stripDeclaration:
+        text = None
+        openedFileStream.close()
+    else:
+        openedFileStream.seek(0)
+        text = openedFileStream.read().decode(encoding)
+        openedFileStream.close()
+        # allow filepath to close
+    # this may not be needed for Mac or Linux, needs confirmation!!!
+    if text is None:  # ok to read as utf-8
+        return io.open(filepath, 'rt', encoding='utf-8'), encoding
+    else:
+        # strip XML declaration
+        xmlDeclarationMatch = XMLdeclaration.search(text)
+        if xmlDeclarationMatch: # remove it for lxml
+            start,end = xmlDeclarationMatch.span()
+            text = text[0:start] + text[end:]
+        return (io.StringIO(initial_value=text), encoding)
+    
+def saveFile(cntlr, filepath, contents, encoding=None):
+    if filepath.startswith("http://"):
+        filepath = cntlr.webCache.getfilename(filepath)
+    # file path may be server (or memcache) or local file system
+    if filepath.startswith(SERVER_WEB_CACHE):
+        cacheKey = filepath[len(SERVER_WEB_CACHE) + 1:].replace("\\","/")
+        if cntlr.isGAE: # check if in memcache
+            gaeSet(cacheKey, contents.encode(encoding or 'utf-8'))
+    else:
+        with io.open(filepath, 'wt', encoding=(encoding or 'utf-8')) as f:
+            f.write(contents)
+                          
+# GAE Blobcache
+gaeMemcache = None
+GAE_MEMCACHE_MAX_ITEM_SIZE = 900 * 1024
+GAE_EXPIRE_WEEK = 60 * 60 * 24 * 7 # one week
+
+def gaeGet(key):
+    # returns bytes (not string) value
+    global gaeMemcache
+    if gaeMemcache is None:
+        from google.appengine.api import memcache as gaeMemcache
+    chunk_keys = gaeMemcache.get(key)
+    if chunk_keys is None:
+        return None
+    chunks = []
+    if isinstance(chunk_keys, _STR_BASE):
+        chunks.append(chunk_keys)  # only one shard
+    else:
+        for chunk_key in chunk_keys:
+            # TODO: use memcache.get_multi() for speedup.
+            # Don't forget about the batch operation size limit (currently 32Mb).
+            chunk = gaeMemcache.get(chunk_key)
+            if chunk is None:
+                return None
+            chunks.append(chunk)
+    try:
+        return zlib.decompress(b''.join(chunks)) # must be bytes join, not unicode
+    except zlib.error:
+        return None
+
+
+def gaeDelete(key):
+    chunk_keys = gaeMemcache.get(key)
+    if chunk_keys is None:
+        return False
+    if isinstance(chunk_keys, _STR_BASE):
+        chunk_keys = []
+    chunk_keys.append(key)
+    gaeMemcache.delete_multi(chunk_keys)
+    return True
+
+
+def gaeSet(key, bytesValue): # stores bytes, not string valye
+    global gaeMemcache
+    if gaeMemcache is None:
+        from google.appengine.api import memcache as gaeMemcache
+    compressedValue = zlib.compress(bytesValue)
+    
+    # delete previous entity with the given key
+    # in order to conserve available memcache space.
+    gaeDelete(key)
+    
+    valueSize = len(compressedValue)
+    if valueSize < GAE_MEMCACHE_MAX_ITEM_SIZE: # only one segment
+        return gaeMemcache.set(key, compressedValue, time=GAE_EXPIRE_WEEK)
+    # else store in separate chunk shards
+    chunkKeys = []
+    for pos in range(0, valueSize, GAE_MEMCACHE_MAX_ITEM_SIZE):
+        # TODO: use memcache.set_multi() for speedup, but don't forget
+        # about batch operation size limit (32Mb currently).
+        chunk = compressedValue[pos:pos + GAE_MEMCACHE_MAX_ITEM_SIZE]
+        
+        # the pos is used for reliable distinction between chunk keys.
+        # the random suffix is used as a counter-measure for distinction
+        # between different values, which can be simultaneously written
+        # under the same key.
+        chunkKey = '%s%d%d' % (key, pos, random.getrandbits(31))
+        isSuccess = gaeMemcache.set(chunkKey, chunk, time=GAE_EXPIRE_WEEK)
+        if not isSuccess:
+            return False
+        chunkKeys.append(chunkKey)
+    return gaeMemcache.set(key, chunkKeys, time=GAE_EXPIRE_WEEK)
+
+
