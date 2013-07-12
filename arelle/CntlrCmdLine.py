@@ -166,6 +166,7 @@ def parseAndRun(args):
     parser.add_option("--logCodeFilter", action="store", dest="logCodeFilter",
                       help=_("Regular expression filter for log message code."))
     parser.add_option("--logcodefilter", action="store", dest="logCodeFilter", help=SUPPRESS_HELP)
+    parser.add_option("--showOptions", action="store_true", dest="showOptions", help=SUPPRESS_HELP)
     parser.add_option("--parameters", action="store", dest="parameters", help=_("Specify parameters for formula and validation (name=value[,name=value])."))
     parser.add_option("--parameterSeparator", action="store", dest="parameterSeparator", help=_("Specify parameters separator string (if other than comma)."))
     parser.add_option("--parameterseparator", action="store", dest="parameterSeparator", help=SUPPRESS_HELP)
@@ -208,6 +209,8 @@ def parseAndRun(args):
     parser.add_option("--internetTimeout", type="int", dest="internetTimeout", 
                       help=_("Specify internet connection timeout in seconds (0 means unlimited)."))
     parser.add_option("--internettimeout", type="int", action="store", dest="internetTimeout", help=SUPPRESS_HELP)
+    parser.add_option("--xdgConfigHome", action="store", dest="xdgConfigHome", 
+                      help=_("Specify non-standard location for configuration and cache files (overrides environment parameter XDG_CONFIG_HOME)."))
     parser.add_option("--plugins", action="store", dest="plugins",
                       help=_("Modify plug-in configuration.  "
                              "Re-save unless 'temp' is in the module list.  " 
@@ -218,13 +221,15 @@ def parseAndRun(args):
                              " (e.g., '+http://arelle.org/files/hello_web.py', '+C:\Program Files\Arelle\examples\plugin\hello_dolly.py' to load, "
                              "or +../examples/plugin/hello_dolly.py for relative use of examples directory, "
                              "~Hello Dolly to reload, -Hello Dolly to remove).  "
-                             "If + is omitted from .py file nothing is saved (same as temp).  " ))
+                             "If + is omitted from .py file nothing is saved (same as temp).  "
+                             "Packaged plug-in urls are their directory's url.  " ))
     parser.add_option("--abortOnMajorError", action="store_true", dest="abortOnMajorError", help=_("Abort process on major error, such as when load is unable to find an entry or discovered file."))
     parser.add_option("--collectProfileStats", action="store_true", dest="collectProfileStats", help=_("Collect profile statistics, such as timing of validation activities and formulae."))
     if hasWebServer:
         parser.add_option("--webserver", action="store", dest="webserver",
                           help=_("start web server on host:port[:server] for REST and web access, e.g., --webserver locahost:8080, "
-                                 "or specify nondefault a server name, such as cherrypy, --webserver locahost:8080:cherrypy"))
+                                 "or specify nondefault a server name, such as cherrypy, --webserver locahost:8080:cherrypy. "
+                                 "(It is possible to specify options to be defaults for the web server, such as disclosureSystem and validations, but not including file names.) "))
     pluginOptionsIndex = len(parser.option_list)
     for optionsExtender in pluginClassMethods("CntlrCmdLine.Options"):
         optionsExtender(parser)
@@ -235,6 +240,25 @@ def parseAndRun(args):
     
     if args is None and cntlr.isGAE:
         args = ["--webserver=::gae"]
+    elif cntlr.isMSW:
+        # if called from java on Windows any empty-string arguments are lost, see:
+        # http://bugs.sun.com/view_bug.do?bug_id=6518827
+        # insert needed arguments
+        args = []
+        namedOptions = set()
+        optionsWithArg = set()
+        for option in parser.option_list:
+            names = str(option).split('/')
+            namedOptions.update(names)
+            if option.action == "store":
+                optionsWithArg.update(names)
+        priorArg = None
+        for arg in sys.argv[1:]:
+            if priorArg in optionsWithArg and arg in namedOptions:
+                # probable java/MSFT interface bug 6518827
+                args.append('')  # add empty string argument
+            args.append(arg)
+            priorArg = arg
         
     (options, leftoverArgs) = parser.parse_args(args)
     if options.about:
@@ -272,17 +296,11 @@ def parseAndRun(args):
                                      (not hasWebServer or options.webserver is None))):
         parser.error(_("incorrect arguments, please try\n  python CntlrCmdLine.py --help"))
     elif hasWebServer and options.webserver:
+        # webserver incompatible with file operations
         if any((options.entrypointFile, options.importFiles, options.diffFile, options.versReportFile,
-                options.validate, options.calcDecimals, options.calcPrecision, options.validateEFM, options.validateHMRC, options.disclosureSystemName,
-                options.utrValidate, options.infosetValidate, options.DTSFile, options.factsFile, options.factListCols, options.factTableFile,
+                options.factsFile, options.factListCols, options.factTableFile,
                 options.conceptsFile, options.preFile, options.calFile, options.dimFile, options.formulaeFile, options.viewArcrole, options.viewFile,
-                options.logFile, options.logFormat, options.logLevel, options.logLevelFilter, options.logCodeFilter, options.formulaParamExprResult, options.formulaParamInputValue,
-                options.formulaCallExprSource, options.formulaCallExprCode, options.formulaCallExprEval,
-                options.formulaCallExprResult, options.formulaVarSetExprEval, options.formulaVarSetExprResult,
-                options.formulaAsserResultCounts, options.formulaFormulaRules, options.formulaVarsOrder,
-                options.formulaVarExpressionSource, options.formulaVarExpressionCode, options.formulaVarExpressionEvaluation,
-                options.formulaVarExpressionResult, options.formulaVarFiltersResult,
-                options.proxy, options.plugins)):
+                )):
             parser.error(_("incorrect arguments with --webserver, please try\n  python CntlrCmdLine.py --help"))
         else:
             cntlr.startLogging(logFileName='logToBuffer')
@@ -316,6 +334,10 @@ class CntlrCmdLine(Cntlr.Cntlr):
         :param options: OptionParser options from parse_args of main argv arguments (when called from command line) or corresponding arguments from web service (REST) request.
         :type options: optparse.Values
         """
+        if options.showOptions: # debug options
+            for optName, optValue in sorted(options.__dict__.items(), key=lambda optItem: optItem[0]):
+                self.addToLog("Option {0}={1}".format(optName, optValue), messageCode="info")
+            self.addToLog("sys.argv {0}".format(sys.argv), messageCode="info")
         if options.uiLang: # set current UI Lang (but not config setting)
             self.setUiLanguage(options.uiLang)
         if options.proxy:
@@ -371,7 +393,7 @@ class CntlrCmdLine(Cntlr.Cntlr):
                         resetPlugins = True
                     else:
                         self.addToLog(_("Unable to delete plug-in."), messageCode="info", file=cmd[1:])
-                elif cmd.endswith(".py"):
+                else: # assume it is a module or package
                     savePluginChanges = False
                     moduleInfo = PluginManager.addPluginModule(cmd)
                     if moduleInfo:
@@ -379,9 +401,7 @@ class CntlrCmdLine(Cntlr.Cntlr):
                                       messageCode="info", file=moduleInfo.get("moduleURL"))
                         resetPlugins = True
                     else:
-                        self.addToLog(_("Unable to load plug-in."), messageCode="info", file=cmd)
-                else:
-                    self.addToLog(_("Plug-in action not recognized (may need +uri or [~-]module."), messageCode="info", file=cmd)
+                        self.addToLog(_("Unable to load {0} as a plug-in or {0} is not recognized as a command. ").format(cmd), messageCode="info", file=cmd)
                 if resetPlugins:
                     PluginManager.reset()
                     if savePluginChanges:

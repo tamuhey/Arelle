@@ -114,7 +114,16 @@ class Cntlr:
             self.localeDir = os.path.join(self.moduleDir, "locale")
             self.pluginDir = os.path.join(self.moduleDir, "plugin")
         
-        configHomeDir = os.getenv('XDG_CONFIG_HOME')
+        configHomeDir = None  # look for path configDir/CONFIG_HOME in argv and environment parameters
+        for i, arg in enumerate(sys.argv):  # check if config specified in a argv 
+            if arg.startswith("--xdgConfigHome="):
+                configHomeDir = arg[16:]
+                break
+            elif arg == "--xdgConfigHome" and i + 1 < len(sys.argv):
+                configHomeDir = sys.argv[i + 1]
+                break
+        if not configHomeDir: # not in argv, may be an environment parameter
+            configHomeDir = os.getenv('XDG_CONFIG_HOME')
         if not configHomeDir:  # look for path configDir/CONFIG_HOME
             configHomeDirFile = os.path.join(self.configDir, "XDG_CONFIG_HOME")
             if os.path.exists(configHomeDirFile):
@@ -180,9 +189,10 @@ class Cntlr:
             if serverSoftware.startswith("Google App Engine/") or serverSoftware.startswith("Development/"):
                 self.hasFileSystem = False # no file system, userAppDir does not exist
                 self.isGAE = True
-            elif not configHomeDir:
-                self.userAppDir = os.path.join( os.path.expanduser("~/.config"), "arelle")
+            else:
                 self.isGAE = False
+                if not configHomeDir:
+                    self.userAppDir = os.path.join( os.path.expanduser("~/.config"), "arelle")
             if hasGui:
                 try:
                     import gtk

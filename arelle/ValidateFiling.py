@@ -14,6 +14,7 @@ from arelle.ModelObject import ModelObject
 from arelle.ModelInstanceObject import ModelFact
 from arelle.ModelDtsObject import ModelConcept
 from arelle.PluginManager import pluginClassMethods
+from arelle.UrlUtil import isHttpUrl
 
 datePattern = None
 linkroleDefinitionStatementSheet = None
@@ -86,8 +87,10 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
         self.entityRegistrantName = None
         self.requiredContext = None
         self.standardNamespaceConflicts = defaultdict(set)
+        self.exhibitType = None # e.g., EX-101, EX-201
         if modelXbrl.modelDocument.type == ModelDocument.Type.INSTANCE or \
            modelXbrl.modelDocument.type == ModelDocument.Type.INLINEXBRL:
+            instanceName = modelXbrl.modelDocument.basename
             
             # parameter-provided CIKs and registrant names
             paramFilerIdentifier = None
@@ -111,6 +114,9 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                 p = self.parameters.get(ModelValue.qname("submissionType",noPrefixIsNoNamespace=True))
                 if p and len(p) == 2:
                     submissionType = p[1]
+                p = self.parameters.get(ModelValue.qname("exhibitType",noPrefixIsNoNamespace=True))
+                if p and len(p) == 2:
+                    self.exhibitType = p[1]
                         
 
             #6.3.3 filename check
@@ -119,18 +125,18 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                 self.fileNameBasePart = m.group(1)
                 self.fileNameDatePart = m.group(2)
                 if not self.fileNameBasePart:
-                    modelXbrl.error(("EFM.6.03.03", "GFM.1.01.01"),
+                    modelXbrl.error((self.EFM60303, "GFM.1.01.01"),
                         _('Invalid instance document base name part (ticker or mnemonic name) in "{base}-{yyyymmdd}.xml": %(filename)s'),
                         modelObject=modelXbrl.modelDocument, filename=modelXbrl.modelDocument.basename)
                 else:
                     try:
                         self.fileNameDate = datetime.datetime.strptime(self.fileNameDatePart,"%Y%m%d").date()
                     except ValueError:
-                        modelXbrl.error(("EFM.6.03.03", "GFM.1.01.01"),
+                        modelXbrl.error((self.EFM60303, "GFM.1.01.01"),
                             _('Invalid instance document base name part (date) in "{base}-{yyyymmdd}.xml": %(filename)s'),
                             modelObject=modelXbrl.modelDocument, filename=modelXbrl.modelDocument.basename)
             else:
-                modelXbrl.error(("EFM.6.03.03", "GFM.1.01.01"),
+                modelXbrl.error((self.EFM60303, "GFM.1.01.01"),
                     _('Invalid instance document name, must match "{base}-{yyyymmdd}.xml": %(filename)s'),
                     modelObject=modelXbrl.modelDocument, filename=modelXbrl.modelDocument.basename)
             
@@ -262,9 +268,11 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
             amendmentFlag = None
             amendmentFlagFact = None
             documentPeriodEndDate = None
+            documentPeriodEndDateFact = None
             documentType = None
             documentTypeFact = None
             deiItems = {}
+            deiFacts = {}
             commonSharesItemsByStockClass = defaultdict(list)
             commonSharesClassMembers = None
             hasDefinedStockAxis = False
@@ -282,7 +290,8 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                 "EntityWellKnownSeasonedIssuer", 
                 "EntityPublicFloat", 
                 disclosureSystem.deiDocumentFiscalYearFocusElement, 
-                "DocumentFiscalPeriodFocus"
+                "DocumentFiscalPeriodFocus",
+                "EntityReportingCurrencyISOCode", # for SD 
                  }
             #6.5.8 unused contexts
             for f in modelXbrl.facts:
@@ -310,6 +319,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                                 amendmentDescriptionFact = f
                             elif factElementName == disclosureSystem.deiDocumentPeriodEndDateElement:
                                 documentPeriodEndDate = value
+                                documentPeriodEndDateFact = f
                                 commonStockMeasurementDatetime = context.endDatetime
                             elif factElementName == "DocumentType":
                                 documentType = value
@@ -342,6 +352,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                                             prefix=prefix, value=value)
                             elif factElementName in deiCheckLocalNames:
                                 deiItems[factElementName] = value
+                                deiFacts[factElementName] = f
                                 if (self.requiredContext is None and context.isStartEndPeriod and
                                     context.startDatetime is not None and context.endDatetime is not None):
                                     self.requiredContext = context
@@ -705,6 +716,8 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                                             "F-1",
                                             "F-6",
                                             "POS AM",
+                                            "SD",
+                                            "SD/A",
                                             "S-20",
                                             "S-B",
                                             "F-4",
@@ -735,6 +748,8 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                                             "S-4",
                                             "S-4EF",
                                             "S-4MEF",
+                                            "SD",
+                                            "SD/A",
                                             "SP 15D2",
                                             "SP 15D2/A"
                                           }:
@@ -743,185 +758,112 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                         modelObject=documentTypeFact, contextID=documentTypeFact.contextID, documentType=documentType)
                 elif submissionType:
                     expectedDocumentTypes = { 
-                                            "10-12B": (	"10-12B",
-                                                "Other"),
-                                            "10-12B/A": (	"10-12B/A",
-                                                "Other"),
-                                            "10-12G": (	"10-12G",
-                                                "Other"),
-                                            "10-12G/A": (	"10-12G/A",
-                                                "Other"),
-                                            "10-K": (	"10-K"),
-                                            "10-K/A": (	"10-K",
-                                                "10-K/A"),
-                                            "10-KT": (	"10-K",
-                                                "10-KT",
-                                                "Other"),
-                                            "10-KT/A": (	"10-K", "10-KT",
-                                                "10-KT/A",
-                                                "Other"),
-                                            "10-Q": (	"10-Q"),
-                                            "10-Q/A": (	"10-Q",
-                                                "10-Q/A"),
-                                            "10-QT": (	"10-Q",
-                                                "10-QT",
-                                                "Other"),
-                                            "10-QT/A": (	"10-Q", "10-QT",
-                                                "10-QT/A",
-                                                "Other"),
-                                            "20-F": (	"20-F"),
-                                            "20-F/A": (	"20-F",
-                                                "20-F/A"),
-                                            "20FR12B": (	"20FR12B",
-                                                "Other"),
-                                            "20FR12B/A": (	"20FR12B/A",
-                                                "Other"),
-                                            "20FR12G": (	"20FR12G",
-                                                "Other"),
-                                            "20FR12G/A": (	"20FR12G/A",
-                                                "Other"),
-                                            "40-F": (	"40-F"),
-                                            "40-F/A": (	"40-F",
-                                                "40-F/A"),
-                                            "40FR12B": (	"40FR12B",
-                                                "Other"),
-                                            "40FR12B/A": (	"40FR12B/A",
-                                                "Other"),
-                                            "40FR12G": (	"40FR12G",
-                                                "Other"),
-                                            "40FR12G/A": (	"40FR12G/A",
-                                                "Other"),
-                                            "485BPOS": (	"485BPOS"),
-                                            "497": (	"497",
-                                                "Other"),
-                                            "6-K": (	"6-K"),
-                                            "6-K/A": (	"6-K",
-                                                "6-K/A"),
-                                            "8-K": (	"8-K"),
-                                            "8-K/A": (	"8-K",
-                                                "8-K/A"),
-                                            "8-K12B": (	"8-K12B",
-                                                "Other"),
-                                            "8-K12B/A": (	"8-K12B/A",
-                                                "Other"),
-                                            "8-K12G3": (	"8-K12G3",
-                                                "Other"),
-                                            "8-K12G3/A": (	"8-K12G3/A",
-                                                "Other"),
-                                            "8-K15D5": (	"8-K15D5",
-                                                "Other"),
-                                            "8-K15D5/A": (	"8-K15D5/A",
-                                                "Other"),
-                                            "F-1": (	"F-1"),
-                                            "F-1/A": (	"F-1",
-                                                "F-1/A"),
-                                            "F-10": (	"F-10"),
-                                            "F-10/A": (	"F-10",
-                                                "F-10/A"),
-                                            "F-10EF": (	"F-10EF",
-                                                "Other"),
-                                            "F-10POS": (	"F-10POS",
-                                                "Other"),
-                                            "F-1MEF": (	"F-1MEF"),
-                                            "F-3": (	"F-3"),
-                                            "F-3/A": (	"F-3",
-                                                "F-3/A"),
-                                            "F-3ASR": (	"F-3",
-                                                "F-3ASR"),
-                                            "F-3D": (	"F-3",
-                                                "F-3D"),
-                                            "F-3DPOS": (	"F-3",
-                                                "F-3DPOS"),
-                                            "F-3MEF": (	"F-3MEF"),
-                                            "F-4": (	"F-4"),
-                                            "F-4 POS": (	"F-4",
-                                                "F-4 POS"),
-                                            "F-4/A": (	"F-4",
-                                                "F-4/A"),
-                                            "F-4EF": (	"F-4",
-                                                "F-4EF"),
-                                            "F-4MEF": (	"F-4MEF"),
-                                            "F-9": (	"F-9"),
-                                            "F-9 POS": (	"F-9",
-                                                "F-9 POS"),
-                                            "F-9/A": (	"F-9",
-                                                "F-9/A"),
-                                            "F-9EF": (	"F-9",
-                                                "F-9EF"),
-                                            "N-1A": (	"N-1A"),
-                                            "N-1A/A": (	"N-1A/A",
-                                                "Other"),
-                                            "N-CSR": (	"N-CSR"),
-                                            "N-CSR/A": (	"N-CSR/A"),
-                                            "N-CSRS": (	"N-CSRS"),
-                                            "N-CSRS/A": (	"N-CSRS/A"),
-                                            "N-Q": (	"N-Q"),
-                                            "N-Q/A": (	"N-Q/A"),
-                                            "POS AM": (	"F-1",
-                                                "F-3",
-                                                "F-4",
-                                                "F-6",
-                                                "Other",
-                                                "POS AM",
-                                                "S-1",
-                                                "S-11",
-                                                "S-20",
-                                                "S-3",
-                                                "S-4",
-                                                "S-B"),
-                                            "POS EX": (	"F-3",
-                                                "F-4",
-                                                "Other",
-                                                "POS EX",
-                                                "S-1",
-                                                "S-3",
-                                                "S-4"),
-                                            "POS462B": (	"F-1MEF",
-                                                "F-3MEF",
-                                                "F-4MEF",
-                                                "Other",
-                                                "POS462B",
-                                                "POS462C",
-                                                "S-11MEF",
-                                                "S-1MEF",
-                                                "S-3MEF",
-                                                "S-BMEF"),
-                                            "POSASR": (	"F-3",
-                                                "Other",
-                                                "POSASR",
-                                                "S-3"),
-                                            "S-1": (	"S-1"),
-                                            "S-1/A": (	"S-1",
-                                                "S-1/A"),
-                                            "S-11": (	"S-11"),
-                                            "S-11/A": (	"S-11/A"),
-                                            "S-11MEF": (	"S-11MEF"),
-                                            "S-1MEF": (	"S-1MEF"),
-                                            "S-3": (	"S-3"),
-                                            "S-3/A": (	"S-3",
-                                                "S-3/A"),
-                                            "S-3ASR": (	"S-3",
-                                                "S-3ASR"),
-                                            "S-3D": (	"S-3",
-                                                "S-3D"),
-                                            "S-3DPOS": (	"S-3",
-                                                "S-3DPOS"),
-                                            "S-3MEF": (	"S-3MEF"),
-                                            "S-4": (	"S-4"),
-                                            "S-4 POS": (	"S-4",
-                                                "S-4 POS"),
-                                            "S-4/A": (	"S-4",
-                                                "S-4/A"),
-                                            "S-4EF": (	"S-4",
-                                                "S-4EF"),
-                                            "S-4MEF": (	"S-4MEF"),
-                                            "SP 15D2": (	"SP 15D2"),
-                                            "SP 15D2/A": (	"SP 15D2/A")
+                                            "10-12B": ("10-12B", "Other"),
+                                            "10-12B/A": ("10-12B/A", "Other"),
+                                            "10-12G": ("10-12G", "Other"),
+                                            "10-12G/A": ("10-12G/A", "Other"),
+                                            "10-K": ("10-K",),
+                                            "10-K/A": ("10-K", "10-K/A"),
+                                            "10-KT": ("10-K","10-KT","Other"),
+                                            "10-KT/A": ("10-K", "10-KT", "10-KT/A", "Other"),
+                                            "10-Q": ("10-Q",),
+                                            "10-Q/A": ("10-Q", "10-Q/A"),
+                                            "10-QT": ("10-Q", "10-QT", "Other"),
+                                            "10-QT/A": ("10-Q", "10-QT", "10-QT/A", "Other"),
+                                            "20-F": ("20-F",),
+                                            "20-F/A": ("20-F", "20-F/A"),
+                                            "20FR12B": ("20FR12B", "Other"),
+                                            "20FR12B/A": ("20FR12B/A", "Other"),
+                                            "20FR12G": ("20FR12G", "Other"),
+                                            "20FR12G/A": ("20FR12G/A", "Other"),
+                                            "40-F": ("40-F",),
+                                            "40-F/A": ("40-F", "40-F/A"),
+                                            "40FR12B": ("40FR12B", "Other"),
+                                            "40FR12B/A": ("40FR12B/A", "Other"),
+                                            "40FR12G": ("40FR12G", "Other"),
+                                            "40FR12G/A": ("40FR12G/A", "Other"),
+                                            "485BPOS": ("485BPOS",),
+                                            "497": ("497", "Other"),
+                                            "6-K": ("6-K",),
+                                            "6-K/A": ("6-K", "6-K/A"),
+                                            "8-K": ("8-K",),
+                                            "8-K/A": ("8-K", "8-K/A"),
+                                            "8-K12B": ("8-K12B", "Other"),
+                                            "8-K12B/A": ("8-K12B/A", "Other"),
+                                            "8-K12G3": ("8-K12G3", "Other"),
+                                            "8-K12G3/A": ("8-K12G3/A", "Other"),
+                                            "8-K15D5": ("8-K15D5", "Other"),
+                                            "8-K15D5/A": ("8-K15D5/A", "Other"),
+                                            "F-1": ("F-1",),
+                                            "F-1/A": ("F-1", "F-1/A"),
+                                            "F-10": ("F-10",),
+                                            "F-10/A": ("F-10", "F-10/A"),
+                                            "F-10EF": ("F-10EF", "Other"),
+                                            "F-10POS": ("F-10POS", "Other"),
+                                            "F-1MEF": ("F-1MEF",),
+                                            "F-3": ("F-3",),
+                                            "F-3/A": ("F-3", "F-3/A"),
+                                            "F-3ASR": ("F-3", "F-3ASR"),
+                                            "F-3D": ("F-3", "F-3D"),
+                                            "F-3DPOS": ("F-3", "F-3DPOS"),
+                                            "F-3MEF": ("F-3MEF",),
+                                            "F-4": ("F-4",),
+                                            "F-4 POS": ("F-4", "F-4 POS"),
+                                            "F-4/A": ("F-4", "F-4/A"),
+                                            "F-4EF": ("F-4", "F-4EF"),
+                                            "F-4MEF": ("F-4MEF",),
+                                            "F-9": ("F-9",),
+                                            "F-9 POS": ("F-9", "F-9 POS"),
+                                            "F-9/A": ("F-9", "F-9/A"),
+                                            "F-9EF": ("F-9", "F-9EF"),
+                                            "N-1A": ("N-1A",),
+                                            "N-1A/A": ("N-1A/A", "Other"),
+                                            "N-CSR": ("N-CSR",),
+                                            "N-CSR/A": ("N-CSR/A",),
+                                            "N-CSRS": ("N-CSRS",),
+                                            "N-CSRS/A": ("N-CSRS/A",),
+                                            "N-Q": ("N-Q",),
+                                            "N-Q/A": ("N-Q/A",),
+                                            "POS AM": ("F-1", "F-3", "F-4", "F-6", "Other", 
+                                                       "POS AM", "S-1", "S-11", "S-20", "S-3", "S-4", "S-B"),
+                                            "POS EX": ("F-3", "F-4", "Other", 
+                                                       "POS EX", "S-1", "S-3", "S-4"),
+                                            "POS462B": ("F-1MEF", "F-3MEF", "F-4MEF", "Other", 
+                                                        "POS462B", "POS462C", "S-11MEF", "S-1MEF", "S-3MEF", "S-BMEF"),
+                                            "POSASR": ("F-3", "Other", "POSASR", "S-3"),
+                                            "S-1": ("S-1",),
+                                            "S-1/A": ("S-1", "S-1/A"),
+                                            "S-11": ("S-11",),
+                                            "S-11/A": ("S-11/A",),
+                                            "S-11MEF": ("S-11MEF",),
+                                            "S-1MEF": ("S-1MEF",),
+                                            "S-3": ("S-3",),
+                                            "S-3/A": ("S-3", "S-3/A"),
+                                            "S-3ASR": ("S-3", "S-3ASR"),
+                                            "S-3D": ("S-3", "S-3D"),
+                                            "S-3DPOS": ("S-3", "S-3DPOS"),
+                                            "S-3MEF": ("S-3MEF",),
+                                            "S-4": ("S-4",),
+                                            "S-4 POS": ("S-4", "S-4 POS"),
+                                            "S-4/A": ("S-4", "S-4/A"),
+                                            "S-4EF": ("S-4", "S-4EF"),
+                                            "S-4MEF": ("S-4MEF",),
+                                            "SD": ("SD",),
+                                            "SD/A": ("SD/A",),
+                                            "SP 15D2": ("SP 15D2",),
+                                            "SP 15D2/A": ("SP 15D2/A",)
                             }.get(submissionType)
                     if expectedDocumentTypes and documentType not in expectedDocumentTypes:
-                        modelXbrl.error("EFM.6.05.20.submissionDocumentType",
+                        modelXbrl.error("EFM.6.05.20.submissionDocumentType" if self.exhibitType != "EX-2.01" else "EFM.6.23.03",
                             _("DocumentType '%(documentType)s' of context %(contextID)s inapplicable to submission form %(submissionType)s"),
                             modelObject=documentTypeFact, contextID=documentTypeFact.contextID, documentType=documentType, submissionType=submissionType)
+                if self.exhibitType:
+                    if (documentType in ("SD", "SD/A")) != (self.exhibitType == "EX-2.01"):
+                        modelXbrl.error({"EX-100":"EFM.6.23.04",
+                                         "EX-101":"EFM.6.23.04",
+                                         "EX-2.01":"EFM.6.23.05"}.get(self.exhibitType,"EX-101"),
+                            _("The value for dei:DocumentType, %(documentType)s, is not allowed for %(exhibitType)s attachments."),
+                            modelObject=documentTypeFact, contextID=documentTypeFact.contextID, documentType=documentType, exhibitType=self.exhibitType)
                     
                 # 6.5.21
                 for doctypesRequired, deiItemsRequired in (
@@ -951,7 +893,9 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                         "10/A", "S-1/A", "S-3/A", "S-4/A", "S-11/A"),
                         ("EntityFilerCategory",)),
                        (("10-K", "10-KT", "20-F", "10-K/A", "10-KT/A", "20-F/A"),
-                         ("EntityWellKnownSeasonedIssuer",))
+                         ("EntityWellKnownSeasonedIssuer",)),
+                       (("SD", "SD/A"),
+                         ("EntityReportingCurrencyISOCode", ))
                 ):
                     if documentType in doctypesRequired:
                         for deiItem in deiItemsRequired:
@@ -965,8 +909,9 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                                                  "CurrentFiscalYearEndDate", "DocumentFiscalPeriodFocus", "DocumentFiscalYearFocus",
                                                  "EntityRegistrantName", "EntityCentralIndexKey",
                                                  "EntityCurrentReportingStatus", "EntityFilerCategory", "EntityPublicFloat", 
-                                                 "EntityVoluntaryFilers", "EntityWellKnownSeasonedIssuer" 
-                                                } else "EFM.6.05.21"),
+                                                 "EntityVoluntaryFilers", "EntityWellKnownSeasonedIssuer"
+                                                } else "EFM.6.23.36" if deiItem == "EntityReportingCurrencyISOCode"
+                                                  else "EFM.6.05.21"),
                                                 _("dei:%(elementName)s is required for DocumentType '%(documentType)s' of context %(contextID)s"),
                         modelObject=documentTypeFact, contextID=documentTypeFact.contextID, documentType=documentType,
                         elementName=deiItem)
@@ -1010,7 +955,271 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                         modelXbrl.log(errLevel, "EFM.6.05.26",
                             _("dei:EntityCommonStockSharesOutstanding is required for DocumentType '%(documentType)s' in the default context because there are not multiple classes of common shares"),
                             modelObject=documentTypeFact, documentType=documentType)
-                
+                if documentType in ("SD", "SD/A"): # SD documentType
+                    self.modelXbrl.profileActivity("... filer required facts checks (other than SD)", minTimeToShow=1.0)
+                    rxdNs = None # find RXD schema
+                    rxdDoc = None
+                    hasRxdPre = hasRxdDef = False
+                    for rxdLoc in disclosureSystem.familyHrefs["RXD"]:
+                        rxdUri = rxdLoc.href
+                        if rxdUri in modelXbrl.urlDocs:
+                            if rxdUri.endswith(".xsd") and rxdLoc.elements == "1":
+                                if rxdNs is None:
+                                    rxdDoc = modelXbrl.urlDocs[rxdUri]
+                                    rxdNs = rxdDoc.targetNamespace
+                                else:
+                                    modelXbrl.error("EFM.6.23.10",
+                                        _("The DTS of must use only one version of the RXD schema"),
+                                        modelObject=(rxdDoc, modelXbrl.urlDocs[rxdUri]), instance=instanceName)
+                            elif "/rxd-pre-" in rxdUri:
+                                hasRxdPre = True
+                            elif "/rxd-def-" in rxdUri:
+                                hasRxdDef = True
+                    if not hasRxdPre:
+                        modelXbrl.error("EFM.6.23.08",
+                            _("The DTS must use a standard presentation linkbase from Family RXD in edgartaxonomies.xml."),
+                            modelObject=modelXbrl, instance=instanceName)
+                    if not hasRxdDef:
+                        modelXbrl.error("EFM.6.23.09",
+                            _("The DTS must use a standard definition linkbase from Family RXD in edgartaxonomies.xml."),
+                            modelObject=modelXbrl, instance=instanceName)
+                    countryNs = None
+                    deiNS = None
+                    for url, doc in modelXbrl.urlDocs.items():
+                        if doc.type == ModelDocument.Type.SCHEMA:
+                            if url.startswith("http://xbrl.sec.gov/country/"):
+                                if countryNs is None:
+                                    countryNs = doc.targetNamespace
+                                else:
+                                    modelXbrl.error("EFM.6.23.11",
+                                        _("The DTS must use must use only one version of the COUNTRY schema."),
+                                        modelObject=(doc
+                                                     for url,doc in modelXbrl.urlDocs.items()
+                                                     if url.startswith("http://xbrl.sec.gov/country/")), instance=instanceName)
+                            if disclosureSystem.deiNamespacePattern.match(doc.targetNamespace):
+                                deiNS = doc.targetNamespace
+
+                    if rxdNs:
+                        qn = ModelValue.qname(rxdNs, "AmendmentNumber")
+                        if amendmentFlag == "true" and (
+                                    qn not in modelXbrl.factsByQname or not any(
+                                           f.context is not None and not f.context.hasSegment 
+                                           for f in modelXbrl.factsByQname[qn])):
+                            modelXbrl.error("EFM.6.23.06",
+                                _("The value for dei:DocumentType, %(documentType)s, requires a value for rxd:AmendmentNumber in the Required Context."),
+                                modelObject=modelXbrl, documentType=documentType)
+                    else:
+                        modelXbrl.error("EFM.6.23.07",
+                            _("The DTS must use a standard schema from Family RXD in edgartaxonomies.xml."),
+                            modelObject=modelXbrl, instance=instanceName)
+                    class Rxd(): # fake class of rxd qnames based on discovered rxd namespace
+                        def __init__(self):
+                            for name in ("CountryAxis", "GovernmentAxis", "PaymentTypeAxis", "ProjectAxis","PmtAxis",
+                                        "AllGovernmentsMember", "AllProjectsMember","BusinessSegmentAxis", "EntityDomain", 
+                                        "A", "Cm", "Co", "Cu", "D", "Gv", "E", "K", "Km", "P", "Payments", "Pr", "Sm"):
+                                setattr(self, name, ModelValue.qname(rxdNs, "rxd:" + name))
+    
+                    rxd = Rxd()
+                    f1 = deiFacts.get(disclosureSystem.deiCurrentFiscalYearEndDateElement)
+                    if f1 is not None and documentPeriodEndDateFact is not None and f1.xValid and documentPeriodEndDateFact.xValid:
+                        d = ModelValue.dateunionDate(documentPeriodEndDateFact.xValue)# is an end date, convert back to a start date without midnight part
+                        if f1.xValue.month != d.month or f1.xValue.day != d.day:
+                            modelXbrl.error("EFM.6.23.26",
+                                _("The dei:CurrentFiscalYearEndDate, %(fyEndDate)s does not match the dei:DocumentReportingPeriod %(reportingPeriod)s"),
+                                modelObject=(f1,documentPeriodEndDateFact), fyEndDate=f1.value, reportingPeriod=documentPeriodEndDateFact.value)
+                    if (documentPeriodEndDateFact is not None and documentPeriodEndDateFact.xValid and
+                        not any(f2.xValue == documentPeriodEndDateFact.xValue
+                                for f2 in modelXbrl.factsByQname[rxd.D]
+                                if f2.xValid)):
+                        modelXbrl.error("EFM.6.23.27",
+                            _("The dei:DocumentPeriodEndDate %(reportingPeriod)s has no corresponding rxd:D fact."),
+                            modelObject=documentPeriodEndDateFact, reportingPeriod=documentPeriodEndDateFact.value)
+                    for url,doc in modelXbrl.urlDocs.items():
+                        if (url not in disclosureSystem.standardTaxonomiesDict and
+                            doc.type == ModelDocument.Type.SCHEMA):
+                            for concept in XmlUtil.children(doc.xmlRootElement, XbrlConst.xsd, "element"):
+                                name = concept.name
+                                if not concept.isAbstract and not concept.isTextBlock:
+                                    modelXbrl.error("EFM.6.23.12",
+                                        _("Extension concept %(concept)s is non-abstract and not a Text Block."),
+                                        modelObject=concept, schemaName=doc.basename, name=concept.name, concept=concept.qname)
+                                elif name.endswith("Table") or name.endswith("Axis") or name.endswith("Domain"):
+                                    modelXbrl.error("EFM.6.23.13",
+                                        _("Extension concept %(concept)s is not allowed in an extension schema."),
+                                        modelObject=concept, schemaName=doc.basename, name=concept.name, concept=concept.qname)
+                    self.modelXbrl.profileActivity("... SD checks 6-13, 26-27", minTimeToShow=1.0)
+                    dimDefRelSet = modelXbrl.relationshipSet(XbrlConst.dimensionDefault)
+                    dimDomRelSet = modelXbrl.relationshipSet(XbrlConst.dimensionDomain)
+                    hypDimRelSet = modelXbrl.relationshipSet(XbrlConst.hypercubeDimension)
+                    hasHypRelSet = modelXbrl.relationshipSet(XbrlConst.all)
+                    for rel in dimDomRelSet.modelRelationships:
+                        if (rel.fromModelObject is not None and rel.toModelObject is not None and 
+                            not dimDefRelSet.isRelated(rel.fromModelObject, "child", rel.toModelObject)):
+                            modelXbrl.error("EFM.6.23.14",
+                                _("The target of the dimension-domain relationship in role %(linkrole)s from %(source)s to %(target)s must be the default member of %(source)s."),
+                                modelObject=(rel, rel.fromModelObject, rel.toModelObject), 
+                                linkbaseName=rel.modelDocument.basename, linkrole=rel.linkrole,
+                                source=rel.fromModelObject.qname, target=rel.toModelObject.qname)
+                    domMemRelSet = modelXbrl.relationshipSet(XbrlConst.domainMember)
+                    memDim = {}
+                    def checkMemMultDims(memRel, dimRel, elt, ELR, visited):
+                        if elt not in visited:
+                            visited.add(elt)
+                            for rel in domMemRelSet.toModelObject(elt):
+                                if rel.consecutiveLinkrole == ELR and rel.fromModelObject is not None:
+                                    checkMemMultDims(memRel, None, rel.fromModelObject, rel.linkrole, visited)
+                            for rel in dimDomRelSet.toModelObject(elt):
+                                if rel.consecutiveLinkrole == ELR and rel.fromModelObject is not None:
+                                    dim = rel.fromModelObject
+                                    mem = memRel.toModelObject
+                                    if dim.qname == rxd.PaymentTypeAxis and not mem.qname.namespaceURI.startswith("http://xbrl.sec.gov/rxd/"):
+                                        modelXbrl.error("EFM.6.23.17",
+                                            _("The member %(member)s in dimension rxd:PaymentTypeAxis in linkrole %(linkrole)s must be a QName with namespace that begins with \"http://xbrl.sec.gov/rxd/\". "),
+                                            modelObject=(rel, memRel, dim, mem), member=mem.qname, linkrole=rel.linkrole)
+                                    if dim.qname == rxd.CountryAxis and not mem.qname.namespaceURI.startswith("http://xbrl.sec.gov/country/"):
+                                        modelXbrl.error("EFM.6.23.18",
+                                            _("The member %(member)s in dimension rxd:CountryAxis in linkrole %(linkrole)s must be a QName with namespace that begins with \"http://xbrl.sec.gov/country//\". "),
+                                            modelObject=(rel, memRel, dim, mem), member=mem.qname, linkrole=rel.linkrole)
+                                    checkMemMultDims(memRel, rel, rel.fromModelObject, rel.linkrole, visited)
+                            for rel in hypDimRelSet.toModelObject(elt):
+                                if rel.consecutiveLinkrole == ELR and rel.fromModelObject is not None:
+                                    checkMemMultDims(memRel, dimRel, rel.fromModelObject, rel.linkrole, visited)
+                            for rel in hasHypRelSet.toModelObject(elt):
+                                if rel.consecutiveLinkrole == ELR and rel.fromModelObject is not None:
+                                    linkrole = rel.linkrole
+                                    mem = memRel.toModelObject
+                                    if (mem,linkrole) not in memDim:
+                                        memDim[mem,linkrole] = (dimRel, memRel)
+                                    else:
+                                        otherDimRel, otherMemRel = memDim[mem,linkrole]
+                                        modelXbrl.error("EFM.6.23.16",
+                                            _("The member %(member)s has two dimensions, %(dimension1)s in linkrole %(linkrole1)s and  %(dimension2)s in linkrole %(linkrole2)s. "),
+                                            modelObject=(dimRel, otherDimRel, memRel, otherMemRel, dimRel.fromModelObject, otherDimRel.fromModelObject),
+                                            member=mem.qname, dimension1=dimRel.fromModelObject.qname, linkrole1=linkrole, 
+                                            dimension2=otherDimRel.fromModelObject.qname, linkrole2=otherDimRel.linkrole)
+                            visited.discard(elt)
+                    for rel in domMemRelSet.modelRelationships:
+                        if rel.fromModelObject is not None and rel.toModelObject is not None:
+                            for rel2 in modelXbrl.relationshipSet(XbrlConst.domainMember, rel.consecutiveLinkrole).fromModelObject(rel.toModelObject):
+                                if rel2.fromModelObject is not None and rel2.toModelObject is not None:
+                                    modelXbrl.error("EFM.6.23.15",
+                                        _("The domain-member relationship in %(linkrole)s from %(source)s to %(target)s is consecutive with domain-member relationship in %(linkrole2)s to %(target2)s. "),
+                                        modelObject=(rel, rel.fromModelObject, rel.toModelObject), 
+                                        linkrole=rel.linkrole, linkrole2=rel2.linkrole,
+                                        source=rel.fromModelObject.qname, target=rel.toModelObject.qname, target2=rel2.toModelObject.qname)
+                            checkMemMultDims(rel, None, rel.fromModelObject, rel.linkrole, set())
+                    self.modelXbrl.profileActivity("... SD checks 14-18", minTimeToShow=1.0)
+                    qnDeiEntityDomain = ModelValue.qname(deiNS, "dei:EntityDomain")
+                    for relSet, dom, priItem, errCode in ((domMemRelSet, rxd.AllProjectsMember, rxd.Pr, "EFM.6.23.30"),
+                                                          (domMemRelSet, rxd.AllGovernmentsMember, rxd.Gv, "EFM.6.23.31"),
+                                                          (dimDomRelSet, rxd.BusinessSegmentAxis, rxd.Sm, "EFM.6.23.33"),
+                                                          (domMemRelSet, qnDeiEntityDomain, rxd.E, "EFM.6.23.34")):
+                        for f in modelXbrl.factsByQname[priItem]:
+                            if (not f.isNil and f.xValid and
+                                not relSet.isRelated(dom, "descendant", f.xValue, isDRS=True)):
+                                modelXbrl.error(errCode,
+                                    _("The %(fact)s %(value)s in context %(context)s is not a %(domain)s."),
+                                    modelObject=f, fact=priItem, value=f.xValue, context=f.context.id, domain=dom)
+                    self.modelXbrl.profileActivity("... SD checks 30, 31, 33, 34", minTimeToShow=1.0)
+                    cntxEqualFacts = defaultdict(list)
+                    for f in modelXbrl.facts:
+                        if f.context is not None:
+                            cntxEqualFacts[f.context.contextDimAwareHash].append(f)
+                    self.modelXbrl.profileActivity("... SD prepare facts by context", minTimeToShow=1.0)
+                    
+                    qnCurrencyMeasure = XbrlConst.qnIsoCurrency(deiItems.get("EntityReportingCurrencyISOCode"))
+                    currencyMeasures = ([qnCurrencyMeasure],[])
+                    qnAllCountriesDomain = ModelValue.qname(countryNs, "country:AllCountriesDomain")
+                    for cntxFacts in cntxEqualFacts.values():
+                        qnameFacts = dict((f.qname,f) for f in cntxFacts)
+                        context = cntxFacts[0].context
+                        contextDims = cntxFacts[0].context.qnameDims
+                        # required priItem values based on context dimension
+                        for dim, priItem, errCode in ((rxd.PmtAxis, rxd.P, "EFM.6.23.20"),
+                                                      (rxd.GovernmentAxis, rxd.Payments, "EFM.6.23.22")):
+                            if context.hasDimension(dim) and (priItem not in qnameFacts or qnameFacts[priItem].isNil): 
+                                modelXbrl.error(errCode,
+                                    _("The Context %(context)s has dimension %(dimension)s member %(member)s but is missing required fact %(fact)s"),
+                                    modelObject=context, context=context.id, dimension=dim, member=context.dimMemberQname(dim), fact=priItem)
+                        if (rxd.Co in qnameFacts and not qnameFacts[rxd.Co].isNil and
+                            not domMemRelSet.isRelated(qnAllCountriesDomain, "descendant", qnameFacts[rxd.Co].xValue, isDRS=True)):
+                            modelXbrl.error("EFM.6.23.44",
+                                _("Fact rxd:Co value %(value)s in context %(context)s is not in the domain of country:AllCountriesDomain"),
+                                modelObject=f, context=context.id, value=qnameFacts[rxd.Co].value)
+                        # required present facts based on other present fact
+                        for qnF, fNilOk, qnG, gNilOk, errCode in ((rxd.A, True, rxd.Cu, False, "EFM.6.23.24"),
+                                                                  (rxd.A, True, rxd.D, False, "EFM.6.23.25"),
+                                                                  (rxd.A, False, rxd.Gv, False, "EFM.6.23.28"),
+                                                                  (rxd.A, False, rxd.Co, False, "EFM.6.23.29"),
+                                                                  (rxd.Km, False, rxd.K, False, "EFM.6.23.35"),
+                                                                  (rxd.K, False, rxd.Km, False, "EFM.6.23.35"),
+                                                                  (rxd.Cm, False, rxd.Cu, False, "EFM.6.23.39"),
+                                                                  (rxd.K, False, rxd.A, False, "EFM.6.23.42"),
+                                                                  (rxd.Pr, False, rxd.A, False, "EFM.6.23.43")):
+                            if (qnF in qnameFacts and (fNilOk or not qnameFacts[qnF].isNil) and
+                                (qnG not in qnameFacts or (not gNilOk and qnameFacts[qnG].isNil))): 
+                                modelXbrl.error(errCode,
+                                    _("The Context %(context)s has a %(fact1)s and is missing required %(fact2NotNil)sfact %(fact2)s"),
+                                    modelObject=qnameFacts[qnF], context=context.id, fact1=qnF, fact2=qnG, fact2NotNil="" if gNilOk else "non-nil ")
+                        for f in cntxFacts:
+                            if (not context.hasDimension(rxd.PmtAxis) and f.isNumeric and 
+                                f.unit is not None and f.unit.measures != currencyMeasures):
+                                modelXbrl.error("EFM.6.23.37",
+                                    _("Fact %(fact)s in context %(context)s has unit %(unit)s not matching dei:EntityReportingCurrencyISOCode %(currency)s"),
+                                    modelObject=f, fact=f.qname, context=context.id, unit=f.unit.value, currency=qnCurrencyMeasure)
+                        
+                        if (rxd.A in qnameFacts and not qnameFacts[rxd.A].isNil and
+                            rxd.Cm in qnameFacts and not qnameFacts[rxd.Cm].isNil and
+                            qnameFacts[rxd.A].unit is not None and qnameFacts[rxd.A].unit.measures == currencyMeasures): 
+                            modelXbrl.error("EFM.6.23.38",
+                                _("A value cannot be given for rxd:Cm in context %(context)s because the payment is in the reporting currency %(currency)s."),
+                                modelObject=(qnameFacts[rxd.A],qnameFacts[rxd.Cm]), context=context.id, currency=qnCurrencyMeasure)
+                        if (rxd.A in qnameFacts and 
+                            rxd.Cu in qnameFacts and not qnameFacts[rxd.Cu].isNil and
+                            qnameFacts[rxd.A].unit is not None and qnameFacts[rxd.A].unit.measures != ([XbrlConst.qnIsoCurrency(qnameFacts[rxd.Cu].xValue)],[])): 
+                            modelXbrl.error("EFM.6.23.41",
+                                _("The unit %(unit)s of rxd:A in context %(context)s is not consistent with the value %(currency)s of rxd:Cu."),
+                                modelObject=(qnameFacts[rxd.A],qnameFacts[rxd.Cu]), context=context.id, unit=qnameFacts[rxd.A].unit.value, currency=qnameFacts[rxd.Cu].value)
+                                                    
+                        if (context.hasDimension(rxd.ProjectAxis) and
+                            not any(f.xValue == m
+                                    for m in (contextDims[rxd.ProjectAxis].memberQname,)
+                                    for f in modelXbrl.factsByQname[rxd.Pr]
+                                    if f.context is not None)):
+                            modelXbrl.error("EFM.6.23.19",
+                                _("The Context %(context)s has dimension %(dimension)s but is missing any payment."),
+                                modelObject=context, context=context.id, dimension=rxd.GovernmentAxis)
+                        if (context.hasDimension(rxd.GovernmentAxis) and
+                            not any(f.xValue == m and f.context.hasDimension(rxd.PmtAxis)
+                                    for m in (contextDims[rxd.GovernmentAxis].memberQname,)
+                                    for f in modelXbrl.factsByQname[rxd.Gv]
+                                    if f.context is not None)):
+                            modelXbrl.error("EFM.6.23.21",
+                                _("The Context %(context)s has dimension %(dimension)s member %(member)s but is missing any payment."),
+                                modelObject=context, context=context.id, dimension=rxd.GovernmentAxis, member=context.dimMemberQname(rxd.GovernmentAxis))
+                        if rxd.P in qnameFacts and not any(f.context is not None and not f.context.hasSegment
+                                                           for f in modelXbrl.factsByQname.get(qnameFacts[rxd.P].xValue,())):
+                            modelXbrl.error("EFM.6.23.23",
+                                _("The Context %(context)s has payment type %(paymentType)s but is missing a corresponding fact in the required context."),
+                                modelObject=context, context=context.id, paymentType=qnameFacts[rxd.P].xValue)
+                        if not context.hasDimension(rxd.PmtAxis) and rxd.A in qnameFacts and not qnameFacts[rxd.A].isNil:
+                            modelXbrl.error("EFM.6.23.40",
+                                _("There is a non-nil rxd:A in context %(context)s but missing a dimension rxd:PmtAxis."),
+                                modelObject=(context, qnameFacts[rxd.A]), context=context.id)
+                    self.modelXbrl.profileActivity("... SD by context for 19-25, 28-29, 35, 37-39, 40-44", minTimeToShow=1.0)
+                    for f in modelXbrl.factsByQname[rxd.D]:
+                        if not f.isNil and f.xValid and f.xValue + datetime.timedelta(1) != f.context.endDatetime: # date needs to be midnite to compare to datetime
+                            modelXbrl.error("EFM.6.23.32",
+                                _("The rxd:D %(value)s in context %(context)s does not match the context end date %(endDate)s."),
+                                modelObject=f, value=f.xValue, context=f.context.id, endDate=XmlUtil.dateunionValue(f.context.endDatetime, subtractOneDay=True))
+                    self.modelXbrl.profileActivity("... SD checks 32 (last SD check)", minTimeToShow=1.0)
+                    # deference object references no longer needed
+                    del rxdDoc, cntxEqualFacts
+                    # dereference compatibly with 2.7 (as these may be used in nested contexts above
+                    hasHypRelSet = hypDimRelSet = dimDefRelSet = domMemRelSet = dimDomRelSet = None
+                    memDim.clear()
+                else: # non-SD documentType
+                    pass # no non=SD tests yet
             elif disclosureSystem.GFM:
                 for deiItem in (
                         disclosureSystem.deiCurrentFiscalYearEndDateElement, 
@@ -1020,7 +1229,8 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                         modelXbrl.error("GFM.3.02.01",
                             _("dei:%(elementName)s is required in the default context"),
                             modelXbrl=modelXbrl, elementName=deiItem)
-            self.modelXbrl.profileActivity("... filer required facts checks", minTimeToShow=1.0)
+            if documentType not in ("SD", "SD/A"):
+                self.modelXbrl.profileActivity("... filer required facts checks", minTimeToShow=1.0)
     
             #6.5.27 footnote elements, etc
             footnoteLinkNbr = 0
@@ -1596,7 +1806,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
             return self._isStandardUri[uri]
         except KeyError:
             isStd = (uri in self.disclosureSystem.standardTaxonomiesDict or
-                     (not uri.startswith("http://") and 
+                     (not isHttpUrl(uri) and 
                       # try 2011-12-23 RH: if works, remove the localHrefs
                       # any(u.endswith(e) for u in (uri.replace("\\","/"),) for e in disclosureSystem.standardLocalHrefs)
                       "/basis/sbr/" in uri.replace("\\","/")
@@ -1967,6 +2177,13 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                 leastMissingItemsSet = None #dereference, can't delete with Python 3.1
                 del foundSummationItemSet 
             del compatibleItemsFacts # dereference object references
+           
+    @property 
+    def EFM60303(self):
+        if self.exhibitType == "EX-2.01": # only applicable for edgar production and parameterized testcases
+            return "EFM.6.23.01"
+        else:
+            return "EFM.6.03.03"
         
 # for SBR 2.3.4.01
 def pLinkedNonAbstractDescendantQnames(modelXbrl, concept, descendants=None):

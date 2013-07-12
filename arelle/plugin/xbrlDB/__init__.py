@@ -17,6 +17,7 @@ import time, os, io, sys, logging
 from arelle.Locale import format_string
 from .XbrlPublicPostgresDB import insertIntoDB as insertIntoPostgresDB, isDBPort as isPostgresPort
 from .XbrlSemanticGraphDB import insertIntoDB as insertIntoRexsterDB, isDBPort as isRexsterPort
+from .XbrlSemanticRdfDB import insertIntoDB as insertIntoRdfDB, isDBPort as isRdfPort
 
 def xbrlDBmenuEntender(cntlr, menu):
     
@@ -30,12 +31,16 @@ def xbrlDBmenuEntender(cntlr, menu):
         priorDBconnection = cntlr.config.get("xbrlDBconnection", None)
         dbConnection = askDatabase(cntlr.parent, priorDBconnection)
         if dbConnection:
-            host, port, user, password, db = dbConnection
+            host, port, user, password, db, timeout = dbConnection
+            if timeout and timeout.isdigit():
+                timeout = int(timeout)
             # identify server
             if isPostgresPort(host, port):
                 insertIntoDB = insertIntoPostgresDB
             elif isRexsterPort(host, port):
                 insertIntoDB = insertIntoRexsterDB
+            elif isRdfPort(host, port, db):
+                insertIntoDB = insertIntoRdfDB
             else:
                 from tkinter import messagebox
                 messagebox.showwarning(_("Unable to determine server type!"),
@@ -52,7 +57,7 @@ def xbrlDBmenuEntender(cntlr, menu):
             try: 
                 startedAt = time.time()
                 insertIntoDB(cntlr.modelManager.modelXbrl, 
-                             host=host, port=port, user=user, password=password, database=db)
+                             host=host, port=port, user=user, password=password, database=db, timeout=timeout)
                 cntlr.addToLog(format_string(cntlr.modelManager.locale, 
                                             _("stored to database in %.2f secs"), 
                                             time.time() - startedAt))
@@ -77,13 +82,27 @@ def xbrlDBmenuEntender(cntlr, menu):
     # add log handler
     logging.getLogger("arelle").addHandler(LogToDbHandler())    
     
-def storeIntoDB(dbConnection, modelXbrl):
-    host, port, user, password, db = dbConnection
+def storeIntoDB(dbConnection, modelXbrl, rssItem=None):
+    host = port = user = password = db = timeout = None
+    if isinstance(dbConnection, (list, tuple)): # variable length list
+        if len(dbConnection) > 0: host = dbConnection[0]
+        if len(dbConnection) > 1: port = dbConnection[1]
+        if len(dbConnection) > 2: user = dbConnection[2]
+        if len(dbConnection) > 3: password = dbConnection[3]
+        if len(dbConnection) > 4: db = dbConnection[4]
+        if len(dbConnection) > 5 and dbConnection[5] and dbConnection[5].isdigit(): 
+            timeout = int(dbConnection[5])
+
     startedAt = time.time()
     if isPostgresPort(host, port):
-        insertIntoPostgresDB(modelXbrl, host=host, port=port, user=user, password=password, database=db)
+        insertIntoPostgresDB(modelXbrl, host=host, port=port, user=user, password=password, database=db, timeout=timeout, rssItem=rssItem)
     elif isRexsterPort(host, port):
-        insertIntoRexsterDB(modelXbrl, host=host, port=port, user=user, password=password, database=db)
+        insertIntoRexsterDB(modelXbrl, host=host, port=port, user=user, password=password, database=db, timeout=timeout, rssItem=rssItem)
+    elif isRdfPort(host, port, db):
+        insertIntoRdfDB(modelXbrl, host=host, port=port, user=user, password=password, database=db, timeout=timeout, rssItem=rssItem)
+    else:
+        modelXbrl.modelManager.addToLog('Server at "{0}:{1}" is not recognized to be either a Postgres or a Rexter service.'.format(host, port))
+        return
     modelXbrl.modelManager.addToLog(format_string(modelXbrl.modelManager.locale, 
                           _("stored to database in %.2f secs"), 
                           time.time() - startedAt), messageCode="info", file=modelXbrl.uri)
@@ -94,7 +113,7 @@ def xbrlDBcommandLineOptionExtender(parser):
                       action="store", 
                       dest="storeToXbrlDb", 
                       help=_("Store into XBRL DB.  "
-                             "Provides connection string: host,port,user,password,database. "))
+                             "Provides connection string: host,port,user,password,database[,timeout]. "))
     logging.getLogger("arelle").addHandler(LogToDbHandler())    
 
 def xbrlDBCommandLineXbrlLoaded(cntlr, options, modelXbrl):
@@ -108,36 +127,16 @@ def xbrlDBCommandLineXbrlRun(cntlr, options, modelXbrl):
         dbConnection = options.storeToXbrlDb.split(",")
         storeIntoDB(dbConnection, modelXbrl)
         
-def xbrlDBvalidateRssItem(val, modelXbrl):
+def xbrlDBvalidateRssItem(val, modelXbrl, rssItem):
     if hasattr(val.modelXbrl, 'xbrlDBconnection'):
-        storeIntoDB(val.modelXbrl.xbrlDBconnection, modelXbrl)
+        storeIntoDB(val.modelXbrl.xbrlDBconnection, modelXbrl, rssItem)
     
-def xbrlDBdialogRssWatchDBconnection(dialog, frame, row, options, cntlr, openFileImage, openDatabaseImage):
-    from tkinter import PhotoImage, N, S, E, W
+def xbrlDBdialogRssWatchDBconnection(*args, **kwargs):
     try:
-        from tkinter.ttk import Button
-        from tkinter.simpledialog import askstring
+        from .DialogRssWatchExtender import dialogRssWatchDBextender
+        dialogRssWatchDBextender(*args, **kwargs)
     except ImportError:
-        from ttk import Button
-    from arelle.CntlrWinTooltip import ToolTip
-    from arelle.UiUtil import gridCell, label
-    # add sphinx formulas to RSS dialog
-    def enterConnectionString():
-        from arelle.DialogUserPassword import askDatabase
-        # (user, password, host, port, database)
-        db = askDatabase(cntlr.parent, dialog.cellDBconnection.value.split(',') if dialog.cellDBconnection.value else None)
-        if db:
-            dbConnectionString = ','.join(db)
-            dialog.options["xbrlDBconnection"] = dbConnectionString 
-            dialog.cellDBconnection.setValue(dbConnectionString)
-        else:  # deleted
-            dialog.options.pop("xbrlDBconnection", "")  # remove entry
-    label(frame, 1, row, "DB Connection:")
-    dialog.cellDBconnection = gridCell(frame,2, row, options.get("xbrlDBconnection",""))
-    ToolTip(dialog.cellDBconnection, text=_("Enter an XBRL Database (Postgres) connection string.  "
-                                           "E.g., pg://dbuser:dbpassword@dbhost:port.  "), wraplength=240)
-    enterDBconnectionButton = Button(frame, image=openDatabaseImage, width=12, command=enterConnectionString)
-    enterDBconnectionButton.grid(row=row, column=3, sticky=W)
+        pass
     
 def xbrlDBdialogRssWatchValidateChoices(dialog, frame, row, options, cntlr):
     from arelle.UiUtil import checkbox

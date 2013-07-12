@@ -8,6 +8,7 @@ import os, re
 from collections import defaultdict
 from lxml import etree
 from arelle import UrlUtil
+from arelle.UrlUtil import isHttpUrl
 
 def compileAttrPattern(elt, attrName, flags=None):
     attr = elt.get(attrName)
@@ -16,6 +17,15 @@ def compileAttrPattern(elt, attrName, flags=None):
         return re.compile(attr, flags)
     else:
         return re.compile(attr)
+
+class ErxlLoc:
+    def __init__(self, family, version, href, attType, elements, namespace):
+        self.family = family
+        self.version = version
+        self.href = href
+        self.attType = attType
+        self.elements = elements
+        self.namespace = namespace
 
 class DisclosureSystem:
     def __init__(self, modelManager):
@@ -26,9 +36,11 @@ class DisclosureSystem:
     def clear(self):
         self.selection = None
         self.standardTaxonomiesDict = {}
+        self.familyHrefs = {}
         self.standardLocalHrefs = set()
         self.standardAuthorities = set()
         self.baseTaxonomyNamespaces = set()
+        self.standardPrefixes = {}
         self.names = None
         self.name = None
         self.validationType = None
@@ -173,8 +185,10 @@ class DisclosureSystem:
     def loadStandardTaxonomiesDict(self):
         if self.selection:
             self.standardTaxonomiesDict = defaultdict(set)
+            self.familyHrefs = defaultdict(set)
             self.standardLocalHrefs = defaultdict(set)
             self.standardAuthorities = set()
+            self.standardPrefixes = {}
             if not self.standardTaxonomiesUrl:
                 return
             basename = os.path.basename(self.standardTaxonomiesUrl)
@@ -191,8 +205,11 @@ class DisclosureSystem:
                         href = None
                         localHref = None
                         namespaceUri = None
+                        prefix = None
                         attType = None
                         family = None
+                        elements = None
+                        version = None
                         for childElt in locElt.iterchildren():
                             ln = childElt.tag
                             value = childElt.text.strip()
@@ -202,10 +219,16 @@ class DisclosureSystem:
                                 localHref = value
                             elif ln == "Namespace":
                                 namespaceUri = value
+                            elif ln == "Prefix":
+                                prefix = value
                             elif ln == "AttType":
                                 attType = value
                             elif ln == "Family":
                                 family = value
+                            elif ln == "Elements":
+                                elements = value
+                            elif ln == "Version":
+                                version = value
                         if href:
                             if namespaceUri and (attType == "SCH" or attType == "ENT"):
                                 self.standardTaxonomiesDict[namespaceUri].add(href)
@@ -215,8 +238,12 @@ class DisclosureSystem:
                                 self.standardAuthorities.add(authority)
                                 if family == "BASE":
                                     self.baseTaxonomyNamespaces.add(namespaceUri)
+                                if prefix:
+                                    self.standardPrefixes[namespaceUri] = prefix
                             if href not in self.standardTaxonomiesDict:
                                 self.standardTaxonomiesDict[href] = "Allowed" + attType
+                            if family:
+                                self.familyHrefs[family].add(ErxlLoc(family, version, href, attType, elements, namespaceUri))
                         elif attType == "SCH" and family == "BASE":
                             self.baseTaxonomyNamespaces.add(namespaceUri)
 
@@ -259,7 +286,7 @@ class DisclosureSystem:
         if namespaceUri in self.standardTaxonomiesDict:
             if href in self.standardTaxonomiesDict[namespaceUri]:
                 return False
-        if namespaceUri in self.standardLocalHrefs and not href.startswith("http://"):
+        if namespaceUri in self.standardLocalHrefs and not isHttpUrl(href):
             normalizedHref = href.replace("\\","/")
             if any(normalizedHref.endswith(localHref)
                    for localHref in self.standardLocalHrefs[namespaceUri]):
@@ -268,4 +295,5 @@ class DisclosureSystem:
 
     def hrefValid(self, href):
         return href in self.standardTaxonomiesDict
-    
+
+

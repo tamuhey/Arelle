@@ -6,6 +6,7 @@ Created on Oct 6, 2010
 '''
 from arelle import ModelObject, ModelDtsObject, XbrlConst, XmlUtil, ViewFile
 from arelle.ModelDtsObject import ModelRelationship
+from arelle.ViewUtil import viewReferences
 import os
 
 def viewRelationshipSet(modelXbrl, outfile, header, arcrole, linkrole=None, linkqname=None, arcqname=None, labelrole=None, lang=None):
@@ -27,7 +28,7 @@ class ViewRelationshipSet(ViewFile.View):
             heading = ["Presentation Relationships", "Type", "References"]
         elif arcrole == XbrlConst.summationItem:    # add columns for calculation relationships
             heading = ["Calculation Relationships", "Weight", "Balance"]
-        if arcrole == "XBRL-dimensions":    # add columns for dimensional information
+        elif arcrole == "XBRL-dimensions":    # add columns for dimensional information
             heading = ["Dimensions Relationships", "Arcrole","CntxElt","Closed","Usable"]
         elif isinstance(arcrole, (list,tuple)) or XbrlConst.isResourceArcrole(arcrole):
             self.isResourceArcrole = True
@@ -75,13 +76,17 @@ class ViewRelationshipSet(ViewFile.View):
         if indent > self.treeCols: self.treeCols = indent
         if concept not in visited:
             visited.add(concept)
-            for modelRel in relationshipSet.fromModelObject(concept):
+            childRelationshipSet = relationshipSet
+            if isinstance(modelObject, ModelRelationship) and arcrole == "XBRL-dimensions": 
+                childRelationshipSet = self.modelXbrl.relationshipSet(XbrlConst.consecutiveArcrole.get(modelObject.arcrole,"XBRL-dimensions"),
+                                                                      modelObject.linkrole)
+            for modelRel in childRelationshipSet.fromModelObject(concept):
                 targetRole = modelRel.targetRole
                 if targetRole is None or len(targetRole) == 0:
                     targetRole = relationshipSet.linkrole
                     nestedRelationshipSet = relationshipSet
                 else:
-                    nestedRelationshipSet = self.modelXbrl.relationshipSet(arcrole, targetRole)
+                    nestedRelationshipSet = self.modelXbrl.relationshipSet(childRelationshipSet.arcrole, targetRole)
                 self.treeDepth(modelRel.toModelObject, modelRel, indent + 1, arcrole, nestedRelationshipSet, visited)
             visited.remove(concept)
             
@@ -90,6 +95,7 @@ class ViewRelationshipSet(ViewFile.View):
             if concept is None:
                 return
             isRelation = isinstance(modelObject, ModelRelationship)
+            childRelationshipSet = relationshipSet
             if isinstance(concept, ModelDtsObject.ModelConcept):
                 text = labelPrefix + concept.label(preferredLabel,lang=self.lang,linkroleHint=relationshipSet.linkrole)
                 if (self.arcrole in ("XBRL-dimensions", XbrlConst.hypercubeDimension) and
@@ -115,21 +121,22 @@ class ViewRelationshipSet(ViewFile.View):
                 text = concept.localName
                 xmlRowElementName = text
             cols = [text]
-            if isRelation:
-                if arcrole == "XBRL-dimensions": # extra columns
-                    relArcrole = modelObject.arcrole
-                    cols.append( os.path.basename( relArcrole ) )
-                    if relArcrole in (XbrlConst.all, XbrlConst.notAll):
-                        cols.append( modelObject.contextElement )
-                        cols.append( modelObject.closed )
-                    else:
-                        cols.append(None)
-                        cols.append(None)
-                    if relArcrole in (XbrlConst.dimensionDomain, XbrlConst.domainMember):
-                        cols.append( modelObject.usable  )
+            if arcrole == "XBRL-dimensions" and isRelation:
+                relArcrole = modelObject.arcrole
+                cols.append( os.path.basename( relArcrole ) )
+                if relArcrole in (XbrlConst.all, XbrlConst.notAll):
+                    cols.append( modelObject.contextElement )
+                    cols.append( modelObject.closed )
+                else:
+                    cols.append(None)
+                    cols.append(None)
+                if relArcrole in (XbrlConst.dimensionDomain, XbrlConst.domainMember):
+                    cols.append( modelObject.usable  )
+                childRelationshipSet = self.modelXbrl.relationshipSet(XbrlConst.consecutiveArcrole.get(relArcrole,"XBRL-dimensions"),
+                                                                      modelObject.linkrole)
             if self.arcrole == XbrlConst.parentChild: # extra columns
                 cols.append(concept.niceType)
-                cols.append(concept.viewReferences(concept))
+                cols.append(viewReferences(concept))
             elif arcrole == XbrlConst.summationItem:
                 if isRelation:
                     cols.append("{:0g} ".format(modelObject.weight))
@@ -148,7 +155,7 @@ class ViewRelationshipSet(ViewFile.View):
             self.addRow(cols, treeIndent=indent, xmlRowElementName=xmlRowElementName, xmlRowEltAttr=attr, xmlCol0skipElt=True)
             if concept not in visited:
                 visited.add(concept)
-                for modelRel in relationshipSet.fromModelObject(concept):
+                for modelRel in childRelationshipSet.fromModelObject(concept):
                     nestedRelationshipSet = relationshipSet
                     targetRole = modelRel.targetRole
                     if arcrole == XbrlConst.summationItem:
@@ -157,7 +164,7 @@ class ViewRelationshipSet(ViewFile.View):
                         targetRole = relationshipSet.linkrole
                         childPrefix = ""
                     else:
-                        nestedRelationshipSet = self.modelXbrl.relationshipSet(arcrole, targetRole)
+                        nestedRelationshipSet = self.modelXbrl.relationshipSet(childRelationshipSet.arcrole, targetRole)
                         childPrefix = "(via targetRole) "
                     toConcept = modelRel.toModelObject
                     if toConcept in visited:

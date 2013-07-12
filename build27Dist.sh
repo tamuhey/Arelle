@@ -14,7 +14,7 @@ cp arelleCmdLine.py arelle_test.py conftest.py app.yaml backends.yaml ${BUILT27D
 mkdir ${BUILT27DIR}/arelle
 cp -R arelle ${BUILT27DIR}
 rm -f -r ${BUILT27DIR}/*.pyc
-rm -f -r ${BUILT27DIR}/arelle/pyparsing
+rm -f -r ${BUILT27DIR}/arelle/pyparsing/*
 rm -f -r ${BUILT27DIR}/arelle/scripts-macOS
 rm -f -r ${BUILT27DIR}/arelle/scripts-unix
 rm -f -r ${BUILT27DIR}/arelle/scripts-windows
@@ -28,7 +28,7 @@ rm -f -r ${BUILT27DIR}/*.pyw
 rm -f ${BUILT27DIR}/arelle/CntlrQuickBooks.py
 rm -f ${BUILT27DIR}/arelle/CntlrWinMain.py
 rm -f ${BUILT27DIR}/arelle/CntlrWinTooltip.py
-rm -f ${BUILT27DIR}/arelle/Dialog*.py
+find ${BUILT27DIR}/arelle -name 'Dialog*.py' -print0 | xargs -0 rm -f
 rm -f ${BUILT27DIR}/arelle/UiUtil.py
 rm -f ${BUILT27DIR}/arelle/ViewWin*.py
 rm -f ${BUILT27DIR}/arelle/WatchRss.py
@@ -45,6 +45,9 @@ rm -f -r ${BUILT27DIR}/*.bak
 # copy non-converted PythonUtil.py (to block 3to2 conversions
 cp arelle/PythonUtil.py ${BUILT27DIR}/arelle/PythonUtil.py
 # copy bottle that works on 2.7
-# arelle/webserver/bottle.py ${BUILT27DIR}/arelle/webserver/bottle.py
+cp arelle/webserver/bottle.py ${BUILT27DIR}/arelle/webserver/bottle.py
+# copy pyparsing that works on 2.7
+cp arelle/pyparsing/__init__.py ${BUILT27DIR}/arelle/pyparsing/__init__.py
+cp arelle/pyparsing/pyparsing_py2.py2 ${BUILT27DIR}/arelle/pyparsing/pyparsing_py2.py
 
 

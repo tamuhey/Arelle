@@ -25,15 +25,27 @@ Information for the 'official' XBRL US-maintained database (this schema, contain
     \Host: public.xbrl.us 
     Port: 5432
 
+to use from command line:
+
+linux
+   # be sure plugin is installed
+   arelleCmdLine --plugin '+xbrlDB|show'
+   arelleCmdLine -f http://sec.org/somewhere/some.rss -v --store-to-XBRL-DB 'myserver.com,portnumber,pguser,pgpasswd,database,timeoutseconds'
+   
+windows
+   rem be sure plugin is installed
+   arelleCmdLine --plugin "+xbrlDB|show"
+   arelleCmdLine -f http://sec.org/somewhere/some.rss -v --store-to-XBRL-DB "myserver.com,portnumber,pguser,pgpasswd,database,timeoutseconds"
+
 '''
 
-import os, sys, io, re, time
+import os, sys, io, re, time, datetime
 from math import isnan, isinf
 from pg8000 import DBAPI
 from pg8000.errors import CursorClosedError, ConnectionClosedError, InterfaceError, ProgrammingError
 import socket
 from arelle.ModelDtsObject import ModelConcept, ModelResource
-from arelle.ModelValue import qname, datetime
+from arelle.ModelValue import qname, dateTime
 from arelle.ValidateXbrlCalcs import roundValue
 from arelle import XbrlConst
 
@@ -41,11 +53,11 @@ TRACESQLFILE = None
 #TRACESQLFILE = r"c:\temp\sqltrace.log"  # uncomment to trace SQL on connection (very big file!!!)
 
 def insertIntoDB(modelXbrl, 
-                 user=None, password=None, host=None, port=None, database=None,
+                 user=None, password=None, host=None, port=None, database=None, timeout=None,
                  rssItem=None):
     xpgdb = None
     try:
-        xpgdb = XbrlPostgresDatabaseConnection(modelXbrl, user, password, host, port, database)
+        xpgdb = XbrlPostgresDatabaseConnection(modelXbrl, user, password, host, port, database, timeout)
         xpgdb.verifyTables()
         xpgdb.insertXbrl(rssItem=rssItem)
         xpgdb.close()
@@ -62,7 +74,7 @@ def isDBPort(host, port, timeout=10):
     t = 2
     while t < timeout:
         try:
-            DBAPI.connect(user='', host=host, port=int(port) if port else None, socket_timeout=t)
+            DBAPI.connect(user='', host=host, port=int(port or 5432), socket_timeout=t)
         except ProgrammingError:
             return True # success, this is really a postgres socket, wants user name
         except InterfaceError:
@@ -125,14 +137,16 @@ class XPDBException(Exception):
 
 
 class XbrlPostgresDatabaseConnection():
-    def __init__(self, modelXbrl, user, password, host, port, database):
+    def __init__(self, modelXbrl, user, password, host, port, database, timeout):
         self.modelXbrl = modelXbrl
         self.disclosureSystem = modelXbrl.modelManager.disclosureSystem
         self.conn = DBAPI.connect(user=user, password=password, host=host, 
-                                  port=int(port) if port else None, 
-                                  database=database)
+                                  port=int(port or 5432), 
+                                  database=database, 
+                                  socket_timeout=timeout or 60)
         self.tableColTypes = {}
-        
+        self.accessionId = "(None)"
+                
     def close(self, rollback=False):
         try:
             self.closeCursor()
@@ -214,7 +228,7 @@ class XbrlPostgresDatabaseConnection():
                                   close=False, commit=False, fetch=False)
         self.showStatus("Dropping prior sequences")
         for sequence in self.sequencesInDB():
-            result = self.execute('DROP SEQUENCE %s' % sequence[0],
+            result = self.execute('DROP SEQUENCE %s' % sequence,
                                   close=False, commit=False, fetch=False)
         self.modelXbrl.profileStat(_("XbrlPublicDB: drop prior tables"), time.time() - startedAt)
                     
@@ -252,7 +266,7 @@ class XbrlPostgresDatabaseConnection():
                 # problem with driver and $$ statements, skip them (for now)
                 stmt = ''
         for sql in sqlstatements:
-            if 'CREATE TABLE' in sql or 'CREATE SEQUENCE' in sql:
+            if 'CREATE TABLE' in sql or 'CREATE SEQUENCE' in sql or 'INSERT INTO' in sql:
                 statusMsg, sep, rest = sql.strip().partition('\n')
                 self.showStatus(statusMsg[0:50])
                 result = self.execute(sql, close=False, commit=False, fetch=False)
@@ -307,7 +321,7 @@ class XbrlPostgresDatabaseConnection():
                                               int if typename in ("integer", "smallint", "int", "bigint") else
                                               float if typename in ("double precision", "real", "numeric") else
                                               pyBoolFromDbBool if typename == "boolean" else
-                                              datetime if typename in ("date","timestamp") else  # ModelValue.datetime !!! not python class
+                                              dateTime if typename in ("date","timestamp") else  # ModelValue.datetime !!! not python class
                                               str))
                                              for name, fulltype in colTypes
                                              for typename in (fulltype.partition(' ')[0],))
@@ -323,7 +337,8 @@ class XbrlPostgresDatabaseConnection():
         if idCol: # idCol is the first returned column if present
             returningCols.append(idCol)
         for matchCol in matchCols:
-            returningCols.append(matchCol)
+            if matchCol not in returningCols: # allow idCol to be specified or default assigned
+                returningCols.append(matchCol)
         colTypeFunctions = self.columnTypeFunctions(table)
         try:
             colTypeCast = tuple(colTypeFunctions[colName][0] for colName in newCols)
@@ -384,6 +399,10 @@ WITH row_values (%(newCols)s) AS (
                          .format(self.accessionId, table, len(sql), len(data)))
                 fh.write(sql)
         tableRows = self.execute(sql,commit=commit, close=False)
+        if TRACESQLFILE:
+            with io.open(TRACESQLFILE, "a", encoding='utf-8') as fh:
+                fh.write("\n\n>>> accession {0} table {1} result row count {2}\n{3}\n"
+                         .format(self.accessionId, table, len(tableRows), '\n'.join(str(r) for r in tableRows)))
         return tuple(tuple(None if colValue == "NULL" or colValue is None else
                            colTypeFunction[i](colValue)  # convert to int, datetime, etc
                            for i, colValue in enumerate(row))
@@ -432,14 +451,15 @@ WITH row_values (%(newCols)s) AS (
                                   ('accepted_timestamp', 'entity_id', 'filing_accession_number'), 
                                   ((rssItem.acceptanceDatetime,
                                     True,
-                                    rssItem.filingDate,
-                                    rssItem.cikNumber,
+                                    rssItem.filingDate or datetime.datetime.min,  # NOT NULL
+                                    rssItem.cikNumber or 0,  # NOT NULL
                                     rssItem.companyName,
                                     self.modelXbrl.modelDocument.creationSoftwareComment,
-                                    rssItem.assignedSic,
+                                    rssItem.assignedSic or -1,  # NOT NULL
                                     rssItem.htmlUrl,
                                     rssItem.url,
-                                    rssItem.accessionNumber),))
+                                    rssItem.accessionNumber or 'UNKNOWN'  # NOT NULL
+                                    ),))
             for id, timestamp, cik, accessionNbr in table:
                 self.accessionId = id
                 break
@@ -479,9 +499,9 @@ WITH row_values (%(newCols)s) AS (
     def insertNamespaces(self):
         self.showStatus("insert namespaces")
         table = self.getTable('namespace', 'namespace_id', 
-                              ('uri', 'is_base', 'taxonomy_version_id'), 
+                              ('uri', 'is_base', 'taxonomy_version_id', 'prefix'), 
                               ('uri',), 
-                              tuple((uri, True, 0) 
+                              tuple((uri, True, 0, self.disclosureSystem.standardPrefixes.get(uri,None)) 
                                     for uri in self.disclosureSystem.baseTaxonomyNamespaces))
         self.namespaceId = dict((uri, id)
                                 for id, uri in table)
@@ -495,6 +515,11 @@ WITH row_values (%(newCols)s) AS (
                                     for docUri in self.modelXbrl.urlDocs.keys()))
         self.documentIds = dict((uri, id)
                                 for id, uri in table)
+        table = self.getTable('accession_document_association', 'accession_document_association_id', 
+                              ('accession_id','document_id'), 
+                              ('document_id',), 
+                              tuple((self.accessionId, docId) 
+                                    for docId in self.documentIds.values()))
         
     def insertCustomArcroles(self):
         self.showStatus("insert arcrole types")
@@ -580,6 +605,22 @@ WITH row_values (%(newCols)s) AS (
                                     if isinstance(resource, ModelResource)))
         self.resourceId = dict(((roleId, qnId, docId, line, offset), id)
                                for id, roleId, qnId, docId, line, offset in table)
+        
+        self.showStatus("insert labels")
+        table = self.getTable('label_resource', 'resource_id', 
+                              ('resource_id', 'label', 'xml_lang'), 
+                              ('resource_id',), 
+                              tuple((self.resourceId[self.uriId[resource.role],
+                                                     self.qnameId[resource.qname],
+                                                     self.documentIds[resource.modelDocument.uri],
+                                                     resource.sourceline,
+                                                     0],
+                                     resource.elementText,
+                                     resource.xmlLang)
+                                    for arcrole in (XbrlConst.conceptLabel, XbrlConst.conceptReference)
+                                    for rel in self.modelXbrl.relationshipSet(arcrole).modelRelationships
+                                    for resource in (rel.fromModelObject, rel.toModelObject)
+                                    if isinstance(resource, ModelResource) and XbrlConst.isLabelRole(resource.role)))
     
     def insertNetworks(self):
         self.showStatus("insert networks")
@@ -624,19 +665,19 @@ WITH row_values (%(newCols)s) AS (
                 for rootConcept in relationshipSet.rootConcepts:
                     seq = walkTree(relationshipSet.fromModelObject(rootConcept), seq, 1, relationshipSet, set(), dbRels, networkId)
 
-        def conceptId(concept):
+        def conceptElementId(concept):
             if isinstance(concept, ModelConcept):
-                self.elementId.get(self.qnameId.get(concept.qname))
+                return self.elementId.get(self.qnameId.get(concept.qname))
             else:
                 return None            
-        def resourceId(resource):
+        def resourceResourceId(resource):
             if isinstance(resource, ModelResource):
                 return self.resourceId.get((self.uriId[resource.role],
                                             self.qnameId[resource.qname],
                                             self.documentIds[resource.modelDocument.uri],
                                             resource.sourceline, 0))
             else:
-                return 0            
+                return None     
         
         table = self.getTable('relationship', 'relationship_id', 
                               ('network_id', 'from_element_id', 'to_element_id', 'reln_order', 
@@ -644,11 +685,11 @@ WITH row_values (%(newCols)s) AS (
                                'tree_sequence', 'tree_depth', 'preferred_label_role_uri_id'), 
                               ('network_id', 'tree_sequence'), 
                               tuple((networkId,
-                                     conceptId(rel.fromModelObject.qname), # may be None
-                                     conceptId(rel.toModelObject.qname), # may be None
+                                     conceptElementId(rel.fromModelObject), # may be None
+                                     conceptElementId(rel.toModelObject), # may be None
                                      dbNum(rel.order),
-                                     resourceId(rel.fromModelObject.qname), # may be None
-                                     resourceId(rel.toModelObject.qname), # may be None
+                                     resourceResourceId(rel.fromModelObject), # may be None
+                                     resourceResourceId(rel.toModelObject), # may be None
                                      dbNum(rel.weight), # none if no weight
                                      sequence,
                                      depth,

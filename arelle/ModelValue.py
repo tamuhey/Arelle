@@ -274,6 +274,13 @@ def dateUnionEqual(dateUnion1, dateUnion2, instantEndDate=False):
         dateUnion2 = dateTime(dateUnion2, addOneDay=instantEndDate)
     return dateUnion1 == dateUnion2
         
+def dateunionDate(datetimeValue, subtractOneDay=False):
+    isDate = (hasattr(datetimeValue,'dateOnly') and datetimeValue.dateOnly) or not hasattr(datetimeValue, 'hour')
+    d = datetimeValue
+    if isDate or (d.hour == 0 and d.minute == 0 and d.second == 0):
+        if subtractOneDay and not isDate: d -= datetime.timedelta(1)
+    return datetime.date(d.year, d.month, d.day)
+
 def yearMonthDuration(value):
     minus, hasYr, yrs, hasMo, mos, hasDay, days, hasTime, hasHr, hrs, hasMin, mins, hasSec, secs = durationPattern.match(value).groups()
     if hasDay or hasHr or hasMin or hasSec: raise ValueError
@@ -355,6 +362,44 @@ class Time(datetime.time):
         time = datetime.time.__new__(cls, hour, minute, second, microsecond, tzinfo)
         time.hour24 = hour24
         return time
+    
+class gYearMonth():
+    def __init__(self, year, month):
+        self.year = int(year)
+        self.month = int(month)
+
+    def __repr__(self):
+        return "-{0}-{1}".format(self.year, self.month)
+    
+    
+class gMonthDay():
+    def __init__(self, month, day):
+        self.month = int(month)
+        self.day = int(day)
+
+    def __repr__(self):
+        return "--{0}-{1}".format(self.month, self.day)
+    
+class gYear():
+    def __init__(self, year):
+        self.year = int(year)
+
+    def __repr__(self):
+        return "-{0}".format(self.year)
+    
+class gMonth():
+    def __init__(self, month):
+        self.month = int(month)
+
+    def __repr__(self):
+        return "--{0}".format(self.month)
+    
+class gDay():
+    def __init__(self, day):
+        self.day = int(day)
+
+    def __repr__(self):
+        return "---{0}".format(self.day)
     
 class InvalidValue(str):
     def __new__(cls, value):

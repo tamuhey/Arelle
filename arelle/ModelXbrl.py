@@ -12,6 +12,7 @@ from arelle.FileSource import FileNamedStringIO
 from arelle.ModelObject import ModelObject
 from arelle.Locale import format_string
 from arelle.PrototypeInstanceObject import FactPrototype, DimValuePrototype
+from arelle.UrlUtil import isHttpUrl
 from arelle.ValidateXbrlDimensions import isFactDimensionallyValid
 ModelRelationshipSet = None # dynamic import
 
@@ -400,7 +401,7 @@ class ModelXbrl:
             return self.modelDocument # use existing instance entry point
         priorFileSource = self.fileSource
         self.fileSource = FileSource.FileSource(url, self.modelManager.cntlr)
-        if self.uri.startswith("http://"):
+        if isHttpUrl(self.uri):
             schemaRefUri = self.uri
         else:   # relativize local paths
             schemaRefUri = os.path.relpath(self.uri, os.path.dirname(url))
@@ -786,7 +787,7 @@ class ModelXbrl:
             # assume it is a string with ID in a tokenized representation, like xyz_33
         try:
             return self.modelObjects[_INT(objectId.rpartition("_")[2])]
-        except ValueError:
+        except (IndexError, ValueError):
             return None
 
     # UI thread viewModelObject
@@ -1056,7 +1057,7 @@ class ModelXbrl:
             if activityCompleted:
                 timeTaken = time.time() - self._startedProfiledActivity
                 if timeTaken > minTimeToShow:
-                    self.modelManager.addToLog("{0} {1:.2f} secs".format(activityCompleted, timeTaken))
+                    self.modelManager.addToLog("{0} {1:.2f} secs".format(activityCompleted, timeTaken), messageCode="info:profileActivity")
         except AttributeError:
             pass
         self._startedProfiledActivity = time.time()
@@ -1072,8 +1073,8 @@ class ModelXbrl:
         pkgFilename = entryFilename + ".zip"
         with ZipFile(pkgFilename, 'w') as zip:
             numFiles = 0
-            for fileUri in sorted(self.urlDocs.keys()):
-                if not (fileUri.startswith("http://") or fileUri.startswith("https://")):
+            for fileUri in sorted(self.urlDocs.keys()): 
+                if not isHttpUrl(fileUri): 
                     numFiles += 1
                     # this has to be a relative path because the hrefs will break
                     zip.write(fileUri, os.path.basename(fileUri))
