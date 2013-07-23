@@ -5,7 +5,10 @@ Created on Jan 25, 2011
 (c) Copyright 2011 Mark V Systems Limited, All rights reserved.
 '''
 from tkinter import Toplevel, N, S, E, W
-from tkinter.ttk import Frame, Button
+try:
+    from tkinter.ttk import Frame, Button
+except ImportError:
+    from ttk import Frame, Button
 import re
 from arelle.UiUtil import (gridHdr, gridCell, gridCombobox, label, checkbox)
 
@@ -118,6 +121,9 @@ class DialogFormulaParameters(Toplevel):
            checkbox(frame, 2, y + 6,
                     "Formula Rules", 
                     "traceFormulaRules"),
+           checkbox(frame, 2, y + 7,
+                    "Evaluation Timing", 
+                    "timeVariableSetEvaluation"),
            checkbox(frame, 3, y + 1, 
                     "Variable Dependencies", 
                     "traceVariablesDependencies"),
@@ -150,9 +156,12 @@ class DialogFormulaParameters(Toplevel):
         
         mainWin.showStatus(None)
 
+        label(frame, 1, y, "IDs:")
+        self.idsEntry = gridCell(frame, 1, y, options.get("runIDs"))
+        self.idsEntry.grid(columnspan=2, padx=30)
         okButton = Button(frame, text=_("OK"), width=12, command=self.ok)
         cancelButton = Button(frame, text=_("Cancel"), width=12, command=self.close)
-        okButton.grid(row=y, column=2, sticky=E, pady=3)
+        okButton.grid(row=y, column=3, sticky=W, pady=3)
         cancelButton.grid(row=y, column=3, sticky=E, pady=3, padx=3)
         
         frame.grid(row=0, column=0, sticky=(N,S,E,W))
@@ -181,6 +190,7 @@ class DialogFormulaParameters(Toplevel):
                 # stored as strings, so they can be saved in json files
                 parameterValues[qnameCell.value] = (typeCell.value, valueCell.value)
         self.options["parameterValues"] = parameterValues
+        self.options["runIDs"] = self.idsEntry.value
         
     def ok(self, event=None):
         self.setOptions()

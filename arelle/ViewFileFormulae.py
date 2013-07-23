@@ -6,7 +6,7 @@ Created on Nov 27, 2011
 '''
 from arelle import ModelObject, XbrlConst, ViewFile
 from arelle.ModelDtsObject import ModelRelationship
-from arelle.ModelFormulaObject import ModelVariable
+from arelle.ModelFormulaObject import ModelVariable, ModelVariableSetAssertion, ModelConsistencyAssertion
 from arelle.ViewUtilFormulae import rootFormulaObjects, formulaObjSortKey
 import os
 
@@ -55,11 +55,14 @@ class ViewFormulae(ViewFile.View):
         if isinstance(fromObject, ModelVariable) and fromRel is not None:
             text = "{0} ${1}".format(fromObject.localName, fromRel.variableQname)
             xmlRowEltAttr = {"type": str(fromObject.localName), "name": str(fromRel.variableQname)}
+        elif isinstance(fromObject, (ModelVariableSetAssertion, ModelConsistencyAssertion)):
+            text = "{0} {1}".format(fromObject.localName, fromObject.id)
+            xmlRowEltAttr = {"type": str(fromObject.localName), "id": str(fromObject.id)}
         else:
             text = fromObject.localName
             xmlRowEltAttr = {"type": str(fromObject.localName)}
         cols = [text, fromObject.xlinkLabel] # label
-        if fromRel is not None and fromRel.arcrole == XbrlConst.variableFilter:
+        if fromRel is not None and fromRel.elementQname == XbrlConst.qnVariableFilterArc:
             cols.append("true" if fromRel.isCovered else "false") # cover
             cols.append("true" if fromRel.isComplemented else "false") #complement
         else:

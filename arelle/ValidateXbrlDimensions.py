@@ -4,12 +4,14 @@ Created on Oct 17, 2010
 @author: Mark V Systems Limited
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
-import os
+import os, sys
 from collections import defaultdict
 from arelle import (UrlUtil, XbrlConst)
 from arelle.ModelObject import ModelObject
 from arelle.ModelDtsObject import ModelConcept
 from arelle.PrototypeInstanceObject import ContextPrototype, DimValuePrototype
+
+NONDEFAULT = sys.intern(_STR_8BIT("non-default"))
 
 def loadDimensionDefaults(val):
     # load dimension defaults when required without performing validations
@@ -84,7 +86,7 @@ def checkBaseSet(val, arcrole, ELR, relsSet):
                                 if cycle is not None:
                                     cycle.append(hcDimRel)
                                     path = str(hcConcept.qname) + " " + " - ".join(
-                                        "{0}:{1} {2}".format(rel.modelDocument.basename, rel.sourceline, rel.toModelObject.qname)
+                                        "{0}:{1} {2}".format(rel.modelDocument.basename, rel.sourceline, (rel.toModelObject.qname if rel.toModelObject is not None else None))
                                         for rel in reversed(cycle))
                                 val.modelXbrl.error("xbrldte:DRSDirectedCycleError",
                                     _("Dimension relationships have a directed cycle in DRS role %(linkrole)s \nstarting from hypercube %(hypercube)s, \ndimension %(dimension)s, \npath %(path)s"),
@@ -94,7 +96,7 @@ def checkBaseSet(val, arcrole, ELR, relsSet):
                                 if cycle is not None:
                                     cycle.append(hcDimRel)
                                     path = str(priItemConcept.qname) + " " + " - ".join(
-                                        "{0}:{1} {2}".format(rel.modelDocument.basename, rel.sourceline, rel.toModelObject.qname)
+                                        "{0}:{1} {2}".format(rel.modelDocument.basename, rel.sourceline, (rel.toModelObject.qname if rel.toModelObject is not None else None))
                                         for rel in reversed(cycle))
                                 val.modelXbrl.error("xbrldte:PrimaryItemPolymorphismError",
                                     _("Dimension relationships have a polymorphism cycle in DRS role %(linkrole)s \nstarting from hypercube %(hypercube)s, \ndimension %(dimension)s, \npath %(path)s"),
@@ -105,7 +107,7 @@ def checkBaseSet(val, arcrole, ELR, relsSet):
             fromConcept = modelRel.fromModelObject
             toConcept = modelRel.toModelObject
             if fromConcept is not None and toConcept is not None:   # none if failed to load
-                if not fromConcept.isDimensionItem:
+                if not isinstance(fromConcept, ModelConcept) or not fromConcept.isDimensionItem:
                     val.modelXbrl.error("xbrldte:DimensionDomainSourceError",
                         _("Dimension-domain relationship from %(source)s to %(target)s in link role %(linkrole)s must have a dimension declaration source"),
                         modelObject=modelRel, source=fromConcept.qname, target=toConcept.qname, linkrole=ELR)
@@ -113,7 +115,7 @@ def checkBaseSet(val, arcrole, ELR, relsSet):
                     val.modelXbrl.error("xbrldte:DimensionDomainSourceError",
                         _("Dimension-domain relationship from %(source)s to %(target)s in link role %(linkrole)s has a typed dimension source"),
                         modelObject=modelRel, source=fromConcept.qname, target=toConcept.qname, linkrole=ELR)
-                if not toConcept.isDomainMember:
+                if not isinstance(toConcept, ModelConcept) or not toConcept.isDomainMember:
                     val.modelXbrl.error("xbrldte:DimensionDomainTargetError",
                         _("Dimension-domain relationship from %(source)s to %(target)s in link role %(linkrole)s must have a domain member target"),
                         modelObject=modelRel, source=fromConcept.qname, target=toConcept.qname, linkrole=ELR)
@@ -123,7 +125,7 @@ def checkBaseSet(val, arcrole, ELR, relsSet):
             fromConcept = modelRel.fromModelObject
             toConcept = modelRel.toModelObject
             if fromConcept is not None and toConcept is not None:
-                if not fromConcept.isDimensionItem:
+                if not isinstance(fromConcept, ModelConcept) or not fromConcept.isDimensionItem:
                     val.modelXbrl.error("xbrldte:DimensionDefaultSourceError",
                         _("Dimension-default relationship from %(source)s to %(target)s in link role %(linkrole)s must have a dimension declaration source"),
                         modelObject=modelRel, source=fromConcept.qname, target=toConcept.qname, linkrole=ELR)
@@ -131,7 +133,7 @@ def checkBaseSet(val, arcrole, ELR, relsSet):
                     val.modelXbrl.error("xbrldte:DimensionDefaultSourceError",
                         _("Dimension-default relationship from %(source)s to %(target)s in link role %(linkrole)s has a typed dimension source"),
                         modelObject=modelRel, source=fromConcept.qname, target=toConcept.qname, linkrole=ELR)
-                if not toConcept.isDomainMember:
+                if not isinstance(toConcept, ModelConcept) or not toConcept.isDomainMember:
                     val.modelXbrl.error("xbrldte:DimensionDefaultTargetError",
                         _("Dimension-default relationship from %(source)s to %(target)s in link role %(linkrole)s must have a domain member target"),
                         modelObject=modelRel, source=fromConcept.qname, target=toConcept.qname, linkrole=ELR)
@@ -151,11 +153,11 @@ def checkBaseSet(val, arcrole, ELR, relsSet):
                 for domMbrRel in rels:
                     toConcept = domMbrRel.toModelObject
                     if toConcept is not None:
-                        if not priItemConcept.isDomainMember:
+                        if not isinstance(priItemConcept, ModelConcept) or not priItemConcept.isDomainMember:
                             val.modelXbrl.error("xbrldte:DomainMemberSourceError",
                                 _("Domain-Member relationship from %(source)s to %(target)s in link role %(linkrole)s must have a domain primary item or domain member source"),
                                 modelObject=domMbrRel, source=priItemConcept.qname, target=toConcept.qname, linkrole=ELR)
-                        if not toConcept.isDomainMember:
+                        if not isinstance(toConcept, ModelConcept) or not toConcept.isDomainMember:
                             val.modelXbrl.error("xbrldte:DomainMemberTargetError",
                                 _("Domain-Member relationship from %(source)s to %(target)s in link role %(linkrole)s must have a domain primary item or domain member target"),
                                 modelObject=domMbrRel, source=priItemConcept.qname, target=toConcept.qname, linkrole=ELR)
@@ -252,6 +254,15 @@ def checkConcept(val, concept):
                 modelObject=concept, concept=concept.qname)
 
 def checkContext(val, cntx):
+    def logDimAndFacts(modelDimValue):
+        dimAndFacts = [modelDimValue]
+        for f in val.modelXbrl.facts:
+            if f.context == cntx:
+                dimAndFacts.append(f)
+                if len(dimAndFacts) > 10:   # log up to 10 facts using this context
+                    break
+        return dimAndFacts
+    
     # check errorDimensions of context
     for modelDimValues in (cntx.segDimValues.values(), cntx.scenDimValues.values(), cntx.errorDimValues):
         for modelDimValue in modelDimValues:
@@ -261,19 +272,19 @@ def checkContext(val, cntx):
                 modelDimValue.isTyped != (dimensionConcept.get("{http://xbrl.org/2005/xbrldt}typedDomainRef") is not None):
                 val.modelXbrl.error("xbrldie:TypedMemberNotTypedDimensionError" if modelDimValue.isTyped else "xbrldie:ExplicitMemberNotExplicitDimensionError",
                     _("Context %(contextID)s %(dimension)s %(value)s is not an appropriate dimension item"),
-                    modelObject=modelDimValue, contextID=cntx.id, 
+                    modelObject=logDimAndFacts(modelDimValue), contextID=cntx.id, 
                     dimension=modelDimValue.prefixedName, value=modelDimValue.dimensionQname)
-            elif modelDimValue.isExplicit:
+            if modelDimValue.isExplicit:
                 memberConcept = modelDimValue.member
                 if memberConcept is None or not memberConcept.isGlobalDeclaration:
                     val.modelXbrl.error("xbrldie:ExplicitMemberUndefinedQNameError",
                         _("Context %(contextID)s explicit dimension %(dimension)s member %(value)s is not a global member item"),
-                        modelObject=modelDimValue, contextID=cntx.id, 
+                        modelObject=logDimAndFacts(modelDimValue), contextID=cntx.id, 
                         dimension=modelDimValue.dimensionQname, value=modelDimValue.memberQname)
-                if val.modelXbrl.dimensionDefaultConcepts.get(dimensionConcept) == memberConcept:
+                elif val.modelXbrl.dimensionDefaultConcepts.get(dimensionConcept) == memberConcept:
                     val.modelXbrl.error("xbrldie:DefaultValueUsedInInstanceError",
-                        _("Context %(contextID)s explicit dimension %(dimension)s member {2} is a default member item"),
-                        modelObject=modelDimValue, contextID=cntx.id, 
+                        _("Context %(contextID)s explicit dimension %(dimension)s member %(value)s is a default member item"),
+                        modelObject=logDimAndFacts(modelDimValue), contextID=cntx.id, 
                         dimension=modelDimValue.dimensionQname, value=modelDimValue.memberQname)
             elif modelDimValue.isTyped:
                 typedDomainConcept = dimensionConcept.typedDomainElement
@@ -282,6 +293,8 @@ def checkContext(val, cntx):
                     if isinstance(element,ModelObject):
                         if problem is None:
                             problem = _("multiple contents")
+                        elif typedDomainConcept is None:
+                            problem = _("Missing domain element schema definition for {0}").format(dimensionConcept.typedDomainRef)
                         elif element.localName != typedDomainConcept.name or \
                             element.namespaceURI != typedDomainConcept.qname.namespaceURI:
                             problem = _("wrong content {0}").format(element.prefixedName)
@@ -290,7 +303,7 @@ def checkContext(val, cntx):
                 if problem:
                     val.modelXbrl.error("xbrldie:IllegalTypedDimensionContentError",
                         _("Context %(contextID)s typed dimension %(dimension)s has %(error)s"),
-                        modelObject=modelDimValue, contextID=cntx.id, 
+                        modelObject=logDimAndFacts(modelDimValue), contextID=cntx.id, 
                         dimension=modelDimValue.dimensionQname, error=problem)
 
     for modelDimValue in cntx.errorDimValues:
@@ -299,25 +312,37 @@ def checkContext(val, cntx):
            and (dimensionConcept in cntx.segDimValues or dimensionConcept in cntx.scenDimValues):
             val.modelXbrl.error("xbrldie:RepeatedDimensionInInstanceError",
                 _("Context %(contextID)s dimension %(dimension)s is a repeated dimension value"),
-                modelObject=modelDimValue, contextID=cntx.id, dimension=modelDimValue.dimensionQname)
+                modelObject=logDimAndFacts(modelDimValue), contextID=cntx.id, dimension=modelDimValue.dimensionQname)
     # decision by WG that dimensions in both seg & scen is also a duplication
     for modelDimValue in cntx.segDimValues.values():
         dimensionConcept = modelDimValue.dimension
         if dimensionConcept is not None and dimensionConcept in cntx.scenDimValues:
             val.modelXbrl.error("xbrldie:RepeatedDimensionInInstanceError",
                 _("Context %(contextID)s dimension %(dimension)s is a repeated dimension value"),
-                modelObject=modelDimValue, contextID=cntx.id, dimension=modelDimValue.dimensionQname)
+                modelObject=logDimAndFacts(modelDimValue), contextID=cntx.id, dimension=modelDimValue.dimensionQname)
             
-def checkFact(val, f):
-    if not isFactDimensionallyValid(val, f):
+def checkFact(val, f, otherFacts=None):
+    if not isFactDimensionallyValid(val, f, otherFacts):
         val.modelXbrl.error("xbrldie:PrimaryItemDimensionallyInvalidError",
             _("Fact %(fact)s context %(contextID)s dimensionally not valid"),
             modelObject=f, fact=f.qname, contextID=f.context.id)
 
-def isFactDimensionallyValid(val, f, setPrototypeContextElements=False):
+def isFactDimensionallyValid(val, f, setPrototypeContextElements=False, otherFacts=None):
     hasElrHc = False
     for ELR, hcRels in priItemElrHcRels(val, f.concept).items():
         hasElrHc = True
+        '''
+        if otherFacts: # find relevant facts with compatible primary items and same dims
+            relevantPriItems = set.intersection(*[priItemsOfElrHc(val, rel.fromModelObject, ELR, ELR)
+                                                  for rel in hcRels])
+            relevantFactsByPriItems = set.union(*[val.factsByQname(priItem.qname)
+                                                for priItem in relevantPriItems]) & otherFacts
+            relevantFactsByDims = set.instersection(relevantFactsByPriItems,
+                                                    *[val.factsByDimMemQname(dimQname, NONDEFAULT)
+                                                      for dimQname in f.context.dimAspects(_DICT_SET(val.modelXbrl.qnameDimensionDefaults.keys()))])
+        else:
+            relevantFactsByDims = None
+        '''
         if checkFactElrHcs(val, f, ELR, hcRels, setPrototypeContextElements):
             return True # meets hypercubes in this ELR
         
@@ -326,7 +351,19 @@ def isFactDimensionallyValid(val, f, setPrototypeContextElements=False):
         return False
     return True
     
-def priItemElrHcRels(val, priItem, ELR=None, elrHcRels=None):
+def priItemElrHcRels(val, priItem, ELR=None):
+    key = (priItem, ELR)
+    try:
+        priItemElrHcRels = val.priItemElrHcRels
+    except AttributeError:
+        priItemElrHcRels = val.priItemElrHcRels = {}
+    try:
+        return priItemElrHcRels[key]
+    except KeyError:
+        rels = priItemElrHcRels[key] = findPriItemElrHcRels(val, priItem, ELR)
+        return rels
+    
+def findPriItemElrHcRels(val, priItem, ELR=None, elrHcRels=None):
     if elrHcRels is None:
         elrHcRels = defaultdict(list)
     # add has hypercube relationships for ELR
@@ -338,8 +375,19 @@ def priItemElrHcRels(val, priItem, ELR=None, elrHcRels=None):
         relLinkrole = domMbrRel.linkrole
         toELR = (domMbrRel.targetRole or relLinkrole)
         if ELR is None or ELR == toELR:
-            priItemElrHcRels(val, domMbrRel.fromModelObject, relLinkrole, elrHcRels)
+            findPriItemElrHcRels(val, domMbrRel.fromModelObject, relLinkrole, elrHcRels)
     return elrHcRels
+
+def priItemsOfElrHc(val, priItem, hcELR, relELR, priItems=None):
+    if priItems is None: 
+        priItems = set(priItem)
+    for domMbrRel in val.modelXbrl.relationshipSet(XbrlConst.domainMember, relELR).fromModelObject(priItem):
+        toPriItem = domMbrRel.toModelObject
+        linkrole = domMbrRel.consecutiveLinkrole
+        if linkrole == hcELR:
+            priItems.add(toPriItem)
+        priItemsOfElrHc(val, toPriItem, hcELR, linkrole, priItems)
+    return priItems
 
 NOT_FOUND = 0
 MEMBER_USABLE = 1
@@ -384,8 +432,9 @@ def checkFactElrHcs(val, f, ELR, hcRels, setPrototypeContextElements=False):
                     hcValid = False
                     continue
                 if not dimConcept.isTypedDimension:
-                    if dimensionMemberState(val, dimConcept, memConcept, domELR) != MEMBER_USABLE:
-                        hcValid = False 
+                    # change to cache all member concepts usability per domain: if dimensionMemberState(val, dimConcept, memConcept, domELR) != MEMBER_USABLE:
+                    if not dimensionMemberUsable(val, dimConcept, memConcept, domELR):
+                        hcValid = False
                 if hcValid and setPrototypeContextElements and isinstance(memModelDimension,DimValuePrototype) and not hcNegating:
                     memModelDimension.contextElement = hcContextElement
         if hcIsClosed:
@@ -405,6 +454,40 @@ def checkFactElrHcs(val, f, ELR, hcRels, setPrototypeContextElements=False):
             elrValid = False
     return elrValid
                             
+def dimensionMemberUsable(val, dimConcept, memConcept, domELR):
+    try:
+        dimensionMembersUsable = val.dimensionMembersUsable
+    except AttributeError:
+        dimensionMembersUsable = val.dimensionMembersUsable = {}
+    key = (dimConcept, domELR)
+    try:
+        return memConcept in dimensionMembersUsable[key]
+    except KeyError:
+        usableMembers = set()
+        unusableMembers = set()
+        dimensionMembersUsable[key] = usableMembers
+        # build set of usable members in dimension/domain/ELR
+        findUsableMembersInDomainELR(val, val.modelXbrl.relationshipSet(XbrlConst.dimensionDomain, domELR).fromModelObject(dimConcept),
+                                     domELR, usableMembers, unusableMembers, defaultdict(set))
+        usableMembers -= unusableMembers
+        return memConcept in usableMembers
+    
+def findUsableMembersInDomainELR(val, rels, ELR, usableMembers, unusableMembers, toConceptELRs):
+    for rel in rels:
+        toConcept = rel.toModelObject
+        if rel.isUsable:
+            usableMembers.add(toConcept)
+        else:
+            unusableMembers.add(toConcept)
+        toELR = (rel.targetRole or ELR)
+        toELRs = toConceptELRs[toConcept]
+        if toELR not in toELRs:  # looping if it's already there in a visited ELR
+            toELRs.add(toELR)
+            domMbrRels = val.modelXbrl.relationshipSet(XbrlConst.domainMember, toELR).fromModelObject(toConcept)
+            findUsableMembersInDomainELR(val, domMbrRels, toELR, usableMembers, unusableMembers, toConceptELRs)
+            toELRs.discard(toELR)
+
+''' removed to cache all members usability for domain
 def dimensionMemberState(val, dimConcept, memConcept, domELR):
     try:
         dimensionMemberStates = val.dimensionMemberStates
@@ -438,6 +521,7 @@ def memberStateInDomain(val, memConcept, rels, ELR, toConceptELRs=None):
                              memberStateInDomain(val, memConcept, domMbrRels, toELR, toConceptELRs))
             toELRs.discard(toELR)
     return foundState
+'''
 
 ''' removed because no valid way to check one isolated dimension for validity without full set of others
 # check a single dimension value for primary item (not the complete set of dimension values)

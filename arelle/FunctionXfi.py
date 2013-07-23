@@ -9,8 +9,10 @@ from arelle import XPathContext, XbrlConst, XbrlUtil, XmlUtil
 from arelle.ModelObject import ModelObject, ModelAttribute
 from arelle.ModelValue import qname, QName, dateTime, DATE, DATETIME, DATEUNION, DateTime, dateUnionEqual, anyURI
 from arelle.FunctionUtil import anytypeArg, stringArg, numericArg, qnameArg, nodeArg, atomicArg
+from arelle.ModelXbrl import ModelXbrl
 from arelle.ModelDtsObject import anonymousTypeSuffix, ModelConcept
 from arelle.ModelInstanceObject import ModelDimensionValue, ModelFact, ModelInlineFact
+from arelle.ModelFormulaObject import ModelFormulaResource
 from arelle.XmlValidate import UNKNOWN, VALID, validate
 from arelle.ValidateXbrlCalcs import inferredDecimals, inferredPrecision
 from arelle.ValidateXbrlDimensions import priItemElrHcRels
@@ -31,25 +33,30 @@ def call(xc, p, localname, args):
         raise XPathContext.FunctionNotAvailable("xfi:{0}".format(localname))
 
 def instance(xc, p, args, i=0):
-    if len(args[i]) != 1: raise XPathContext.FunctionArgType(i+1,"xbrl:xbrl")
+    if i >= len(args):  # missing argument means to use the standard input instance
+        return xc.modelXbrl
+    if len(args[i]) != 1: # a sequence of instances isn't acceptable to these classes of functions
+        raise XPathContext.FunctionArgType(i+1,"xbrl:xbrl")
     xbrliXbrl = anytypeArg(xc, args, i, "xbrli:xbrl")
     if isinstance(xbrliXbrl, ModelObject) and xbrliXbrl.elementQname == XbrlConst.qnXbrliXbrl:
         return xbrliXbrl.modelXbrl
-    raise XPathContext.FunctionArgType(i+1,"xbrl:xbrl")
+    elif isinstance(xbrliXbrl, ModelXbrl):
+        return xbrliXbrl
+    raise XPathContext.FunctionArgType(i,"xbrl:xbrl")
 
 def item(xc, args, i=0):
     if len(args[i]) != 1: raise XPathContext.FunctionArgType(i+1,"xbrl:item")
     modelItem = xc.modelItem(args[i][0])
     if modelItem is not None: 
         return modelItem
-    raise XPathContext.FunctionArgType(i+1,"xbrl:item")
+    raise XPathContext.FunctionArgType(i,"xbrl:item")
 
 def tuple(xc, args, i=0):
     if len(args[i]) != 1: raise XPathContext.FunctionArgType(i+1,"xbrl:tuple")
     modelTuple = args[i][0]
     if isinstance(modelTuple, (ModelFact, ModelInlineFact)) and modelTuple.isTuple:
         return modelTuple
-    raise XPathContext.FunctionArgType(i+1,"xbrl:tuple")
+    raise XPathContext.FunctionArgType(i,"xbrl:tuple")
 
 def item_context(xc, args, i=0):
     return item(xc, args, i).context
@@ -248,7 +255,7 @@ def decimals(xc, p, args):
 
 def infer_precision_decimals(xc, p, args, attrName):
     if len(args) != 1: raise XPathContext.FunctionNumArgs()
-    if len(args[0]) != 1: raise XPathContext.FunctionArgType(1,"xbrl:item")
+    if len(args[0]) != 1: raise XPathContext.FunctionArgType(1,"xbrl:item",args[0])
     modelItem = xc.modelItem(args[0][0])
     if modelItem is None: 
         raise XPathContext.FunctionArgType(1,"xbrl:item")
@@ -284,6 +291,24 @@ def conceptProperty(xc, p, args, property):
             if property == "fraction": return modelConcept.isFraction
     return False
 
+def checkXffFunctionUse(xc, p, functionName):
+    # check function use after checking argument types
+    if xc.progHeader is not None and xc.progHeader.element is not None:
+        try:
+            modelResourceElt = xc.progHeader.element._modelResourceElt
+        except AttributeError:
+            modelResourceElt = xc.progHeader.element
+            while (modelResourceElt is not None and not isinstance(modelResourceElt, ModelFormulaResource)):
+                modelResourceElt = modelResourceElt.getparent()
+            xc.progHeader.element._modelResourceElt = modelResourceElt
+        
+        if (modelResourceElt is None or
+            modelResourceElt.localName not in ("formula", "consistencyAssertion", "valueAssertion", "precondition", "message")):
+            raise XPathContext.XPathException(p, 'xffe:invalidFunctionUse', _('Function xff:uncovered-aspect cannot be used on an XPath expression associated with a {0}').format(xc.progHeader.element.localName))
+            
+    if xc.variableSet is not None and xc.variableSet.implicitFiltering  == "false":
+        raise XPathContext.XPathException(p, 'xffe:invalidFunctionUse', _('Function xff:uncovered-aspect cannot be used with implicitFiltering=false'))
+
 def uncovered_aspect(xc, p, args):
     from arelle.ModelFormulaObject import aspectFromToken, Aspect
     from arelle.FormulaEvaluator import uncoveredAspectValue
@@ -292,12 +317,7 @@ def uncovered_aspect(xc, p, args):
     if aspect == Aspect.DIMENSIONS:
         qn = qnameArg(xc, p, args, 1, 'QName', emptyFallback=None)
         
-    # check function use after checking argument types
-    if xc.progHeader is not None and xc.progHeader.element is not None:
-        if xc.progHeader.element.localName not in ("formula", "consistencyAssertion", "valueAssertion", "message"):
-            raise XPathContext.XPathException(p, 'xffe:invalidFunctionUse', _('Function xff:uncovered-aspect cannot be used on an XPath expression associated with a {0}').format(xc.progHeader.element.localName))
-        if xc.variableSet is not None and xc.variableSet.implicitFiltering  == "false":
-            raise XPathContext.XPathException(p, 'xffe:invalidFunctionUse', _('Function xff:uncovered-aspect cannot be used with implicitFiltering=false'))
+    checkXffFunctionUse(xc, p, "uncovered-aspect")
         
     if aspect == Aspect.DIMENSIONS:
         if qn:
@@ -325,12 +345,7 @@ def has_fallback_value(xc, p, args):
     if len(args) != 1: raise XPathContext.FunctionNumArgs()
     variableQname = qnameArg(xc, p, args, 0, 'QName', emptyFallback=None)
         
-    # check function use after checking argument types
-    if xc.progHeader is not None and xc.progHeader.element is not None:
-        if xc.progHeader.element.localName not in ("formula", "consistencyAssertion", "valueAssertion", "message"):
-            raise XPathContext.XPathException(p, 'xffe:invalidFunctionUse', _('Function xff:uncovered-aspect cannot be used on an XPath expression associated with a {0}').format(xc.progHeader.element.localName))
-        if xc.variableSet is not None and xc.variableSet.implicitFiltering  == "false":
-            raise XPathContext.XPathException(p, 'xffe:invalidFunctionUse', _('Function xff:uncovered-aspect cannot be used with implicitFiltering=false'))
+    checkXffFunctionUse(xc, p, "has-fallback-value")
         
     return variableBindingIsFallback(xc, variableQname)
 
@@ -823,6 +838,20 @@ def fact_typed_dimension_value(xc, p, args):
         return result if result is not None else ()
     raise XPathContext.FunctionArgType(1,"xbrl:item")
 
+def fact_explicit_dimensions(xc, p, args):
+    if len(args) != 1: raise XPathContext.FunctionNumArgs()
+    context = item_context(xc, args)
+    if context is not None:
+        return set(qn for qn, dim in context.qnameDims.items() if dim.isExplicit) | _DICT_SET(xc.modelXbrl.qnameDimensionDefaults.keys())
+    return set()
+
+def fact_typed_dimensions(xc, p, args):
+    if len(args) != 1: raise XPathContext.FunctionNumArgs()
+    context = item_context(xc, args)
+    if context is not None:
+        return set(qn for qn, dim in context.qnameDims.items() if dim.isTyped)
+    return set()
+
 def fact_dimension_s_equal2(xc, p, args):
     if len(args) != 3: raise XPathContext.FunctionNumArgs()
     context1 = item_context(xc, args, i=0)
@@ -846,9 +875,10 @@ def fact_dimension_s_equal2(xc, p, args):
     raise XPathContext.FunctionArgType(1,"xbrl:item")
 
 def linkbase_link_roles(xc, p, args):
-    if len(args) != 1: raise XPathContext.FunctionNumArgs()
+    if len(args) > 2: raise XPathContext.FunctionNumArgs()
+    inst = instance(xc, p, args, 1)
     arcroleURI = stringArg(xc, args, 0, "xs:string")
-    relationshipSet = xc.modelXbrl.relationshipSet(arcroleURI)
+    relationshipSet = inst.relationshipSet(arcroleURI)
     if relationshipSet:
         return [anyURI(linkrole) for linkrole in relationshipSet.linkRoleUris]
     return ()
@@ -857,10 +887,10 @@ def navigate_relationships(xc, p, args):
     raise xfiFunctionNotAvailable()
 
 def concept_label(xc, p, args):
-    if len(args) == 5: raise xfiFunctionNotAvailable()
-    if len(args) != 4: raise XPathContext.FunctionNumArgs()
+    if not 4 <= len(args) <= 5: raise XPathContext.FunctionNumArgs()
+    inst = instance(xc, p, args, 4)
     qnSource = qnameArg(xc, p, args, 0, 'QName', emptyFallback=None)
-    srcConcept = xc.modelXbrl.qnameConcepts.get(qnSource)
+    srcConcept = inst.qnameConcepts.get(qnSource)
     if srcConcept is None:
         return ""
     linkroleURI = stringArg(xc, args, 1, "xs:string", emptyFallback='')
@@ -868,7 +898,7 @@ def concept_label(xc, p, args):
     labelroleURI = stringArg(xc, args, 2, "xs:string", emptyFallback='')
     if not labelroleURI: labelroleURI = XbrlConst.standardLabel
     lang = stringArg(xc, args, 3, "xs:string", emptyFallback='')
-    relationshipSet = xc.modelXbrl.relationshipSet(XbrlConst.conceptLabel,linkroleURI)
+    relationshipSet = inst.relationshipSet(XbrlConst.conceptLabel,linkroleURI)
     if relationshipSet is not None:
         label = relationshipSet.label(srcConcept, labelroleURI, lang)
         if label is not None: return label
@@ -876,24 +906,28 @@ def concept_label(xc, p, args):
 
 
 def arcrole_definition(xc, p, args):
-    if len(args) == 2: raise XPathContext.FunctionNumArgs()
+    if len(args) > 2: raise XPathContext.FunctionNumArgs()
+    inst = instance(xc, p, args, 1)
     arcroleURI = stringArg(xc, args, 0, "xs:string", emptyFallback='')
-    modelArcroleTypes = xc.modelXbrl.arcroleTypes.get(arcroleURI)
+    modelArcroleTypes = inst.arcroleTypes.get(arcroleURI)
     if modelArcroleTypes is not None and len(modelArcroleTypes) > 0:
         arcroledefinition = modelArcroleTypes[0].definition
         if arcroledefinition is not None: return arcroledefinition
     return ()
 
 def role_definition(xc, p, args):
+    if len(args) > 2: raise XPathContext.FunctionNumArgs()
+    inst = instance(xc, p, args, 1)
     roleURI = stringArg(xc, args, 0, "xs:string", emptyFallback='')
-    modelRoleTypes = xc.modelXbrl.roleTypes.get(roleURI)
+    modelRoleTypes = inst.roleTypes.get(roleURI)
     if modelRoleTypes is not None and len(modelRoleTypes) > 0:
         roledefinition = modelRoleTypes[0].definition
         if roledefinition is not None: return roledefinition
     return ()
 
 def fact_footnotes(xc, p, args):
-    if len(args) != 5: raise XPathContext.FunctionNumArgs()
+    if len(args) > 6: raise XPathContext.FunctionNumArgs()
+    inst = instance(xc, p, args, 5)
     itemObj = item(xc, args)
     linkroleURI = stringArg(xc, args, 1, "xs:string", emptyFallback='')
     if not linkroleURI: linkroleURI = XbrlConst.defaultLinkRole
@@ -902,24 +936,27 @@ def fact_footnotes(xc, p, args):
     footnoteroleURI = stringArg(xc, args, 3, "xs:string", emptyFallback='')
     if not footnoteroleURI: footnoteroleURI = XbrlConst.footnote
     lang = stringArg(xc, args, 4, "xs:string", emptyFallback='')
-    relationshipSet = xc.modelXbrl.relationshipSet(arcroleURI,linkroleURI)
+    relationshipSet = inst.relationshipSet(arcroleURI,linkroleURI)
     if relationshipSet:
         return relationshipSet.label(itemObj, footnoteroleURI, lang, returnMultiple=True)
     return ()
 
-def concept_relationships(xc, p, args):
+def concept_relationships(xc, p, args, nestResults=False):
     lenArgs = len(args)
-    if lenArgs < 4 or lenArgs > 8: raise XPathContext.FunctionNumArgs()
+    if not 4 <= lenArgs <= 8: raise XPathContext.FunctionNumArgs()
+    inst = instance(xc, p, args, 7)
     qnSource = qnameArg(xc, p, args, 0, 'QName', emptyFallback=None)
     linkroleURI = stringArg(xc, args, 1, "xs:string")
     if not linkroleURI:
         linkroleURI = XbrlConst.defaultLinkRole
+    elif linkroleURI == "XBRL-all-linkroles":
+        linkroleURI = None
     arcroleURI = stringArg(xc, args, 2, "xs:string")
     axis = stringArg(xc, args, 3, "xs:string")
     if not axis in ('descendant', 'child', 'ancestor', 'parent', 'sibling', 'sibling-or-self'):
         return ()
     if qnSource != XbrlConst.qnXfiRoot:
-        srcConcept = xc.modelXbrl.qnameConcepts.get(qnSource)
+        srcConcept = inst.qnameConcepts.get(qnSource)
         if srcConcept is None:
             return ()
     if lenArgs > 4:
@@ -944,7 +981,7 @@ def concept_relationships(xc, p, args):
         qnArc = None
         
     removeSelf = axis == 'sibling'
-    relationshipSet = xc.modelXbrl.relationshipSet(arcroleURI, linkroleURI, qnLink, qnArc)
+    relationshipSet = inst.relationshipSet(arcroleURI, linkroleURI, qnLink, qnArc)
     if relationshipSet:
         result = []
         visited = {qnSource}
@@ -970,7 +1007,7 @@ def concept_relationships(xc, p, args):
             else: # must be a root, never has any siblings
                 return []
         if rels:
-            concept_relationships_step(xc, relationshipSet, rels, axis, generations, result, visited)
+            concept_relationships_step(xc, inst, relationshipSet, rels, axis, generations, result, visited, nestResults)
             if removeSelf:
                 for i, rel in enumerate(result):
                     if rel.toModelObject == srcConcept:
@@ -979,22 +1016,41 @@ def concept_relationships(xc, p, args):
             return result
     return ()
 
-def concept_relationships_step(xc, relationshipSet, rels, axis, generations, result, visited):
-    for modelRel in rels:
-        concept = modelRel.toModelObject if axis == 'descendant' else modelRel.fromModelObject
-        conceptQname = concept.qname
-        result.append(modelRel)
-        if generations > 1 or (generations == 0 and conceptQname not in visited):
-            nextGen = (generations - 1) if generations > 1 else 0
-            if generations == 0:
-                visited.add(conceptQname)
-            if axis in ('descendant'):
-                stepRels = relationshipSet.fromModelObject(concept)
-            else:
-                stepRels = relationshipSet.toModelObject(concept)
-            concept_relationships_step(xc, relationshipSet, stepRels, axis, nextGen, result, visited)
-            if generations == 0:
-                visited.discard(conceptQname)
+def concept_relationships_step(xc, inst, relationshipSet, rels, axis, generations, result, visited, nestResults):
+    if rels:
+        for modelRel in rels:
+            concept = modelRel.toModelObject if axis == 'descendant' else modelRel.fromModelObject
+            conceptQname = concept.qname
+            result.append(modelRel)
+            if generations > 1 or (generations == 0 and conceptQname not in visited):
+                nextGen = (generations - 1) if generations > 1 else 0
+                if generations == 0:
+                    visited.add(conceptQname)
+                if axis == 'descendant':
+                    if relationshipSet.arcrole == "XBRL-dimensions":
+                        stepRelationshipSet = inst.relationshipSet("XBRL-dimensions", modelRel.consecutiveLinkrole)
+                    else: 
+                        stepRelationshipSet = relationshipSet
+                    stepRels = stepRelationshipSet.fromModelObject(concept)
+                else:
+                    if relationshipSet.arcrole == "XBRL-dimensions":
+                        stepRelationshipSet = inst.relationshipSet("XBRL-dimensions")
+                        # search all incoming relationships for those with right consecutiveLinkrole
+                        stepRels = [rel
+                                    for rel in stepRelationshipSet.toModelObject(concept)
+                                    if rel.consectuiveLinkrole == modelRel.linkrole]
+                    else:
+                        stepRelationshipSet = relationshipSet
+                        stepRels = stepRelationshipSet.toModelObject(concept)
+                if nestResults: # nested results are in a sub-list
+                    nestedList = []
+                else: # nested results flattened in top level results
+                    nestedList = result
+                concept_relationships_step(xc, inst, stepRelationshipSet, stepRels, axis, nextGen, nestedList, visited, nestResults)
+                if nestResults and nestedList:  # don't append empty nested results
+                    result.append(nestedList)
+                if generations == 0:
+                    visited.discard(conceptQname)
 
 def relationship_from_concept(xc, p, args):
     if len(args) != 1: raise XPathContext.FunctionNumArgs()
@@ -1012,7 +1068,8 @@ def relationship_to_concept(xc, p, args):
 
 def distinct_nonAbstract_parent_concepts(xc, p, args):
     lenArgs = len(args)
-    if lenArgs < 2 or lenArgs > 3: raise XPathContext.FunctionNumArgs()
+    if not 2 <= lenArgs <= 3: raise XPathContext.FunctionNumArgs()
+    inst = instance(xc, p, args, 2)
     linkroleURI = stringArg(xc, args, 0, "xs:string")
     if not linkroleURI:
         linkroleURI = XbrlConst.defaultLinkRole
@@ -1020,7 +1077,7 @@ def distinct_nonAbstract_parent_concepts(xc, p, args):
     # TBD allow instance as arg 2
     
     result = set()
-    relationshipSet = xc.modelXbrl.relationshipSet(arcroleURI, linkroleURI)
+    relationshipSet = inst.relationshipSet(arcroleURI, linkroleURI)
     if relationshipSet:
         for rel in relationshipSet.modelRelationships:
             fromModelObject = rel.fromModelObject
@@ -1173,6 +1230,8 @@ xfiFunctions = {
     'fact-has-explicit-dimension-value': fact_has_explicit_dimension_value,
     'fact-explicit-dimension-value': fact_explicit_dimension_value,
     'fact-typed-dimension-value': fact_typed_dimension_value,
+    'fact-explicit-dimensions': fact_explicit_dimensions,
+    'fact-typed-dimensions': fact_typed_dimensions,
     'fact-dimension-s-equal2': fact_dimension_s_equal2,
     'linkbase-link-roles': linkbase_link_roles,
     'concept-label': concept_label,

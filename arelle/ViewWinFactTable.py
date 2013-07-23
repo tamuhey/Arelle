@@ -30,6 +30,9 @@ def viewFacts(modelXbrl, tabWin, header="Fact Table", arcrole=XbrlConst.parentCh
         view.menuAddClipboard()
         view.menuAddLangs()
         view.menuAddLabelRoles(includeConceptName=True)
+        #saveMenu = Menu(view.viewFrame, tearoff=0)
+        #saveMenu.add_command(label=_("HTML file"), underline=0, command=lambda: view.modelXbrl.modelManager.cntlr.fileSave(view=view, fileType="html"))
+        #menu.add_cascade(label=_("Save"), menu=saveMenu, underline=0)
     
 class ViewFactTable(ViewWinTree.ViewTree):
     def __init__(self, modelXbrl, tabWin, header, arcrole, linkrole=None, linkqname=None, arcqname=None, lang=None):
@@ -78,7 +81,9 @@ class ViewFactTable(ViewWinTree.ViewTree):
                     for dimQname in sorted(dims.keys(), key=lambda d: str(d)):
                         dimvalue = dims[dimQname]
                         if dimvalue.isExplicit:
-                            values.append(dimvalue.member.label(self.labelrole,lang=self.lang))
+                            values.append(dimvalue.member.label(self.labelrole,lang=self.lang)
+                                          if dimvalue.member is not None 
+                                          else str(dimvalue.memberQname))
                         else:
                             values.append(XmlUtil.innerText(dimvalue.typedMember))
                             
@@ -142,10 +147,8 @@ class ViewFactTable(ViewWinTree.ViewTree):
         else:
             for linkroleUri in relationshipSet.linkRoleUris:
                 modelRoleTypes = self.modelXbrl.roleTypes.get(linkroleUri)
-                if modelRoleTypes is not None and len(modelRoleTypes) > 0:
-                    roledefinition = modelRoleTypes[0].definition
-                    if roledefinition is None or roledefinition == "":
-                        roledefinition = linkroleUri                    
+                if modelRoleTypes:
+                    roledefinition = (modelRoleTypes[0].genLabel(lang=self.lang, strip=True) or modelRoleTypes[0].definition or linkroleUri)                    
                     roleId = modelRoleTypes[0].objectId(self.id)
                 else:
                     roledefinition = linkroleUri
@@ -163,10 +166,12 @@ class ViewFactTable(ViewWinTree.ViewTree):
         return True
 
     def viewConcept(self, concept, modelObject, labelPrefix, preferredLabel, parentnode, n, relationshipSet, visited):
-        if concept is None or concept.substitutionGroupQname == XbrlConst.qnXbrldtDimensionItem:
+        # bad relationship could identify non-concept or be None
+        if (not isinstance(concept, ModelDtsObject.ModelConcept) or 
+            concept.substitutionGroupQname == XbrlConst.qnXbrldtDimensionItem):
             return
         childnode = self.treeView.insert(parentnode, "end", modelObject.objectId(self.id),
-                    text=labelPrefix + concept.label(preferredLabel,lang=self.lang), 
+                    text=labelPrefix + concept.label(preferredLabel,lang=self.lang,linkroleHint=relationshipSet.linkrole), 
                     tags=("odd" if n & 1 else "even",))
         self.setRowFacts(childnode,concept,preferredLabel)
         self.id += 1

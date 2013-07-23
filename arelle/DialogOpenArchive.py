@@ -5,15 +5,17 @@ Created on Oct 20, 2010
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
 from tkinter import Toplevel, StringVar, VERTICAL, HORIZONTAL, N, S, E, W, messagebox
-from tkinter.ttk import Frame, Button, Treeview, Scrollbar
+try:
+    from tkinter.ttk import Frame, Button, Treeview, Scrollbar
+except ImportError:
+    from ttk import Frame, Button, Treeview, Scrollbar
 import re, os, sys
 from arelle.CntlrWinTooltip import ToolTip
+from arelle.UrlUtil import isHttpUrl
 
 '''
 caller checks accepted, if True, caller retrieves url
 '''
-
-TAXONOMY_PACKAGE_FILE_NAME = '.taxonomyPackage.xml'
 
 ARCHIVE = 1
 ENTRY_POINTS = 2
@@ -23,7 +25,7 @@ def askArchiveFile(mainWin, filesource):
     filenames = filesource.dir
     if filenames is not None:   # an IO or other error can return None
         
-        if TAXONOMY_PACKAGE_FILE_NAME in filenames:            
+        if filesource.isTaxonomyPackage:            
             dialog = DialogOpenArchive(mainWin, 
                                        ENTRY_POINTS, 
                                        filesource, 
@@ -91,10 +93,18 @@ class DialogOpenArchive(Toplevel):
         selectedNode = None
 
         if openType == ENTRY_POINTS:
-            metadata = filesource.file(filesource.url + os.sep + TAXONOMY_PACKAGE_FILE_NAME)[0]
-    
             try:
-                self.nameToUrls = parseTxmyPkg(mainWin, metadata)
+                metadataFiles = filesource.taxonomyPackageMetadataFiles
+                if len(metadataFiles) > 1:
+                    raise IOError(_("Taxonomy package contained more than one metadata file: {0}.")
+                                  .format(', '.join(metadataFiles)))
+                metadataFile = metadataFiles[0]
+                metadata = filesource.file(filesource.url + os.sep + metadataFile)[0]
+                self.metadataFilePrefix = os.sep.join(os.path.split(metadataFile)[:-1])
+                if self.metadataFilePrefix:
+                    self.metadataFilePrefix += os.sep
+        
+                self.nameToUrls, self.remappings = parseTxmyPkg(mainWin, metadata)
             except Exception as e:
                 self.close()
                 err = _("Failed to parse metadata; the underlying error was: {0}").format(e)
@@ -233,20 +243,27 @@ class DialogOpenArchive(Toplevel):
                     self.filesource.select(filename)
                     self.accepted = True
                     self.close()
-        elif self.openType == ENTRY_POINTS:
-            epName = selection[0]
-            #index 0 is the remapped Url, as opposed to the canonical one used for display
-            urlOrFile = self.nameToUrls[epName][0]
-
-            if not urlOrFile.endswith("/"):
-                # check if it's an absolute URL rather than a path into the archive
-                if urlOrFile.startswith("http://") or urlOrFile.startswith("https://"):
-                    self.webUrl = urlOrFile
-                else:
-                    # assume it's a path inside the archive:
-                    self.filesource.select(urlOrFile)
-                self.accepted = True
-                self.close()
+            elif self.openType == ENTRY_POINTS:
+                epName = selection[0]
+                #index 0 is the remapped Url, as opposed to the canonical one used for display
+                urlOrFile = self.nameToUrls[epName][0]
+                
+                # load file source remappings
+                self.filesource.mappedPaths = \
+                    dict((prefix, 
+                          remapping if isHttpUrl(remapping)
+                          else (self.filesource.baseurl + os.sep + self.metadataFilePrefix +remapping.replace("/", os.sep)))
+                          for prefix, remapping in self.remappings.items())
+    
+                if not urlOrFile.endswith("/"):
+                    # check if it's an absolute URL rather than a path into the archive
+                    if isHttpUrl(urlOrFile):
+                        self.filesource.select(urlOrFile)  # absolute path selection
+                    else:
+                        # assume it's a path inside the archive:
+                        self.filesource.select(self.metadataFilePrefix + urlOrFile)
+                    self.accepted = True
+                    self.close()
         
     def close(self, event=None):
         self.parent.focus_set()
@@ -341,7 +358,7 @@ def parseTxmyPkg(mainWin, metadataFile):
             #perform prefix remappings
             remappedUrl = resolvedUrl
             for prefix, replace in remappings.items():
-                remappedUrl = resolvedUrl.replace(prefix, replace, 1)
+                remappedUrl = remappedUrl.replace(prefix, replace, 1)
             result[name] = (remappedUrl, resolvedUrl)
 
-    return result
+    return (result, remappings)

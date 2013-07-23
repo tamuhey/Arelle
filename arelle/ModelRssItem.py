@@ -11,6 +11,7 @@ from arelle.ModelObject import ModelObject
 edgr = "http://www.sec.gov/Archives/edgar"
 edgrDescription = "{http://www.sec.gov/Archives/edgar}description"
 edgrFile = "{http://www.sec.gov/Archives/edgar}file"
+edgrSequence = "{http://www.sec.gov/Archives/edgar}sequence"
 edgrType = "{http://www.sec.gov/Archives/edgar}type"
 edgrUrl = "{http://www.sec.gov/Archives/edgar}url"
 
@@ -43,7 +44,7 @@ class ModelRssItem(ModelObject):
                 self.status = _("not tested")
         except AttributeError:
             self.status = _("not tested")
-        self.results = []
+        self.results = None
         self.assertions = None
         
     @property
@@ -91,12 +92,35 @@ class ModelRssItem(ModelObject):
         return None
     
     @property
+    def assignedSic(self):
+        return XmlUtil.text(XmlUtil.descendant(self, edgr, "assignedSic"))
+    
+    @property
+    def acceptanceDatetime(self):
+        try:
+            return self._acceptanceDatetime
+        except AttributeError:
+            import datetime
+            self._acceptanceDatetime = None
+            date = XmlUtil.text(XmlUtil.descendant(self, edgr, "acceptanceDatetime"))
+            if date and len(date) == 14:
+                self._acceptanceDatetime = datetime.datetime(_INT(date[0:4]),_INT(date[4:6]),_INT(date[6:8]),_INT(date[8:10]),_INT(date[10:12]),_INT(date[12:14]))
+            return self._acceptanceDatetime
+    
+    @property
     def fiscalYearEnd(self):
         yrEnd = XmlUtil.text(XmlUtil.descendant(self, edgr, "fiscalYearEnd"))
         if yrEnd and len(yrEnd) == 4:
             return "{0}-{1}".format(yrEnd[0:2],yrEnd[2:4])
         return None
     
+    @property
+    def htmlUrl(self):  # main filing document
+        htmlDocElt = XmlUtil.descendant(self, edgr, "xbrlFile", attrName=edgrSequence, attrValue="1")
+        if htmlDocElt is not None:
+            return htmlDocElt.get(edgrUrl)
+        return None
+
     @property
     def url(self):
         try:
@@ -134,25 +158,20 @@ class ModelRssItem(ModelObject):
         
     def setResults(self, modelXbrl):
         self.results = []
+        self.assertionUnsuccessful = False
         # put error codes first, sorted, then assertion result (dict's)
+        self.status = "pass"
         for error in modelXbrl.errors:
             if isinstance(error,dict):  # assertion results
                 self.assertions = error
-            else:   # error code results
-                self.results.append(error)
-        self.results.sort()
-        self.assertionUnsuccessful = False
-        for error in self.results:
-            if isinstance(error,dict):
-                self.results.append(error)
-                # check if any not successful
                 for countSuccessful, countNotsuccessful in error.items():
                     if countNotsuccessful > 0:
                         self.assertionUnsuccessful = True
-        if self.results:
-            self.status = " \n".join(str(result) for result in self.results)
-        else:
-            self.status = "pass"
+                        self.status = "unsuccessful"
+            else:   # error code results
+                self.results.append(error)
+                self.status = "fail" # error code
+        self.results.sort()
     
     @property
     def propertyView(self):

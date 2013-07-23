@@ -4,21 +4,21 @@ Created on Feb 20, 2011
 @author: Mark V Systems Limited
 (c) Copyright 2011 Mark V Systems Limited, All rights reserved.
 '''
-from lxml import etree
 import os, re
 from arelle import XbrlConst, XmlUtil
-from arelle.ModelValue import qname, dateTime, DATE, DATETIME, DATEUNION, anyURI
+from arelle.ModelValue import qname, dateTime, DATE, DATETIME, DATEUNION, anyURI, INVALIDixVALUE, gYearMonth, gMonthDay, gYear, gMonth, gDay
 from arelle.ModelObject import ModelObject, ModelAttribute
 from arelle import UrlUtil
 validateElementSequence = None  #dynamic import to break dependency loops
 modelGroupCompositorTitle = None
 ModelInlineFact = None
 
-UNKNOWN = 0
-INVALID = 1
-NONE = 2
-VALID = 3 # values >= VALID are valid
-VALID_ID = 4
+UNVALIDATED = 0
+UNKNOWN = 1
+INVALID = 2
+NONE = 3
+VALID = 4 # values >= VALID are valid
+VALID_ID = 5
 
 normalizeWhitespacePattern = re.compile(r"\s")
 collapseWhitespacePattern = re.compile(r"\s+")
@@ -26,9 +26,16 @@ languagePattern = re.compile("[a-zA-Z]{1,8}(-[a-zA-Z0-9]{1,8})*$")
 NCNamePattern = re.compile("^[_A-Za-z\xC0-\xD6\xD8-\xF6\xF8-\xFF\u0100-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD]"
                             r"[_\-\." 
                                "\xB7A-Za-z0-9\xC0-\xD6\xD8-\xF6\xF8-\xFF\u0100-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\u0300-\u036F\u203F-\u2040]*$")
+QNamePattern = re.compile("^([_A-Za-z\xC0-\xD6\xD8-\xF6\xF8-\xFF\u0100-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD]"
+                             r"[_\-\." 
+                               "\xB7A-Za-z0-9\xC0-\xD6\xD8-\xF6\xF8-\xFF\u0100-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\u0300-\u036F\u203F-\u2040]*:)?"
+                          "[_A-Za-z\xC0-\xD6\xD8-\xF6\xF8-\xFF\u0100-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD]"
+                            r"[_\-\." 
+                               "\xB7A-Za-z0-9\xC0-\xD6\xD8-\xF6\xF8-\xFF\u0100-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\u0300-\u036F\u203F-\u2040]*$")
 namePattern = re.compile("^[_A-Za-z\xC0-\xD6\xD8-\xF6\xF8-\xFF\u0100-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD]"
                             r"[_\-\.:" 
                                "\xB7A-Za-z0-9\xC0-\xD6\xD8-\xF6\xF8-\xFF\u0100-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\u0300-\u036F\u203F-\u2040]*$")
+
 NMTOKENPattern = re.compile(r"[_\-\.:" 
                                "\xB7A-Za-z0-9\xC0-\xD6\xD8-\xF6\xF8-\xFF\u0100-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\u0300-\u036F\u203F-\u2040]+$")
 lexicalPatterns = {
@@ -41,6 +48,17 @@ lexicalPatterns = {
     "language": re.compile(r"[a-zA-Z]{1,8}(-[a-zA-Z0-9]{1,8})*$"),   
     }
 
+# patterns difficult to compile into python
+xmlSchemaPatterns = {
+    r"\c+": NMTOKENPattern,
+    r"\i\c*": namePattern,
+    r"[\i-[:]][\c-[:]]*": NCNamePattern,
+    }
+
+# patterns to replace \c and \i in names
+iNameChar = "[_A-Za-z\xC0-\xD6\xD8-\xF6\xF8-\xFF\u0100-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD]"
+cNameChar = r"[_\-\.:"   "\xB7A-Za-z0-9\xC0-\xD6\xD8-\xF6\xF8-\xFF\u0100-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\u0300-\u036F\u203F-\u2040]"
+
 baseXsdTypePatterns = {
                 "Name": namePattern,
                 "language": languagePattern,
@@ -48,99 +66,14 @@ baseXsdTypePatterns = {
                 "NCName": NCNamePattern,
                 "ID": NCNamePattern,
                 "IDREF": NCNamePattern,
-                "ENTITY": NCNamePattern,                
+                "ENTITY": NCNamePattern, 
+                "QName": QNamePattern,               
             }
-def schemaValidate(modelXbrl):
-    class schemaResolver(etree.Resolver):
-        def resolve(self, url, id, context): 
-            if url.startswith("file:///__"):
-                url = importedFilepaths[int(url[10:])]
-            filepath = modelXbrl.modelManager.cntlr.webCache.getfilename(url)
-            return self.resolve_filename(filepath, context)
-          
-    entryDocument = modelXbrl.modelDocument
-    # test of schema validation using lxml (trial experiment, commented out for production use)
-    from arelle import ModelDocument
-    imports = []
-    importedNamespaces = set()
-    importedFilepaths = []
-
-    '''    
-    for mdlSchemaDoc in entryDocument.referencesDocument.keys():
-        if (mdlSchemaDoc.type == ModelDocument.Type.SCHEMA and 
-            mdlSchemaDoc.targetNamespace not in importedNamespaces):
-            # actual file won't pass through properly, fake with table reference
-            imports.append('<xsd:import namespace="{0}" schemaLocation="file:///__{1}"/>'.format(
-                mdlSchemaDoc.targetNamespace, len(importedFilepaths)))
-            importedNamespaces.add(mdlSchemaDoc.targetNamespace)
-            importedFilepaths.append(mdlSchemaDoc.filepath)
-    '''    
-
-    def importReferences(referencingDocument):
-        for mdlSchemaDoc in referencingDocument.referencesDocument.keys():
-            if (mdlSchemaDoc.type == ModelDocument.Type.SCHEMA and 
-                mdlSchemaDoc.targetNamespace not in importedNamespaces):
-                importedNamespaces.add(mdlSchemaDoc.targetNamespace)
-                importReferences(mdlSchemaDoc)  # do dependencies first
-                # actual file won't pass through properly, fake with table reference
-                imports.append('<xsd:import namespace="{0}" schemaLocation="file:///__{1}"/>'.format(
-                    mdlSchemaDoc.targetNamespace, len(importedFilepaths)))
-                importedFilepaths.append(mdlSchemaDoc.filepath)
-    importReferences(entryDocument)
-   # add schemas used in xml validation but not DTS discovered
-    for mdlDoc in modelXbrl.urlDocs.values():
-        if mdlDoc.type in (ModelDocument.Type.INSTANCE, ModelDocument.Type.LINKBASE):
-            schemaLocation = mdlDoc.xmlRootElement.get("{http://www.w3.org/2001/XMLSchema-instance}schemaLocation")
-            if schemaLocation:
-                ns = None
-                for entry in schemaLocation.split():
-                    if ns is None:
-                        ns = entry
-                    else:
-                        if ns not in importedNamespaces:
-                            imports.append('<xsd:import namespace="{0}" schemaLocation="file:///__{1}"/>'.format(
-                                ns, len(importedFilepaths)))
-                            importedNamespaces.add(ns)
-                            importedFilepaths.append(entry)
-                        ns = None
-    schemaXml = '<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema">\n{0}</xsd:schema>\n'.format(
-                   '\n'.join(imports))
-    # trace schema files referenced
-    with open("c:\\temp\\test.xml", "w") as fh:
-        fh.write(schemaXml)
-    modelXbrl.modelManager.showStatus(_("lxml validator loading xml schema"))
-    schema_root = etree.XML(schemaXml)
-    import time
-    startedAt = time.time()
-    parser = etree.XMLParser()
-    parser.resolvers.add(schemaResolver())
-    schemaDoc = etree.fromstring(schemaXml, parser=parser, base_url=entryDocument.filepath+"-dummy-import.xsd")
-    schema = etree.XMLSchema(schemaDoc)
-    from arelle.Locale import format_string
-    modelXbrl.info("info:lxmlSchemaValidator", format_string(modelXbrl.modelManager.locale, 
-                                 _("schema loaded in %.2f secs"), 
-                                        time.time() - startedAt))
-    modelXbrl.modelManager.showStatus(_("lxml schema validating"))
-    # check instance documents and linkbases (sort for inst doc before linkbases, and in file name order)
-    for mdlDoc in sorted(modelXbrl.urlDocs.values(), key=lambda mdlDoc: (-mdlDoc.type, mdlDoc.filepath)):
-        if mdlDoc.type in (ModelDocument.Type.INSTANCE, ModelDocument.Type.LINKBASE):
-            startedAt = time.time()
-            docXmlTree = etree.parse(mdlDoc.filepath)
-            modelXbrl.info("info:lxmlSchemaValidator", format_string(modelXbrl.modelManager.locale, 
-                                                _("schema validated in %.3f secs"), 
-                                                time.time() - startedAt),
-                                                modelDocument=mdlDoc)
-            if not schema.validate(docXmlTree):
-                for error in schema.error_log:
-                    modelXbrl.error("lxmlSchema:{0}".format(error.type_name.lower()),
-                            error.message,
-                            modelDocument=mdlDoc,
-                            sourceLine=error.line)
-    modelXbrl.modelManager.showStatus(_("lxml validation done"), clearAfter=3000)
-    
 predefinedAttributeTypes = {
     qname("{http://www.w3.org/XML/1998/namespace}xml:lang"):("language",None),
     qname("{http://www.w3.org/XML/1998/namespace}xml:space"):("NCName",{"enumeration":{"default","preserve"}})}
+
+xAttributesSharedEmptyDict = {}
 
 def xhtmlValidate(modelXbrl, elt):
     from lxml.etree import DTD, XMLSyntaxError
@@ -149,7 +82,7 @@ def xhtmlValidate(modelXbrl, elt):
         dtd = DTD(fh)
     try:
         if not dtd.validate( XmlUtil.ixToXhtml(elt) ):
-            modelXbrl.error("xmlDTD:error",
+            modelXbrl.error("xhmlDTD:elementUnexpected",
                 _("%(element)s error %(error)s"),
                 modelObject=elt, element=elt.localName.title(),
                 error=', '.join(e.message for e in dtd.error_log.filter_from_errors()))
@@ -165,10 +98,24 @@ def validate(modelXbrl, elt, recurse=True, attrQname=None, ixFacts=False):
     isIxFact = isinstance(elt, ModelInlineFact)
 
     # attrQname can be provided for attributes that are global and LAX
-    if not hasattr(elt,"xValid") and (not isIxFact or ixFacts):
-        text = elt.elementText
-        qnElt = elt.qname if ixFacts and isIxFact else qname(elt)
+    if (not hasattr(elt,"xValid") or elt.xValid == UNVALIDATED) and (not isIxFact or ixFacts):
+        qnElt = elt.qname if ixFacts and isIxFact else elt.elementQname
         modelConcept = modelXbrl.qnameConcepts.get(qnElt)
+        try:
+            text = elt.elementText
+        except Exception as err:
+            if isIxFact and err.__class__.__name__ == "FunctionArgType":
+                modelXbrl.error("ixTransform:valueError",
+                    _("Inline element %(element)s fact %(fact)s type %(typeName)s transform %(transform)s value error: %(value)s"),
+                    modelObject=elt, element=elt.elementQname, fact=elt.qname, transform=elt.format,
+                    typeName=modelConcept.baseXsdType if modelConcept is not None else "unknown",
+                    value=XmlUtil.innerText(elt, ixExclude=True))
+            else:
+                modelXbrl.error("xmlValidation:valueError",
+                    _("Element %(element)s error %(error)s value: %(value)s"),
+                    modelObject=elt, element=elt.elementQname, error=str(err), value=elt.text)
+            elt.sValue = elt.xValue = text = INVALIDixVALUE
+            elt.xValid = INVALID
         facets = None
         if modelConcept is not None:
             isNillable = modelConcept.isNillable
@@ -178,8 +125,11 @@ def validate(modelXbrl, elt, recurse=True, attrQname=None, ixFacts=False):
             else:
                 baseXsdType = modelConcept.baseXsdType
                 facets = modelConcept.facets
-                if len(text) == 0 and modelConcept.default is not None:
-                    text = modelConcept.default
+                if len(text) == 0:
+                    if modelConcept.default is not None:
+                        text = modelConcept.default
+                    elif modelConcept.fixed is not None:
+                        text = modelConcept.fixed
         elif qnElt == XbrlConst.qnXbrldiExplicitMember: # not in DTS
             baseXsdType = "QName"
             type = None
@@ -194,14 +144,13 @@ def validate(modelXbrl, elt, recurse=True, attrQname=None, ixFacts=False):
             isNillable = False
         isNil = isNillable and elt.get("{http://www.w3.org/2001/XMLSchema-instance}nil") == "true"
         if attrQname is None:
-            validateValue(modelXbrl, elt, None, baseXsdType, text, isNillable, facets)
+            if text is not INVALIDixVALUE:
+                validateValue(modelXbrl, elt, None, baseXsdType, text, isNillable, isNil, facets)
             if type is not None:
                 definedAttributes = type.attributes
             else:
                 definedAttributes = {}
             presentAttributes = set()
-        if not hasattr(elt, "xAttributes"):
-            elt.xAttributes = {}
         # validate attributes
         # find missing attributes for default values
         for attrTag, attrValue in elt.items():
@@ -241,9 +190,15 @@ def validate(modelXbrl, elt, recurse=True, attrQname=None, ixFacts=False):
                 elif qn in predefinedAttributeTypes:
                     baseXsdAttrType, facets = predefinedAttributeTypes[qn]
             validateValue(modelXbrl, elt, attrTag, baseXsdAttrType, attrValue, facets=facets)
+        # if no attributes assigned above, there won't be an xAttributes, if so assign a shared dict to save memory
+        try:
+            elt.xAttributes
+        except AttributeError:
+            elt.xAttributes = xAttributesSharedEmptyDict
+            
         if type is not None:
             if attrQname is None:
-                missingAttributes = type.requiredAttributeQnames - presentAttributes
+                missingAttributes = type.requiredAttributeQnames - presentAttributes - elt.slottedAttributesNames
                 if missingAttributes:
                     modelXbrl.error("xmlSchema:attributesRequired",
                         _("Element %(element)s type %(typeName)s missing required attributes: %(attributes)s"),
@@ -251,6 +206,21 @@ def validate(modelXbrl, elt, recurse=True, attrQname=None, ixFacts=False):
                         element=qnElt,
                         typeName=baseXsdType,
                         attributes=','.join(str(a) for a in missingAttributes))
+                extraAttributes = presentAttributes - _DICT_SET(definedAttributes.keys()) - XbrlConst.builtinAttributes
+                if extraAttributes:
+                    attributeWildcards = type.attributeWildcards
+                    extraAttributes -= set(a
+                                           for a in extraAttributes
+                                           if validateAnyWildcard(qnElt, a, attributeWildcards))
+                    if isIxFact:
+                        extraAttributes -= XbrlConst.ixAttributes
+                    if extraAttributes:
+                        modelXbrl.error("xmlSchema:attributesExtraneous",
+                            _("Element %(element)s type %(typeName)s extraneous attributes: %(attributes)s"),
+                            modelObject=elt,
+                            element=qnElt,
+                            typeName=baseXsdType,
+                            attributes=','.join(str(a) for a in extraAttributes))
                 # add default attribute values
                 for attrQname in (type.defaultAttributeQnames - presentAttributes):
                     modelAttr = type.attributes[attrQname]
@@ -268,7 +238,7 @@ def validate(modelXbrl, elt, recurse=True, attrQname=None, ixFacts=False):
                                 modelObject=elt,
                                 element=qnElt)
                     else:
-                        errResult = validateElementSequence(modelXbrl, type, childElts)
+                        errResult = validateElementSequence(modelXbrl, type, childElts, ixFacts)
                         if errResult is not None and errResult[2]:
                             iElt, occured, errDesc, errArgs = errResult
                             errElt = childElts[iElt] if iElt < len(childElts) else elt
@@ -278,7 +248,7 @@ def validate(modelXbrl, elt, recurse=True, attrQname=None, ixFacts=False):
                             if "compositor" in errArgs:  # compositor is an object, provide friendly string
                                 errArgs["compositor"] = modelGroupCompositorTitle(errArgs["compositor"])
                             modelXbrl.error(*errDesc,**errArgs)
-                    recurse = False # cancel child element validation below
+                    recurse = False # cancel child element validation below, recursion was within validateElementSequence
                 except AttributeError as ex:
                     pass
     if recurse: # if there is no complex or simple type (such as xbrli:measure) then this code is used
@@ -286,14 +256,14 @@ def validate(modelXbrl, elt, recurse=True, attrQname=None, ixFacts=False):
             if isinstance(child, ModelObject):
                 validate(modelXbrl, child, recurse, attrQname, ixFacts)
 
-def validateValue(modelXbrl, elt, attrTag, baseXsdType, value, isNillable=False, facets=None):
+def validateValue(modelXbrl, elt, attrTag, baseXsdType, value, isNillable=False, isNil=False, facets=None):
     if baseXsdType:
         try:
-            if (len(value) == 0 and
-                not attrTag is None and 
-                not isNillable and 
+            '''
+            if (len(value) == 0 and attrTag is None and not isNillable and 
                 baseXsdType not in ("anyType", "string", "normalizedString", "token", "NMTOKEN", "anyURI", "noContent")):
                 raise ValueError("missing value for not nillable element")
+            '''
             xValid = VALID
             whitespaceReplace = (baseXsdType == "normalizedString")
             whitespaceCollapse = (not whitespaceReplace and baseXsdType != "string")
@@ -303,98 +273,159 @@ def validateValue(modelXbrl, elt, attrTag, baseXsdType, value, isNillable=False,
                     pattern = facets["pattern"]
                     # note multiple patterns are or'ed togetner, which isn't yet implemented!
                 if "whiteSpace" in facets:
-                    whitespaceReplace, whitespaceCollapse = {"preserve":(False,False), "replace":(True,False), "collapse":(False,True)}
+                    whitespaceReplace, whitespaceCollapse = {"preserve":(False,False), "replace":(True,False), "collapse":(False,True)}[facets["whiteSpace"]]
             if whitespaceReplace:
                 value = normalizeWhitespacePattern.sub(' ', value)
             elif whitespaceCollapse:
                 value = collapseWhitespacePattern.sub(' ', value.strip())
-            if pattern is not None and pattern.match(value) is None:
-                    raise ValueError("pattern facet " + facets["pattern"].pattern if facets and "pattern" in facets else "pattern mismatch")
-            if facets:
-                if "enumeration" in facets and value not in facets["enumeration"]:
-                    raise ValueError("is not in {1}".format(value, facets["enumeration"]))
-                if "length" in facets and len(value) != facets["length"]:
-                    raise ValueError("length {0}, expected {1}".format(len(value), facets["length"]))
-                if "minLength" in facets and len(value) < facets["minLength"]:
-                    raise ValueError("length {0}, minLength {1}".format(len(value), facets["minLength"]))
-                if "maxLength" in facets and len(value) > facets["maxLength"]:
-                    raise ValueError("length {0}, maxLength {1}".format(len(value), facets["maxLength"]))
             if baseXsdType == "noContent":
                 if len(value) > 0 and not value.isspace():
                     raise ValueError("value content not permitted")
                 xValue = sValue = None
-            elif baseXsdType in {"string", "normalizedString", "language", "token", "NMTOKEN","Name","NCName","IDREF","ENTITY"}:
-                xValue = sValue = value
-            elif baseXsdType == "ID":
-                xValue = sValue = value
-                xValid = VALID_ID
-            elif baseXsdType == "anyURI":
-                xValue = anyURI(value)
-                sValue = value
-                if xValue and not UrlUtil.isValid(xValue):  # allow empty strings to be valid anyURIs
-                    raise ValueError("invalid anyURI value")
-            elif not value: # rest of types get None if nil/empty value
+            elif not value and isNil and isNillable: # rest of types get None if nil/empty value
                 xValue = sValue = None
-            elif baseXsdType in ("decimal", "float", "double"):
-                xValue = sValue = float(value)
-                if facets:
-                    if "totalDigits" in facets and len(value.replace(".","")) > facets["totalDigits"]:
-                        raise ValueError("totalDigits facet {0}".format(facets["totalDigits"]))
-                    if "fractionDigits" in facets and ( '.' in value and
-                        len(value[value.index('.') + 1:]) > facets["fractionDigits"]):
-                        raise ValueError("fraction digits facet {0}".format(facets["fractionDigits"]))
-            elif baseXsdType in ("integer",):
-                xValue = sValue = int(value)
-            elif baseXsdType == "boolean":
-                if value in ("true", "1"):  
-                    xValue = sValue = True
-                elif value in ("false", "0"): 
-                    xValue = sValue = False
-                else: raise ValueError
-            elif baseXsdType == "QName":
-                xValue = qname(elt, value, castException=ValueError)
-                sValue = value
-                ''' not sure here, how are explicitDimensions validated, but bad units not?
-                if xValue.namespaceURI in modelXbrl.namespaceDocs:
-                    if (xValue not in modelXbrl.qnameConcepts and 
-                        xValue not in modelXbrl.qnameTypes and
-                        xValue not in modelXbrl.qnameAttributes and
-                        xValue not in modelXbrl.qnameAttributeGroups):
-                        raise ValueError("qname not defined " + str(xValue))
-                '''
-            elif baseXsdType in ("XBRLI_DECIMALSUNION", "XBRLI_PRECISIONUNION"):
-                xValue = sValue = value if value == "INF" else int(value)
-            elif baseXsdType in ("XBRLI_NONZERODECIMAL"):
-                xValue = sValue = int(value)
-                if xValue == 0:
-                    raise ValueError("invalid value")
-            elif baseXsdType == "XBRLI_DATEUNION":
-                xValue = dateTime(value, type=DATEUNION, castException=ValueError)
-                sValue = value
-            elif baseXsdType == "dateTime":
-                xValue = dateTime(value, type=DATETIME, castException=ValueError)
-                sValue = value
-            elif baseXsdType == "date":
-                xValue = dateTime(value, type=DATE, castException=ValueError)
-                sValue = value
-            elif baseXsdType == "regex-pattern":
-                # for facet compiling
-                try:
-                    xValue = re.compile(value + "$") # must match whole string
-                    sValue = value
-                except Exception as err:
-                    raise ValueError(err)
             else:
-                if baseXsdType in lexicalPatterns:
-                    match = lexicalPatterns[baseXsdType].match(value)
-                    if match is None:
-                        raise ValueError("lexical pattern mismatch")
-                    if baseXsdType == "gMonthDay":
-                        month, day, zSign, zHrMin, zHr, zMin = match.groups()
-                        if int(day) > {2:29, 4:30, 6:30, 9:30, 11:30, 1:31, 3:31, 5:31, 7:31, 8:31, 10:31, 12:31}[int(month)]:
-                            raise ValueError("invalid day {0} for month {1}".format(day, month))
-                xValue = value
-                sValue = value
+                if pattern is not None and pattern.match(value) is None:
+                        raise ValueError("pattern facet " + facets["pattern"].pattern if facets and "pattern" in facets else "pattern mismatch")
+                if facets:
+                    if "enumeration" in facets and value not in facets["enumeration"]:
+                        raise ValueError("{0} is not in {1}".format(value, facets["enumeration"]))
+                    if "length" in facets and len(value) != facets["length"]:
+                        raise ValueError("length {0}, expected {1}".format(len(value), facets["length"]))
+                    if "minLength" in facets and len(value) < facets["minLength"]:
+                        raise ValueError("length {0}, minLength {1}".format(len(value), facets["minLength"]))
+                    if "maxLength" in facets and len(value) > facets["maxLength"]:
+                        raise ValueError("length {0}, maxLength {1}".format(len(value), facets["maxLength"]))
+                if baseXsdType in {"string", "normalizedString", "language", "token", "NMTOKEN","Name","NCName","IDREF","ENTITY"}:
+                    xValue = sValue = value
+                elif baseXsdType == "ID":
+                    xValue = sValue = value
+                    xValid = VALID_ID
+                elif baseXsdType == "anyURI":
+                    if value:  # allow empty strings to be valid anyURIs
+                        if UrlUtil.relativeUrlPattern.match(value) is None:
+                            raise ValueError("IETF RFC 2396 4.3 syntax")
+                    # encode PSVI xValue similarly to Xerces and other implementations
+                    xValue = anyURI(UrlUtil.anyUriQuoteForPSVI(value))
+                    sValue = value
+                elif baseXsdType in ("decimal", "float", "double"):
+                    xValue = sValue = float(value)
+                    if facets:
+                        if "totalDigits" in facets and len(value.replace(".","")) > facets["totalDigits"]:
+                            raise ValueError("totalDigits facet {0}".format(facets["totalDigits"]))
+                        if "fractionDigits" in facets and ( '.' in value and
+                            len(value[value.index('.') + 1:]) > facets["fractionDigits"]):
+                            raise ValueError("fraction digits facet {0}".format(facets["fractionDigits"]))
+                        if "maxInclusive" in facets and xValue > facets["maxInclusive"]:
+                            raise ValueError(" > maxInclusive {0}".format(facets["maxInclusive"]))
+                        if "maxExclusive" in facets and xValue >= facets["maxExclusive"]:
+                            raise ValueError(" >= maxInclusive {0}".format(facets["maxExclusive"]))
+                        if "minInclusive" in facets and xValue < facets["minInclusive"]:
+                            raise ValueError(" < minInclusive {0}".format(facets["minInclusive"]))
+                        if "minExclusive" in facets and xValue <= facets["minExclusive"]:
+                            raise ValueError(" <= minExclusive {0}".format(facets["minExclusive"]))
+                elif baseXsdType in {"integer",
+                                     "nonPositiveInteger","negativeInteger","nonNegativeInteger","positiveInteger",
+                                     "long","unsignedLong",
+                                     "int","unsignedInt",
+                                     "short","unsignedShort",
+                                     "byte","unsignedByte"}:
+                    xValue = sValue = _INT(value)
+                    if ((baseXsdType in {"nonNegativeInteger","unsignedLong","unsignedInt"} 
+                         and xValue < 0) or
+                        (baseXsdType == "nonPositiveInteger" and xValue > 0) or
+                        (baseXsdType == "positiveInteger" and xValue <= 0) or
+                        (baseXsdType == "byte" and not -128 <= xValue < 127) or
+                        (baseXsdType == "unsignedByte" and not 0 <= xValue < 255) or
+                        (baseXsdType == "short" and not -32768 <= xValue < 32767) or
+                        (baseXsdType == "unsignedShort" and not 0 <= xValue < 65535) or
+                        (baseXsdType == "positiveInteger" and xValue <= 0)):
+                        raise ValueError("{0} is not {1}".format(value, baseXsdType))
+                    if facets:
+                        if "totalDigits" in facets and len(value.replace(".","")) > facets["totalDigits"]:
+                            raise ValueError("totalDigits facet {0}".format(facets["totalDigits"]))
+                        if "fractionDigits" in facets and ( '.' in value and
+                            len(value[value.index('.') + 1:]) > facets["fractionDigits"]):
+                            raise ValueError("fraction digits facet {0}".format(facets["fractionDigits"]))
+                        if "maxInclusive" in facets and xValue > facets["maxInclusive"]:
+                            raise ValueError(" > maxInclusive {0}".format(facets["maxInclusive"]))
+                        if "maxExclusive" in facets and xValue >= facets["maxExclusive"]:
+                            raise ValueError(" >= maxInclusive {0}".format(facets["maxExclusive"]))
+                        if "minInclusive" in facets and xValue < facets["minInclusive"]:
+                            raise ValueError(" < minInclusive {0}".format(facets["minInclusive"]))
+                        if "minExclusive" in facets and xValue <= facets["minExclusive"]:
+                            raise ValueError(" <= minExclusive {0}".format(facets["minExclusive"]))
+                elif baseXsdType == "boolean":
+                    if value in ("true", "1"):  
+                        xValue = sValue = True
+                    elif value in ("false", "0"): 
+                        xValue = sValue = False
+                    else: raise ValueError
+                elif baseXsdType == "QName":
+                    xValue = qname(elt, value, castException=ValueError, prefixException=ValueError)
+                    sValue = value
+                    ''' not sure here, how are explicitDimensions validated, but bad units not?
+                    if xValue.namespaceURI in modelXbrl.namespaceDocs:
+                        if (xValue not in modelXbrl.qnameConcepts and 
+                            xValue not in modelXbrl.qnameTypes and
+                            xValue not in modelXbrl.qnameAttributes and
+                            xValue not in modelXbrl.qnameAttributeGroups):
+                            raise ValueError("qname not defined " + str(xValue))
+                    '''
+                elif baseXsdType in ("XBRLI_DECIMALSUNION", "XBRLI_PRECISIONUNION"):
+                    xValue = sValue = value if value == "INF" else _INT(value)
+                elif baseXsdType in ("XBRLI_NONZERODECIMAL"):
+                    xValue = sValue = _INT(value)
+                    if xValue == 0:
+                        raise ValueError("invalid value")
+                elif baseXsdType == "XBRLI_DATEUNION":
+                    xValue = dateTime(value, type=DATEUNION, castException=ValueError)
+                    sValue = value
+                elif baseXsdType == "dateTime":
+                    xValue = dateTime(value, type=DATETIME, castException=ValueError)
+                    sValue = value
+                elif baseXsdType == "date":
+                    xValue = dateTime(value, type=DATE, castException=ValueError)
+                    sValue = value
+                elif baseXsdType == "regex-pattern":
+                    # for facet compiling
+                    try:
+                        sValue = value
+                        if value in xmlSchemaPatterns:
+                            xValue = xmlSchemaPatterns[value]
+                        else:
+                            if r"\i" in value or r"\c" in value:
+                                value = value.replace(r"\i", iNameChar).replace(r"\c", cNameChar)
+                            xValue = re.compile(value + "$") # must match whole string
+                    except Exception as err:
+                        raise ValueError(err)
+                else:
+                    if baseXsdType in lexicalPatterns:
+                        match = lexicalPatterns[baseXsdType].match(value)
+                        if match is None:
+                            raise ValueError("lexical pattern mismatch")
+                        if baseXsdType == "gMonthDay":
+                            month, day, zSign, zHrMin, zHr, zMin = match.groups()
+                            if int(day) > {2:29, 4:30, 6:30, 9:30, 11:30, 1:31, 3:31, 5:31, 7:31, 8:31, 10:31, 12:31}[int(month)]:
+                                raise ValueError("invalid day {0} for month {1}".format(day, month))
+                            xValue = gMonthDay(month, day)
+                        elif baseXsdType == "gYearMonth":
+                            year, month, zSign, zHrMin, zHr, zMin = match.groups()
+                            xValue = gYearMonth(year, month)
+                        elif baseXsdType == "gYear":
+                            year, zSign, zHrMin, zHr, zMin = match.groups()
+                            xValue = gYear(year)
+                        elif baseXsdType == "gMonth":
+                            month, zSign, zHrMin, zHr, zMin = match.groups()
+                            xValue = gMonth(month)
+                        elif baseXsdType == "gDay":
+                            day, zSign, zHrMin, zHr, zMin = match.groups()
+                            xValue = gDay(day)
+                        else:
+                            xValue = value
+                    else: # no lexical pattern, forget compiling value
+                        xValue = value
+                    sValue = value
         except ValueError as err:
             if ModelInlineFact is not None and isinstance(elt, ModelInlineFact):
                 errElt = "{0} fact {1}".format(elt.elementQname, elt.qname)
@@ -424,7 +455,11 @@ def validateValue(modelXbrl, elt, attrTag, baseXsdType, value, isNillable=False,
         xValue = sValue = None
         xValid = UNKNOWN
     if attrTag:
-        elt.xAttributes[attrTag] = ModelAttribute(elt, attrTag, xValid, xValue, sValue, value)
+        try:  # dynamically allocate attributes (otherwise given shared empty set)
+            xAttributes = elt.xAttributes
+        except AttributeError:
+            elt.xAttributes = xAttributes = {}
+        xAttributes[attrTag] = ModelAttribute(elt, attrTag, xValid, xValue, sValue, value)
     else:
         elt.xValid = xValid
         elt.xValue = xValue
@@ -452,3 +487,10 @@ def validateFacet(typeElt, facetElt):
     if facetElt.xValid == VALID:
         return facetElt.xValue
     return None
+
+def validateAnyWildcard(qnElt, qnAttr, attributeWildcards):
+    # note wildcard is a set of possibly multiple values from inherited attribute groups
+    for attributeWildcard in attributeWildcards:
+        if attributeWildcard.allowsNamespace(qnAttr.namespaceURI):
+            return True
+    return False

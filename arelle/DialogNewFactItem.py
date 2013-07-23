@@ -5,7 +5,10 @@ Created on Nov 28, 2011
 (c) Copyright 2011 Mark V Systems Limited, All rights reserved.
 '''
 from tkinter import Toplevel, N, S, E, W, messagebox
-from tkinter.ttk import Frame, Button
+try:
+    from tkinter.ttk import Frame, Button
+except ImportError:
+    from ttk import Frame, Button
 import re
 from arelle.ModelInstanceObject import NewFactItemOptions
 from arelle.ModelValue import dateTime
@@ -18,8 +21,10 @@ caller checks accepted, if True, caller retrieves url
 '''
 def getNewFactItemOptions(mainWin, newInstanceOptions=None):
     if newInstanceOptions is None: newInstanceOptions = NewFactItemOptions() 
-    if not newInstanceOptions.entityIdentScheme:
-        newInstanceOptions.__dict__.update(mainWin.config.get("newFactItemOptions",{}))
+    # use prior prevOptionValues for those keys not in existing newInstanceOptions
+    for prevOptionKey, prevOptionValue in mainWin.config.get("newFactItemOptions",{}).items():
+        if not getattr(newInstanceOptions, prevOptionKey, None):
+            newInstanceOptions.__dict__[prevOptionKey] = prevOptionValue
     dialog = DialogNewFactItemOptions(mainWin, newInstanceOptions)
     if dialog.accepted:
         if dialog.options is not None: # pickle as strings, DateTime won't unpickle right
@@ -72,12 +77,10 @@ class DialogNewFactItemOptions(Toplevel):
         self.cellEntityIdentValue = gridCell(frame, 2, 2, getattr(options,"entityIdentValue",""))
         ToolTip(self.cellEntityIdentValue, text=_("Enter the entity identifier value (e.g., stock ticker)"), wraplength=240)
         label(frame, 1, 3, "Start date:")
-        startDate = getattr(options,"startDate",None)
-        self.cellStartDate = gridCell(frame, 2, 3, XmlUtil.dateunionValue(startDate) if startDate else "")
+        self.cellStartDate = gridCell(frame, 2, 3, getattr(options,"startDate",""))
         ToolTip(self.cellStartDate, text=_("Enter the start date for the report period (e.g., 2010-01-01)"), wraplength=240)
         label(frame, 1, 4, "End date:")
-        endDate = getattr(options,"endDate",None)
-        self.cellEndDate = gridCell(frame, 2, 4, XmlUtil.dateunionValue(endDate, subtractOneDay=True) if endDate else "")
+        self.cellEndDate = gridCell(frame, 2, 4, getattr(options,"endDate",""))
         ToolTip(self.cellEndDate, text=_("Enter the end date for the report period (e.g., 2010-12-31)"), wraplength=240)
         label(frame, 1, 5, "Monetary unit:")
         self.cellMonetaryUnit = gridCombobox(frame, 2, 5, getattr(options,"monetaryUnit",""), values=monetaryUnits)
@@ -136,8 +139,8 @@ class DialogNewFactItemOptions(Toplevel):
         self.options.entityIdentScheme = self.cellEntityIdentScheme.value
         self.options.entityIdentValue = self.cellEntityIdentValue.value
         # need datetime.datetime base class for pickling, not ModelValue class (unpicklable)
-        self.options.startDate = XmlUtil.datetimeValue(self.cellStartDate.value)
-        self.options.endDate = XmlUtil.datetimeValue(self.cellEndDate.value, addOneDay=True)
+        self.options.startDate = self.cellStartDate.value
+        self.options.endDate = self.cellEndDate.value
         self.options.monetaryUnit = self.cellMonetaryUnit.value
         self.options.monetaryDecimals = self.cellMonetaryDecimals.value
         self.options.nonMonetaryDecimals = self.cellNonMonetaryDecimals.value

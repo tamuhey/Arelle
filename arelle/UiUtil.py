@@ -5,7 +5,12 @@ Created on Jan 25, 2011
 (c) Copyright 2011 Mark V Systems Limited, All rights reserved.
 '''
 from tkinter import *
-from tkinter.ttk import *
+try:
+    from tkinter.ttk import *
+    _Combobox = ttk.Combobox
+except ImportError:
+    from ttk import *
+    _Combobox = Combobox
 
 TOPBORDER = 1
 LEFTBORDER = 2
@@ -108,7 +113,7 @@ class gridSpacer(Frame):
   
 class gridHdr(Label): 
     def __init__(self, master, x, y, text, columnspan=None, rowspan=None, anchor='center', padding=None, 
-                 wraplength=None, width=None, minwidth=None,
+                 wraplength=None, width=None, minwidth=None, stretchCols=True, stretchRows=True,
                  objectId=None, onClick=None): 
         Label.__init__(self, master=master) 
         if isinstance(master.master.master, scrolledHeaderedFrame):
@@ -146,6 +151,15 @@ class gridHdr(Label):
         
         if minwidth:
             master.columnconfigure(x, minsize=minwidth)
+            
+        if stretchCols:
+            master.columnconfigure(x, weight=1)
+        else:
+            master.columnconfigure(x, weight=0, uniform='noStretch')
+        if stretchRows:
+            master.rowconfigure(y, weight=1)
+        else:
+            master.rowconfigure(y, weight=0, uniform='noStretch')
         # copy bindings
         try:
             contextMenuBinding = master.bind(master.contextMenuClick)
@@ -163,7 +177,6 @@ class gridCell(Entry):
         Entry.__init__(self, master=master) 
         self.valueVar = StringVar() 
         self.valueVar.trace('w', self.valueChanged)
-        self.isChanged = False
         self.config(textvariable=self.valueVar,
                     #relief="ridge", 
                     #bg="#ff8ff8ff8", fg="#000000000", 
@@ -190,6 +203,7 @@ class gridCell(Entry):
             self.bind("<Configure>", master.master.master._configure_cell)
         if onClick:
             self.bind("<1>", onClick)
+        self.isChanged = False
         
     @property
     def value(self):
@@ -201,10 +215,11 @@ class gridCell(Entry):
     def valueChanged(self, *args):
         self.isChanged = True
     
-class gridCombobox(ttk.Combobox): 
+class gridCombobox(_Combobox): 
     def __init__(self, master, x, y, value="", values=(), columnspan=None, selectindex=None, comboboxselected=None): 
-        ttk.Combobox.__init__(self, master=master) 
+        _Combobox.__init__(self, master=master) 
         self.valueVar = StringVar() 
+        self.valueVar.trace('w', self.valueChanged)
         self.config(textvariable=self.valueVar,
                     background="#ff8ff8ff8", foreground="#000000000", 
                    # justify='center'
@@ -231,6 +246,7 @@ class gridCombobox(ttk.Combobox):
             pass
         if comboboxselected:
             self.bind("<<ComboboxSelected>>", comboboxselected)
+        self.isChanged = False
         
     @property
     def value(self):
@@ -244,7 +260,9 @@ class gridCombobox(ttk.Combobox):
             return values.index(value)
         return -1
         
-    
+    def valueChanged(self, *args):
+        self.isChanged = True
+        
 class label(Label):
     def __init__(self, master, x, y, text):
         Label.__init__(self, master=master, text=text) 
@@ -252,17 +270,21 @@ class label(Label):
         self.grid(column=x, row=y, sticky=W, padx=8) 
     
 class checkbox(Checkbutton):
-    def __init__(self, master, x, y, text, attr=None):
+    def __init__(self, master, x, y, text, attr=None, columnspan=None):
         self.attr = attr 
         self.valueVar = StringVar() 
+        self.valueVar.trace('w', self.valueChanged)
         Checkbutton.__init__(self, master=master, text=text, variable=self.valueVar) 
         self.grid(column=x, row=y, sticky=W, padx=24) 
+        if columnspan:
+            self.grid(columnspan=columnspan)
         try:
             options = master.master.options
             if attr in options:
                 self.valueVar.set( options[attr] )
         except AttributeError:
             pass
+        self.isChanged = False
         
     @property
     def value(self):
@@ -270,6 +292,9 @@ class checkbox(Checkbutton):
             return True
         else:
             return False
+        
+    def valueChanged(self, *args):
+        self.isChanged = True
         
 class radiobutton(Radiobutton):
     def __init__(self, master, x, y, text, value, attr=None, valueVar=None):
@@ -359,6 +384,7 @@ class scrolledHeaderedFrame(Frame):
 
         self.colsConfigured = False
         self.bodyCellsConfigured = False
+        self.blockConfigureCell = False
         self.hdrVscrollbar = Scrollbar(self, orient=VERTICAL)
         self.hdrHscrollbar = Scrollbar(self, orient=HORIZONTAL)
         self.bodyVscrollbar = Scrollbar(self, orient=VERTICAL)
@@ -460,26 +486,37 @@ class scrolledHeaderedFrame(Frame):
         self.colsConfigured = False
 
     def _configure_colHdrInterior(self,event):
+        #print("configure_colHdrInterior")
         # seems to not help:
         #if not self.colsConfigured:
         #    self.conformHdrsToBody()
         interiorW = self.colHdrInterior.winfo_reqwidth()
         interiorH = self.colHdrInterior.winfo_reqheight()
-        self.colHdrCanvas.config(scrollregion=(0,0,interiorW,interiorH))
-        if interiorH != self.colHdrCanvas.winfo_height(): # update the canvas's width to fit the inner frame
-            self.colHdrCanvas.config(height=interiorH)
+        raiseHeight = interiorH != self.colHdrCanvas.winfo_height()
+        # tkinter bug, mac won't display col headers without setting height here and below
+        # 1 pixel higher, not needed on PC/linux
+        self.colHdrCanvas.config(height=interiorH, scrollregion=(0,0,interiorW,interiorH))
+        if raiseHeight: # update the canvas's width to fit the inner frame
+            self.colHdrCanvas.config(height=interiorH + 1)
         #if interiorH != self.tblHdrInterior.winfo_height():
         #    self.tblHdrInterior.tk.call( ('grid', 'rowconfigure', self.tblHdrInterior._w, 1, '-minsize', interiorH ) )
     def _configure_rowHdrInterior(self,event):
+        #print("configure_rowHdrInterior")
         interiorW = self.rowHdrInterior.winfo_reqwidth()
         interiorH = self.rowHdrInterior.winfo_reqheight()
-        self.rowHdrCanvas.config(scrollregion=(0,0,interiorW,interiorH))
-        if interiorW != self.rowHdrCanvas.winfo_width(): # update the canvas's width to fit the inner frame
-            self.rowHdrCanvas.config(width=interiorW)
+        # width doesn't set wide enough when first expanding, force by setting wider before scroll region
+        widenWidth = interiorW != self.rowHdrCanvas.winfo_width()
+        # tkinter bug?  right side of row headers is clipped without setting it 1 pixel wider below
+        # and then back on next configure event.  Would like to remove first config of width.
+        # also: mac won't display at all without this trick
+        self.rowHdrCanvas.config(width=interiorW, scrollregion=(0,0,interiorW,interiorH))
+        if widenWidth: # update the canvas's width to fit the inner frame
+            self.rowHdrCanvas.config(width=interiorW + 1) # remove if tkinter issue gets solved
         #if interiorW != self.tblHdrInterior.winfo_width() or \
         #   interiorW != self.tblHdrInterior.tk.call( ('grid', 'columnconfigure', self.tblHdrInterior._w, 1, '-minsize' ) ):
         #    self.tblHdrInterior.tk.call( ('grid', 'columnconfigure', self.tblHdrInterior._w, 1, '-minsize', interiorW ) )
     def _configure_bodyInterior(self,event):
+        #print("configure_bodyInterior")
         # seems to not help:
         #if not self.bodyCellsConfigured:
         #    self.conformBodyCellsToHeader()
@@ -487,19 +524,27 @@ class scrolledHeaderedFrame(Frame):
         interiorH = self.bodyInterior.winfo_reqheight()
         self.bodyCanvas.config(scrollregion=(0,0,interiorW,interiorH))
     def _configure_colHdrCanvas(self, event):
+        #print("configure_colHdrCanvas")
         canvasH = self.colHdrCanvas.winfo_height()
         if self.colHdrInterior.winfo_reqheight() != canvasH:
             self.colHdrCanvas.itemconfigure(self.colHdrInterior_id, height=canvasH)
     def _configure_rowHdrCanvas(self, event):
         canvasW = self.rowHdrCanvas.winfo_width()
+        #print("configure_rowHdrCanvas width {0}".format(canvasW))
         if self.rowHdrInterior.winfo_reqwidth() != canvasW:
             self.rowHdrCanvas.itemconfigure(self.rowHdrInterior_id, width=canvasW)
+        # set table header wrap length
+        if hasattr(self.tblHdrInterior, "tblHdrLabel") and canvasW > self.tblHdrInterior.tblHdrWraplength:
+            self.tblHdrInterior.tblHdrWraplength = canvasW - 4
+            self.tblHdrInterior.tblHdrLabel.config(wraplength=canvasW - 4)
     def _configure_bodyCanvas(self, event):
+        #print("configure_bodyCanvas")
         #canvasW = self.rowHdrCanvas.winfo_width()
         #if self.rowHdrInterior.winfo_reqwidth() != canvasW:
         #    self.rowHdrCanvas.itemconfigure(self.rowHdrInterior_id, width=canvasW)
         pass
     def _configure_interiors(self,event):
+        #print("configure_interiors")
         bodyW = self.bodyInterior.winfo_reqwidth()
         bodyH = self.bodyInterior.winfo_reqheight()
         colHdrW = self.colHdrInterior.winfo_reqwidth()
@@ -512,13 +557,18 @@ class scrolledHeaderedFrame(Frame):
         self.colHdrCanvas.config(scrollregion=(0,0,bodyW,colHdrH))
         self.rowHdrCanvas.config(scrollregion=(0,0,rowHdrW,bodyH))
     def _configure_canvases(self, event):
+        #print("configure_canvases")
         canvasH = self.colHdrCanvas.winfo_height()
         if self.colHdrInterior.winfo_reqheight() != canvasH:
             self.colHdrCanvas.itemconfigure(self.colHdrInterior_id, height=canvasH)
         canvasW = self.rowHdrCanvas.winfo_width()
         if self.rowHdrInterior.winfo_reqwidth() != canvasW:
             self.rowHdrCanvas.itemconfigure(self.rowHdrInterior_id, width=canvasW)
+            
     def _configure_cell(self, event):
+        #if self.blockConfigureCell:
+        #    return
+        self.blockConfigureCell = True
         cell = event.widget
         x = cell.x
         y = cell.y
@@ -527,6 +577,7 @@ class scrolledHeaderedFrame(Frame):
         isColHdrCell = event.widget.master == self.colHdrInterior
         isRowHdrCell = event.widget.master == self.rowHdrInterior
         isBodyCell = event.widget.master == self.bodyInterior
+        #print("configure_cell {4} x={0} y={1} w={2} h={3}".format(x,y,cellW,cellH, "colHdr" if isColHdrCell else "rowHdr" if isRowHdrCell else "body" if isBodyCell else "unknown"))
         if isColHdrCell:
             if hasattr(cell,'columnspan') and cell.columnspan:
                 columnspan = cell.columnspan # this is the non borders columns spanned
@@ -557,8 +608,9 @@ class scrolledHeaderedFrame(Frame):
                     #self.bodyInterior.update()
             '''
         if isRowHdrCell:
-            if not hasattr(cell,'rowspan') or not cell.rowspan: # ignore abstract spanned rows
+            if (getattr(cell,'rowspan',None) or 0) <= 1: # ignore abstract spanned rows (probably should divide them equally among children)
                 bodyRowH = self.bodyInterior.tk.call( ('grid', 'rowconfigure', self.bodyInterior._w, y, '-minsize' ) )
+                #print("body row height {0}".format(bodyRowH))
                 if cellH > bodyRowH:
                     self.bodyInterior.tk.call( ('grid', 'rowconfigure', self.bodyInterior._w, y, '-minsize', cellH ) )
                     #self.bodyInterior.update()
@@ -574,6 +626,7 @@ class scrolledHeaderedFrame(Frame):
             elif colHdrW > cellW:
                 self.bodyInterior.tk.call( ('grid', 'columnconfigure', self.bodyInterior._w, x, '-minsize', colHdrW ) )
                 #self.bodyInterior.update()
+        self.blockConfigureCell = False
     
     def conformHdrsToBody(self):
         self.colsConfigured = True

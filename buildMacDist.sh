@@ -7,6 +7,9 @@
 # set the build date in version.py
 python3.2 buildVersion.py
 
+# Regenerate messages catalog (doc/messagesCatalog.xml)
+python3.2 generateMessagesCatalog.py
+
 # create new app
 python3.2 setup.py py2app
 
@@ -14,10 +17,12 @@ python3.2 setup.py py2app
 cp -R arelle/images/arelle.icns dist/Arelle.app/Contents/Resources
 
 # add icon and config files to resources
-cp -R arelle/images dist/Arelle.app/Contents/Resources
 cp -R arelle/config dist/Arelle.app/Contents/Resources
+cp -R arelle/doc dist/Arelle.app/Contents/Resources
 cp -R arelle/examples dist/Arelle.app/Contents/Resources
+cp -R arelle/images dist/Arelle.app/Contents/Resources
 cp -R arelle/locale dist/Arelle.app/Contents/Resources
+cp -R arelle/plugin dist/Arelle.app/Contents/Resources
 
 # add tcl and tk 8.6 versions
 cp -R /library/frameworks/tcl.framework/versions dist/Arelle.app/Contents/Frameworks/Tcl.framework

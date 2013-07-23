@@ -4,6 +4,7 @@ Python version specific utilities
 do not convert 3 to 2
 '''
 import sys
+from decimal import Decimal
 
 if sys.version[0] >= '3':
     import builtins
@@ -12,8 +13,8 @@ if sys.version[0] >= '3':
     builtins.__dict__['_STR_UNICODE'] = str
     builtins.__dict__['_INT'] = int
     builtins.__dict__['_INT_TYPES'] = int
-    builtins.__dict__['_NUM_TYPES'] = (int,float)
-    builtins.__dict__['_STR_NUM_TYPES'] = (str,int,float)
+    builtins.__dict__['_NUM_TYPES'] = (int,float,Decimal)
+    builtins.__dict__['_STR_NUM_TYPES'] = (str,int,float,Decimal)
     builtins.__dict__['_RANGE'] = range
     def noop(x): return x
     builtins.__dict__['_DICT_SET'] = noop
@@ -23,10 +24,19 @@ else:
     __builtins__['_STR_UNICODE'] = unicode
     __builtins__['_INT'] = long
     __builtins__['_INT_TYPES'] = (int,long)
-    __builtins__['_NUM_TYPES'] = (int,long,float)
-    __builtins__['_STR_NUM_TYPES'] = (basestring,int,long,float)
+    __builtins__['_NUM_TYPES'] = (int,long,float,Decimal)
+    __builtins__['_STR_NUM_TYPES'] = (basestring,int,long,float,Decimal)
     __builtins__['_RANGE'] = xrange
     __builtins__['_DICT_SET'] = set
+    
+import math
+if sys.version >= "3.2":
+    __builtins__['_ISFINITE'] = math.isfinite
+else:
+    def simulatedIsFinite(num):
+        return not math.isinf(num) and not math.isnan(num)
+    __builtins__['_ISFINITE'] = simulatedIsFinite
+    
    
 # python 3 unquote, because py2 unquote doesn't do utf-8 correctly   
 def py3unquote(string, encoding='utf-8', errors='replace'):
@@ -72,3 +82,24 @@ def py3unquote(string, encoding='utf-8', errors='replace'):
         # Flush the final pct_sequence
         string += pct_sequence.decode(encoding, errors)
     return string
+
+def pyTypeName(object):
+    try:
+        objectClass = object.__class__
+        classModule = objectClass.__module__
+        className = objectClass.__name__
+        if sys.version[0] >= '3':
+            if classModule == 'builtins':
+                return className
+        else:
+            if classModule == '__builtin__':
+                return className
+        fullname = classModule + '.' + className
+        if fullname == 'arelle.ModelValue.DateTime':
+            if object.dateOnly:
+                fullname += '-dateOnly'
+            else:
+                fullname += '-dateTime'
+        return fullname
+    except:
+        return str(type(object))

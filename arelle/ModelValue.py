@@ -5,6 +5,7 @@ Created on Jan 4, 2011
 (c) Copyright 2011 Mark V Systems Limited, All rights reserved.
 '''
 import re, copy, datetime
+XmlUtil = None
 
 def qname(value, name=None, noPrefixIsNoNamespace=False, castException=None, prefixException=None):
     # either value can be an etree ModelObject element: if no name then qname is element tag quanem
@@ -52,7 +53,7 @@ def qname(value, name=None, noPrefixIsNoNamespace=False, castException=None, pre
         else:
             namespaceURI = None
             namespaceDict = None
-        prefix,sep,localName = value.partition(":")
+        prefix,sep,localName = value.strip().partition(":")  # must be whitespace collapsed
         if len(localName) == 0:
             #default namespace
             localName = prefix
@@ -64,11 +65,13 @@ def qname(value, name=None, noPrefixIsNoNamespace=False, castException=None, pre
     elif namespaceDict and prefix in namespaceDict:
         return QName(prefix, namespaceDict[prefix], localName)
     elif element is not None:
-        from arelle import (XmlUtil)
+        global XmlUtil
+        if XmlUtil is None:
+            from arelle import XmlUtil
         namespaceURI = XmlUtil.xmlns(element, prefix)
     if not namespaceURI:
         if prefix: 
-            if castException: raise castException
+            if prefixException: raise prefixException
             return None  # error, prefix not found
     if not namespaceURI:
         namespaceURI = None # cancel namespace if it is a zero length string
@@ -175,18 +178,18 @@ def dateTime(value, time=None, addOneDay=None, type=None, castException=None):
     elif isinstance(value, datetime.date):
         return DateTime(value.year, value.month, value.day,dateOnly=True,addOneDay=addOneDay)
     elif castException and not isinstance(value, _STR_BASE):
-        raise castException
+        raise castException("not a string value")
     if value is None:
         return None
     match = datetimePattern.match(value.strip())
     if match is None:
         if castException:
-            raise castException
+            raise castException("lexical pattern mismatch")
         return None
     if match.lastindex == 6:
         if type == DATE: 
             if castException:
-                raise castException
+                raise castException("date-only object has too many fields or contains time")
             return None
         result = DateTime(int(match.group(1)),int(match.group(2)),int(match.group(3)),int(match.group(4)),int(match.group(5)),int(match.group(6)), dateOnly=False)
     else:
@@ -205,15 +208,20 @@ def lastDayOfMonth(year, month):
     if year % 400 == 0 or (year % 100 != 0 and year % 4 == 0): return 29
     return 28
 
+#!!! see note in XmlUtil.py datetimeValue, may need exceptions handled or special treatment for end time of 9999-12-31
+
 class DateTime(datetime.datetime):
     def __new__(cls, y, m, d, hr=0, min=0, sec=0, microsec=0, tzinfo=None, dateOnly=None, addOneDay=None):
+        lastDay = lastDayOfMonth(y, m)
+        # check day and month before adjustment
+        if not 1 <= m <= 12: raise ValueError("month must be in 1..12")
+        if not 1 <= d <= lastDay: raise ValueError("day is out of range for month")
         if hr == 24:
-            if min != 0 or sec != 0 or microsec != 0: raise ValueError
+            if min != 0 or sec != 0 or microsec != 0: raise ValueError("hour 24 must have 0 mins and secs.")
             hr = 0
             d += 1
         if addOneDay: 
             d += 1
-        lastDay = lastDayOfMonth(y, m)
         if d > lastDay: d -= lastDay; m += 1
         if m > 12: m = 1; y += 1
         dateTime = datetime.datetime.__new__(cls, y, m, d, hr, min, sec, microsec, tzinfo)
@@ -266,6 +274,13 @@ def dateUnionEqual(dateUnion1, dateUnion2, instantEndDate=False):
         dateUnion2 = dateTime(dateUnion2, addOneDay=instantEndDate)
     return dateUnion1 == dateUnion2
         
+def dateunionDate(datetimeValue, subtractOneDay=False):
+    isDate = (hasattr(datetimeValue,'dateOnly') and datetimeValue.dateOnly) or not hasattr(datetimeValue, 'hour')
+    d = datetimeValue
+    if isDate or (d.hour == 0 and d.minute == 0 and d.second == 0):
+        if subtractOneDay and not isDate: d -= datetime.timedelta(1)
+    return datetime.date(d.year, d.month, d.day)
+
 def yearMonthDuration(value):
     minus, hasYr, yrs, hasMo, mos, hasDay, days, hasTime, hasHr, hrs, hasMin, mins, hasSec, secs = durationPattern.match(value).groups()
     if hasDay or hasHr or hasMin or hasSec: raise ValueError
@@ -348,4 +363,48 @@ class Time(datetime.time):
         time.hour24 = hour24
         return time
     
-        
+class gYearMonth():
+    def __init__(self, year, month):
+        self.year = int(year)
+        self.month = int(month)
+
+    def __repr__(self):
+        return "-{0}-{1}".format(self.year, self.month)
+    
+    
+class gMonthDay():
+    def __init__(self, month, day):
+        self.month = int(month)
+        self.day = int(day)
+
+    def __repr__(self):
+        return "--{0}-{1}".format(self.month, self.day)
+    
+class gYear():
+    def __init__(self, year):
+        self.year = int(year)
+
+    def __repr__(self):
+        return "{0}".format(self.year)
+    
+class gMonth():
+    def __init__(self, month):
+        self.month = int(month)
+
+    def __repr__(self):
+        return "--{0}".format(self.month)
+    
+class gDay():
+    def __init__(self, day):
+        self.day = int(day)
+
+    def __repr__(self):
+        return "---{0}".format(self.day)
+    
+class InvalidValue(str):
+    def __new__(cls, value):
+        return str.__new__(cls, value)
+
+INVALIDixVALUE = InvalidValue("(ixTransformValueError)")
+
+    

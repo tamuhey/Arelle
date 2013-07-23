@@ -10,7 +10,6 @@ from collections import defaultdict
 def viewConcepts(modelXbrl, outFile, labelrole=None, lang=None):
     modelXbrl.modelManager.showStatus(_("viewing concepts"))
     view = ViewConcepts(modelXbrl, outFile, labelrole, lang)
-    view.addRow(["Label","Name","ID","Abs\u00ADtract","Substi\u00ADtu\u00ADtion Group","Type","Facets","Doc\u00ADu\u00ADmen\u00ADta\u00ADtion"], asHeader=True)
     view.view(modelXbrl.modelDocument)
     view.close()
     
@@ -20,6 +19,8 @@ class ViewConcepts(ViewFile.View):
         self.labelrole = labelrole
         
     def view(self, modelDocument):
+        # header
+        self.addRow(["Label","Name","ID","Abs\u00ADtract","Substi\u00ADtu\u00ADtion Group","Type","Facets","Doc\u00ADu\u00ADmen\u00ADta\u00ADtion"], asHeader=True)
         # sort by labels
         lbls = defaultdict(list)
         for concept in self.modelXbrl.qnameConcepts.values():
@@ -31,17 +32,17 @@ class ViewConcepts(ViewFile.View):
                 if concept.modelDocument.targetNamespace not in (
                          XbrlConst.xbrli, XbrlConst.link, XbrlConst.xlink, XbrlConst.xl,
                          XbrlConst.xbrldt):
-                    self.addRow([concept.label(preferredLabel=self.labelrole, lang=self.lang, strip=True),
+                    self.addRow([concept.label(preferredLabel=self.labelrole, lang=self.lang, strip=True, linkroleHint=XbrlConst.defaultLinkRole),
                                  concept.name,
                                  concept.id,
                                  concept.abstract,
                                  concept.substitutionGroupQname,
                                  concept.typeQname,
                                  # facets if any, sorted and separated by ;
-                                 " ".join("{0}={1}".format(
+                                 (" ".join("{0}={1}".format(
                                        name,
                                        sorted(value) if isinstance(value,set) else value
-                                       ) for name,value in sorted(concept.type.facets.items())) \
-                                       if concept.type is not None and concept.type.facets else '',
-                                 concept.label(preferredLabel=XbrlConst.documentationLabel, fallbackToQname=False, lang=self.lang, strip=True)
+                                       ) for name,value in sorted(concept.type.facets.items()))) \
+                                 if concept.type is not None and concept.type.facets else '',
+                                 concept.label(preferredLabel=XbrlConst.documentationLabel, fallbackToQname=False, lang=self.lang, strip=True, linkroleHint=XbrlConst.defaultLinkRole)
                                 ])

@@ -27,7 +27,7 @@ class ViewFacts(ViewFile.View):
                 if col not in ("Label","Name","contextRef","unitRef","Dec","Prec","Lang","Value","EntityScheme","EntityIdentifier","Period","Dimensions"):
                     unrecognizedCols.append(col)
             if unrecognizedCols:
-                self.modelXbrl.error("arelle:unrecognizedCsvFactListColumn",
+                self.modelXbrl.error("arelle:unrecognizedFactListColumn",
                                      _("Unrecognized columns: %(cols)s"),
                                      modelXbrl=self.modelXbrl, cols=','.join(unrecognizedCols))
             if "Period" in self.cols:
@@ -37,12 +37,12 @@ class ViewFacts(ViewFile.View):
             self.cols = ["Label","contextRef","unitRef","Dec","Prec","Lang","Value"]
         col0 = self.cols[0]
         if col0 not in ("Label", "Name"):
-            self.modelXbrl.error("arelle:firstCsvFactListColumn",
+            self.modelXbrl.error("arelle:firstFactListColumn",
                                  _("First column must be Label or Name: %(col1)s"),
                                  modelXbrl=self.modelXbrl, col1=col0)
         self.isCol0Label = col0 == "Label"
         self.maxNumDims = 1
-        self.tupleDepth(self.modelXbrl.facts, 1)
+        self.tupleDepth(self.modelXbrl.facts, 0)
         if "Dimensions" == self.cols[-1]:
             lastColSpan = self.maxNumDims
         else:
@@ -64,7 +64,7 @@ class ViewFacts(ViewFile.View):
             xmlRowElementName = 'item'
             attr = {"name": str(modelFact.qname)}
             if concept is not None and self.isCol0Label:
-                lbl = concept.label(preferredLabel=self.labelrole, lang=self.lang)
+                lbl = concept.label(preferredLabel=self.labelrole, lang=self.lang, linkroleHint=XbrlConst.defaultLinkRole)
                 xmlCol0skipElt = False # provide label as a row element
             else:
                 lbl = modelFact.qname
@@ -73,7 +73,11 @@ class ViewFacts(ViewFile.View):
             if concept is not None:
                 if modelFact.isItem:
                     for col in self.cols[1:]:
-                        if col == "contextRef":
+                        if col == "Label": # label or name may be 2nd to nth col if name or label is 1st col
+                            cols.append( concept.label(preferredLabel=self.labelrole, lang=self.lang) )
+                        elif col == "Name":
+                            cols.append( modelFact.qname )
+                        elif col == "contextRef":
                             cols.append( modelFact.contextID )
                         elif col == "unitRef":
                             cols.append( modelFact.unitID )

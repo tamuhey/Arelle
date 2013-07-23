@@ -4,32 +4,32 @@ Created on Oct 5, 2010
 @author: Mark V Systems Limited
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
-import os, threading
-from tkinter import Menu, constants
-from arelle import (ViewWinGrid, ModelDocument, ModelInstanceObject, ModelObject, XbrlConst, 
+import os, threading, time
+from tkinter import Menu, BooleanVar
+from arelle import (ViewWinGrid, ModelDocument, ModelInstanceObject, XbrlConst, 
                     ModelXbrl, XmlValidate, Locale)
-from arelle.ModelValue import qname
-from arelle.ViewUtilRenderedGrid import (setDefaults, getTblAxes, inheritedPrimaryItemQname,
-                                         inheritedExplicitDims)
+from arelle.ModelValue import qname, QName
+from arelle.ViewUtilRenderedGrid import (resolveAxesStructure, inheritedAspectValue)
+from arelle.ModelFormulaObject import Aspect, aspectModels, aspectRuleAspects, aspectModelAspect
+from arelle.ModelInstanceObject import ModelDimensionValue
+from arelle.ModelRenderingObject import ModelClosedDefinitionNode, ModelEuAxisCoord
+from arelle.FormulaEvaluator import aspectMatches
 
-from arelle.PrototypeInstanceObject import FactPrototype, ContextPrototype, DimValuePrototype
+from arelle.PrototypeInstanceObject import FactPrototype
 from arelle.UiUtil import (gridBorder, gridSpacer, gridHdr, gridCell, gridCombobox, 
-                     label, checkbox, 
-                     TOPBORDER, LEFTBORDER, RIGHTBORDER, BOTTOMBORDER, CENTERCELL)
+                           label,  
+                           TOPBORDER, LEFTBORDER, RIGHTBORDER, BOTTOMBORDER, CENTERCELL)
 from arelle.DialogNewFactItem import getNewFactItemOptions
 from collections import defaultdict
-from itertools import repeat
+
+emptyList = []
 
 def viewRenderedGrid(modelXbrl, tabWin, lang=None):
     modelXbrl.modelManager.showStatus(_("viewing rendering"))
     view = ViewRenderedGrid(modelXbrl, tabWin, lang)
-    
-    # dimension defaults required in advance of validation
-    from arelle import ValidateXbrlDimensions
-    ValidateXbrlDimensions.loadDimensionDefaults(view)
-    
-    # context menu
-    setDefaults(view)
+        
+    view.blockMenuEvents = 1
+
     menu = view.contextMenu()
     optionsMenu = Menu(view.viewFrame, tearoff=0)
     optionsMenu.add_command(label=_("New fact item options"), underline=0, command=lambda: getNewFactItemOptions(modelXbrl.modelManager.cntlr, view.newFactItemOptions))
@@ -46,6 +46,7 @@ def viewRenderedGrid(modelXbrl, tabWin, lang=None):
     view.menuAddLangs()
     saveMenu = Menu(view.viewFrame, tearoff=0)
     saveMenu.add_command(label=_("HTML file"), underline=0, command=lambda: view.modelXbrl.modelManager.cntlr.fileSave(view=view, fileType="html"))
+    saveMenu.add_command(label=_("Table layout infoset"), underline=0, command=lambda: view.modelXbrl.modelManager.cntlr.fileSave(view=view, fileType="xml"))
     saveMenu.add_command(label=_("XBRL instance"), underline=0, command=view.saveInstance)
     menu.add_cascade(label=_("Save"), menu=saveMenu, underline=0)
     view.view()
@@ -53,20 +54,33 @@ def viewRenderedGrid(modelXbrl, tabWin, lang=None):
     view.blockViewModelObject = 0
     view.viewFrame.bind("<Enter>", view.cellEnter, '+')
     view.viewFrame.bind("<Leave>", view.cellLeave, '+')
+    view.viewFrame.bind("<1>", view.onClick, '+')
+    view.blockMenuEvents = 0
             
 class ViewRenderedGrid(ViewWinGrid.ViewGrid):
     def __init__(self, modelXbrl, tabWin, lang):
         super(ViewRenderedGrid, self).__init__(modelXbrl, tabWin, "Rendering", True, lang)
-        self.dimsContextElement = {}
-        self.hcDimRelSet = self.modelXbrl.relationshipSet("XBRL-dimensions")
-        self.zComboBoxIndex = None
         self.newFactItemOptions = ModelInstanceObject.NewFactItemOptions(xbrlInstance=modelXbrl)
+        self.factPrototypes = []
+        self.zOrdinateChoices = None
+        # context menu Boolean vars
+        self.options = self.modelXbrl.modelManager.cntlr.config.setdefault("viewRenderedGridOptions", {})
+        self.ignoreDimValidity = BooleanVar(value=self.options.setdefault("ignoreDimValidity",True))
+        self.xAxisChildrenFirst = BooleanVar(value=self.options.setdefault("xAxisChildrenFirst",True))
+        self.yAxisChildrenFirst = BooleanVar(value=self.options.setdefault("yAxisChildrenFirst",False))
+            
+    def close(self):
+        super(ViewRenderedGrid, self).close()
+        if self.modelXbrl:
+            for fp in self.factPrototypes:
+                fp.clear()
+            self.factPrototypes = None
         
     def loadTablesMenu(self):
         tblMenuEntries = {}             
         tblRelSet = self.modelXbrl.relationshipSet("Table-rendering")
         for tblLinkroleUri in tblRelSet.linkRoleUris:
-            for tableAxisArcrole in (XbrlConst.euTableAxis, XbrlConst.tableAxis):
+            for tableAxisArcrole in (XbrlConst.euTableAxis, XbrlConst.tableBreakdown, XbrlConst.tableBreakdown201301, XbrlConst.tableAxis2011):
                 tblAxisRelSet = self.modelXbrl.relationshipSet(tableAxisArcrole, tblLinkroleUri)
                 if tblAxisRelSet and len(tblAxisRelSet.modelRelationships) > 0:
                     # table name
@@ -81,320 +95,405 @@ class ViewRenderedGrid(ViewWinGrid.ViewGrid):
                             break
         self.tablesMenu.delete(0, self.tablesMenuLength)
         self.tablesMenuLength = 0
+        self.tblELR = None
         for tblMenuEntry in sorted(tblMenuEntries.items()):
             tbl,elr = tblMenuEntry
             self.tablesMenu.add_command(label=tbl, command=lambda e=elr: self.view(viewTblELR=e))
             self.tablesMenuLength += 1
-            if not hasattr(self,"tblELR") or self.tblELR is None: 
+            if self.tblELR is None: 
                 self.tblELR = elr # start viewing first ELR
         
     def viewReloadDueToMenuAction(self, *args):
-        self.view()
+        if not self.blockMenuEvents:
+            # update config (config saved when exiting)
+            self.options["ignoreDimValidity"] = self.ignoreDimValidity.get()
+            self.options["xAxisChildrenFirst"] = self.xAxisChildrenFirst.get()
+            self.options["yAxisChildrenFirst"] = self.yAxisChildrenFirst.get()
+            self.view()
         
     def view(self, viewTblELR=None, newInstance=None):
+        startedAt = time.time()
+        self.blockMenuEvents += 1
         if newInstance is not None:
             self.modelXbrl = newInstance # a save operation has created a new instance to use subsequently
+            clearZchoices = False
         if viewTblELR:  # specific table selection
             self.tblELR = viewTblELR
+            clearZchoices = True
         else:   # first or subsequenct reloading (language, dimensions, other change)
-            self.loadTablesMenu()  # load menus (and initialize if first time
+            clearZchoices = self.zOrdinateChoices is None
+            if clearZchoices: # also need first time initialization
+                self.loadTablesMenu()  # load menus (and initialize if first time
             viewTblELR = self.tblELR
+            
+        if not self.tblELR:
+            return  # no table to display
+
+        if clearZchoices:
+            self.zOrdinateChoices = {}
 
         # remove old widgets
         self.viewFrame.clearGrid()
 
-        tblAxisRelSet, xAxisObj, yAxisObj, zAxisObjs = getTblAxes(self, viewTblELR) 
-        if self.zComboBoxIndex is None:
-            self.zComboBoxIndex = list(repeat(0, len(zAxisObjs))) # start with 0 indices
-            self.zFilterIndex = list(repeat(0, len(zAxisObjs)))
+        tblAxisRelSet, xTopStructuralNode, yTopStructuralNode, zTopStructuralNode = resolveAxesStructure(self, viewTblELR) 
         
         if tblAxisRelSet:
-            
-            gridHdr(self.gridTblHdr, 0, 0, 
-                    self.roledefinition, 
-                    anchor="nw",
-                    #columnspan=(self.dataFirstCol - 1),
-                    #rowspan=(self.dataFirstRow),
-                    wraplength=200) # in screen units
-            zFilters = []
-            for i, zAxisObj in enumerate(zAxisObjs):
-                self.zAxis(1 + i, zAxisObj, zFilters)
-            xFilters = []
+            #print("tbl hdr width rowHdrCols {0}".format(self.rowHdrColWidth))
+            self.gridTblHdr.tblHdrWraplength = 200 # to  adjust dynamically during configure callbacks
+            self.gridTblHdr.tblHdrLabel = \
+                gridHdr(self.gridTblHdr, 0, 0, 
+                        (self.modelTable.genLabel(lang=self.lang, strip=True) or  # use table label, if any 
+                         self.roledefinition),
+                        anchor="nw",
+                        #columnspan=(self.dataFirstCol - 1),
+                        #rowspan=(self.dataFirstRow),
+                        wraplength=200) # in screen units
+                        #wraplength=sum(self.rowHdrColWidth)) # in screen units
+            zAspects = defaultdict(set)
+            self.zAxis(1, zTopStructuralNode, zAspects, clearZchoices)
+            xStructuralNodes = []
             self.xAxis(self.dataFirstCol, self.colHdrTopRow, self.colHdrTopRow + self.colHdrRows - 1, 
-                       xAxisObj, xFilters, self.xAxisChildrenFirst.get(), True, True)
+                       xTopStructuralNode, xStructuralNodes, self.xAxisChildrenFirst.get(), True, True)
             self.yAxis(1, self.dataFirstRow,
-                       yAxisObj, self.yAxisChildrenFirst.get(), True, True)
+                       yTopStructuralNode, self.yAxisChildrenFirst.get(), True, True)
+            for fp in self.factPrototypes: # dereference prior facts
+                if fp is not None:
+                    fp.clear()
             self.factPrototypes = []
-            self.bodyCells(self.dataFirstRow, yAxisObj, xFilters, zFilters, self.yAxisChildrenFirst.get())
+            self.bodyCells(self.dataFirstRow, yTopStructuralNode, xStructuralNodes, zAspects, self.yAxisChildrenFirst.get())
                 
             # data cells
+            #print("body cells done")
                 
+        self.modelXbrl.profileStat("viewTable_" + os.path.basename(viewTblELR), time.time() - startedAt)
+
         #self.gridView.config(scrollregion=self.gridView.bbox(constants.ALL))
+        self.blockMenuEvents -= 1
 
             
-    def zAxis(self, row, zAxisObj, zFilters):
-        priorZfilter = len(zFilters)
-        
-        for axisMbrRel in self.axisMbrRelSet.fromModelObject(zAxisObj):
-            zAxisObj = axisMbrRel.toModelObject
-            zFilters.append((inheritedPrimaryItemQname(self, zAxisObj),
-                             inheritedExplicitDims(self, zAxisObj),
-                             zAxisObj.genLabel(lang=self.lang),
-                             zAxisObj.objectId()))
-            self.zAxis(None, zAxisObj, zFilters)
-            
-        if row is not None:
-            nextZfilter = len(zFilters)
+    def zAxis(self, row, zStructuralNode, zAspects, clearZchoices):
+        if zStructuralNode is not None:
             gridBorder(self.gridColHdr, self.dataFirstCol, row, TOPBORDER, columnspan=2)
             gridBorder(self.gridColHdr, self.dataFirstCol, row, LEFTBORDER)
             gridBorder(self.gridColHdr, self.dataFirstCol, row, RIGHTBORDER, columnspan=2)
-            if nextZfilter > priorZfilter + 1:  # combo box, use header on zAxis
-                label = axisMbrRel.fromModelObject.genLabel(lang=self.lang)
-            else: # no combo box, use label on coord
-                label = zAxisObj.genLabel(lang=self.lang)
+            label = zStructuralNode.header(lang=self.lang)
             hdr = gridHdr(self.gridColHdr, self.dataFirstCol, row,
                           label, 
                           anchor="w", columnspan=2,
                           wraplength=200, # in screen units
-                          objectId=zAxisObj.objectId(),
+                          objectId=zStructuralNode.objectId(),
                           onClick=self.onClick)
-            if nextZfilter > priorZfilter + 1:    # multiple choices, use combo box
-                zIndex = row - 1
-                selectIndex = self.zComboBoxIndex[zIndex]
+    
+            if zStructuralNode.choiceStructuralNodes: # combo box
+                valueHeaders = [''.ljust(zChoiceStructuralNode.indent * 4) + # indent if nested choices 
+                                (zChoiceStructuralNode.header(lang=self.lang) or '')
+                                for zChoiceStructuralNode in zStructuralNode.choiceStructuralNodes]
                 combobox = gridCombobox(
                              self.gridColHdr, self.dataFirstCol + 2, row,
-                             values=[zFilter[2] for zFilter in zFilters[priorZfilter:nextZfilter]],
-                             selectindex=selectIndex,
+                             values=valueHeaders,
+                             selectindex=zStructuralNode.choiceNodeIndex,
                              columnspan=2,
-                             comboboxselected=self.comboBoxSelected)
-                combobox.zIndex = zIndex
-                zFilterIndex = priorZfilter + selectIndex
-                self.zFilterIndex[zIndex] = zFilterIndex
-                combobox.objectId = hdr.objectId = zFilters[zFilterIndex][3]
+                             comboboxselected=self.onComboBoxSelected)
+                combobox.zStructuralNode = zStructuralNode
+                combobox.zChoiceOrdIndex = row - 1
+                combobox.objectId = hdr.objectId = zStructuralNode.objectId()
                 gridBorder(self.gridColHdr, self.dataFirstCol + 3, row, RIGHTBORDER)
-                row += 1
-
-        if not zFilters:
-            zFilters.append( (None,set()) )  # allow empty set operations
-        
-    def comboBoxSelected(self, *args):
+    
+            if zStructuralNode.childStructuralNodes:
+                for zStructuralNode in zStructuralNode.childStructuralNodes:
+                    self.zAxis(row + 1, zStructuralNode, zAspects, clearZchoices)
+            else: # nested-nost element, aspects process inheritance
+                for aspect in aspectModels[self.aspectModel]:
+                    for ruleAspect in aspectRuleAspects.get(aspect, (aspect,)):
+                        if zStructuralNode.hasAspect(ruleAspect): #implies inheriting from other z axes
+                            if ruleAspect == Aspect.DIMENSIONS:
+                                for dim in (zStructuralNode.aspectValue(Aspect.DIMENSIONS) or emptyList):
+                                    zAspects[dim].add(zStructuralNode)
+                            else:
+                                zAspects[ruleAspect].add(zStructuralNode)
+            
+    def onComboBoxSelected(self, *args):
         combobox = args[0].widget
-        self.zComboBoxIndex[combobox.zIndex] = combobox.valueIndex
+        self.zOrdinateChoices[combobox.zStructuralNode._definitionNode] = \
+            combobox.zStructuralNode.choiceNodeIndex = combobox.valueIndex
         self.view() # redraw grid
             
-    def xAxis(self, leftCol, topRow, rowBelow, xAxisParentObj, xFilters, childrenFirst, renderNow, atTop):
-        parentRow = rowBelow
-        noDescendants = True
-        rightCol = leftCol
-        widthToSpanParent = 0
-        sideBorder = not xFilters
-        if atTop and sideBorder and childrenFirst:
-            gridBorder(self.gridColHdr, self.dataFirstCol, 1, LEFTBORDER, rowspan=self.dataFirstRow)
-        for axisMbrRel in self.axisMbrRelSet.fromModelObject(xAxisParentObj):
-            noDescendants = False
-            xAxisHdrObj = axisMbrRel.toModelObject
-            rightCol, row, width, leafNode = self.xAxis(leftCol, topRow + 1, rowBelow, xAxisHdrObj, xFilters, # nested items before totals
-                                                        childrenFirst, childrenFirst, False)
-            if row - 1 < parentRow:
-                parentRow = row - 1
-            #if not leafNode: 
-            #    rightCol -= 1
-            nonAbstract = xAxisHdrObj.abstract == "false"
-            if nonAbstract:
-                width += 100 # width for this label, in screen units
-            widthToSpanParent += width
-            label = xAxisHdrObj.genLabel(lang=self.lang)
-            if childrenFirst:
-                thisCol = rightCol
-                sideBorder = RIGHTBORDER
-            else:
-                thisCol = leftCol
-                sideBorder = LEFTBORDER
-            if renderNow:
-                columnspan = (rightCol - leftCol + (1 if nonAbstract else 0))
-                gridBorder(self.gridColHdr, leftCol, topRow, TOPBORDER, columnspan=columnspan)
-                gridBorder(self.gridColHdr, leftCol, topRow, 
-                           sideBorder, columnspan=columnspan,
-                           rowspan=(rowBelow - topRow + 1) )
-                gridHdr(self.gridColHdr, leftCol, topRow, 
-                        label if label else "         ", 
-                        anchor="center",
-                        columnspan=(rightCol - leftCol + (1 if nonAbstract else 0)),
-                        rowspan=(row - topRow + 1) if leafNode else 1,
-                        wraplength=width, # screen units
-                        objectId=xAxisHdrObj.objectId(),
-                        onClick=self.onClick)
-                if nonAbstract:
-                    if self.colHdrDocRow:
-                        gridBorder(self.gridColHdr, thisCol, self.dataFirstRow - 1 - self.rowHdrCodeCol, TOPBORDER)
-                        gridBorder(self.gridColHdr, thisCol, self.dataFirstRow - 1 - self.rowHdrCodeCol, sideBorder)
-                        gridHdr(self.gridColHdr, thisCol, self.dataFirstRow - 1 - self.rowHdrCodeCol, 
-                                xAxisHdrObj.genLabel(role="http://www.xbrl.org/2008/role/documentation",
-                                                       lang=self.lang), 
-                                anchor="center",
-                                wraplength=100, # screen units
-                                objectId=xAxisHdrObj.objectId(),
-                                onClick=self.onClick)
-                    if self.colHdrCodeRow:
-                        gridBorder(self.gridColHdr, thisCol, self.dataFirstRow - 1, TOPBORDER)
-                        gridBorder(self.gridColHdr, thisCol, self.dataFirstRow - 1, sideBorder)
-                        gridHdr(self.gridColHdr, thisCol, self.dataFirstRow - 1, 
-                                xAxisHdrObj.genLabel(role="http://www.eurofiling.info/role/2010/coordinate-code"),
-                                anchor="center",
-                                wraplength=100, # screen units
-                                objectId=xAxisHdrObj.objectId(),
-                                onClick=self.onClick)
-                    gridBorder(self.gridColHdr, thisCol, self.dataFirstRow - 1, BOTTOMBORDER)
-                    xFilters.append((inheritedPrimaryItemQname(self, xAxisHdrObj),
-                                     inheritedExplicitDims(self, xAxisHdrObj)))
-            if nonAbstract:
-                rightCol += 1
-            if renderNow and not childrenFirst:
-                self.xAxis(leftCol + (1 if nonAbstract else 0), topRow + 1, rowBelow, xAxisHdrObj, xFilters, childrenFirst, True, False) # render on this pass
-            leftCol = rightCol
-        if atTop and sideBorder and not childrenFirst:
-            gridBorder(self.gridColHdr, rightCol - 1, 1, RIGHTBORDER, rowspan=self.dataFirstRow)
-        return (rightCol, parentRow, widthToSpanParent, noDescendants)
-            
-    def yAxis(self, leftCol, row, yAxisParentObj, childrenFirst, renderNow, atLeft):
-        nestedBottomRow = row
-        if atLeft:
-            gridBorder(self.gridRowHdr, self.rowHdrCols + self.rowHdrDocCol + self.rowHdrCodeCol, 
-                       self.dataFirstRow, 
-                       RIGHTBORDER, 
-                       rowspan=self.dataRows)
-            gridBorder(self.gridRowHdr, 1, self.dataFirstRow + self.dataRows - 1, 
-                       BOTTOMBORDER, 
-                       columnspan=(self.rowHdrCols + self.rowHdrDocCol + self.rowHdrCodeCol))
-        for axisMbrRel in self.axisMbrRelSet.fromModelObject(yAxisParentObj):
-            yAxisHdrObj = axisMbrRel.toModelObject
-            nestRow, nextRow = self.yAxis(leftCol + 1, row, yAxisHdrObj,  # nested items before totals
-                                    childrenFirst, childrenFirst, False)
-            
-            isNonAbstract = yAxisHdrObj.abstract == "false"
-            isAbstract = not isNonAbstract
-            label = yAxisHdrObj.genLabel(lang=self.lang)
-            topRow = row
-            if childrenFirst and isNonAbstract:
-                row = nextRow
-            if renderNow:
-                columnspan = self.rowHdrCols - leftCol + 1 if isNonAbstract or nextRow == row else None
-                gridBorder(self.gridRowHdr, leftCol, topRow, LEFTBORDER, 
-                           rowspan=(nestRow - topRow + 1) )
-                gridBorder(self.gridRowHdr, leftCol, topRow, TOPBORDER, 
-                           columnspan=(1 if childrenFirst and nextRow > row else columnspan))
-                if childrenFirst and row > topRow:
-                    gridBorder(self.gridRowHdr, leftCol + 1, row, TOPBORDER, 
-                               columnspan=(self.rowHdrCols - leftCol))
-                gridHdr(self.gridRowHdr, leftCol, row, 
-                        label if label else "         ", 
-                        anchor=("w" if isNonAbstract or nestRow == row else "center"),
-                        columnspan=columnspan,
-                        rowspan=(nestRow - row if isAbstract else None),
-                        # wraplength is in screen units
-                        wraplength=(self.rowHdrColWidth[leftCol] if isAbstract else
-                                    self.rowHdrWrapLength -
-                                      sum(self.rowHdrColWidth[i] for i in range(leftCol))),
-                        minwidth=(16 if isNonAbstract and nextRow > topRow else None),
-                        objectId=yAxisHdrObj.objectId(),
-                        onClick=self.onClick)
-                if isNonAbstract:
-                    if self.rowHdrDocCol:
-                        docCol = self.dataFirstCol - 1 - self.rowHdrCodeCol
-                        gridBorder(self.gridRowHdr, docCol, row, TOPBORDER)
-                        gridBorder(self.gridRowHdr, docCol, row, LEFTBORDER)
-                        gridHdr(self.gridRowHdr, docCol, row, 
-                                yAxisHdrObj.genLabel(role="http://www.xbrl.org/2008/role/documentation",
-                                                     lang=self.lang), 
-                                anchor="w",
-                                wraplength=100, # screen units
-                                objectId=yAxisHdrObj.objectId(),
-                                onClick=self.onClick)
-                    if self.rowHdrCodeCol:
-                        codeCol = self.dataFirstCol - 1
-                        gridBorder(self.gridRowHdr, codeCol, row, TOPBORDER)
-                        gridBorder(self.gridRowHdr, codeCol, row, LEFTBORDER)
-                        gridHdr(self.gridRowHdr, codeCol, row, 
-                                yAxisHdrObj.genLabel(role="http://www.eurofiling.info/role/2010/coordinate-code"),
-                                anchor="center",
-                                wraplength=40, # screen units
-                                objectId=yAxisHdrObj.objectId(),
-                                onClick=self.onClick)
-                    # gridBorder(self.gridRowHdr, leftCol, self.dataFirstRow - 1, BOTTOMBORDER)
-            if isNonAbstract:
-                row += 1
-            elif childrenFirst:
-                row = nextRow
-            if nestRow > nestedBottomRow:
-                nestedBottomRow = nestRow + (not childrenFirst)
-            if row > nestedBottomRow:
-                nestedBottomRow = row
-            #if renderNow and not childrenFirst:
-            #    dummy, row = self.yAxis(leftCol + 1, row, yAxisHdrObj, childrenFirst, True, False) # render on this pass
-            if not childrenFirst:
-                dummy, row = self.yAxis(leftCol + 1, row, yAxisHdrObj, childrenFirst, renderNow, False) # render on this pass
-        return (nestedBottomRow, row)
-
-    def bodyCells(self, row, yAxisParentObj, xFilters, zFilters, yChildrenFirst):
-        dimDefaults = self.modelXbrl.qnameDimensionDefaults
-        priItemQnameErrors = set()
-        dimQnameErrors = set()
-        memQnameErrors = set()
-        for axisMbrRel in self.axisMbrRelSet.fromModelObject(yAxisParentObj):
-            yAxisHdrObj = axisMbrRel.toModelObject
-            if yChildrenFirst:
-                row = self.bodyCells(row, yAxisHdrObj, xFilters, zFilters, yChildrenFirst)
-            if yAxisHdrObj.abstract == "false":
-                yAxisPriItemQname = inheritedPrimaryItemQname(self, yAxisHdrObj)
-                yAxisExplicitDims = inheritedExplicitDims(self, yAxisHdrObj)
-                    
-                gridSpacer(self.gridBody, self.dataFirstCol, row, LEFTBORDER)
-                # data for columns of row
-                ignoreDimValidity = self.ignoreDimValidity.get()
-                zPriItemQname = None
-                zDims = set()
-                for zIndex in self.zFilterIndex:
-                    zFilter = zFilters[zIndex]
-                    if zFilter[0]: zPriItemQname = zFilter[0] # inherit pri item
-                    zDims |= zFilter[1] # or in z-dims
-                for i, colFilter in enumerate(xFilters):
-                    colPriItemQname = colFilter[0] # y axis pri item
-                    if not colPriItemQname: colPriItemQname = yAxisPriItemQname # y axis
-                    if not colPriItemQname: colPriItemQname = zPriItemQname # z axis
-                    fp = FactPrototype(self,
-                                       colPriItemQname,
-                                       yAxisExplicitDims | colFilter[1] | zDims)
-                    from arelle.ValidateXbrlDimensions import isFactDimensionallyValid
-                    value = None
-                    objectId = None
-                    justify = None
-                    for fact in self.modelXbrl.facts:
-                        if fact.qname == fp.qname:
-                            factDimMem = fact.context.dimMemberQname
-                            defaultedDims = _DICT_SET(dimDefaults.keys()) - fp.dimKeys
-                            if (all(factDimMem(dim,includeDefaults=True) == mem 
-                                    for dim, mem in fp.dims) and
-                                all(factDimMem(dim,includeDefaults=True) in (dimDefaults[dim], None)
-                                    for dim in defaultedDims)):
-                                value = fact.effectiveValue
-                                objectId = fact.objectId()
-                                justify = "right" if fact.isNumeric else "left"
-                                break
-                    if value is not None or ignoreDimValidity or isFactDimensionallyValid(self, fp):
-                        if objectId is None:
-                            objectId = "f{0}".format(len(self.factPrototypes))
-                            self.factPrototypes.append(fp)  # for property views
-                        gridCell(self.gridBody, self.dataFirstCol + i, row, value, justify=justify, 
-                                 width=12, # width is in characters, not screen units
-                                 objectId=objectId, onClick=self.onClick)
+    def xAxis(self, leftCol, topRow, rowBelow, xParentStructuralNode, xStructuralNodes, childrenFirst, renderNow, atTop):
+        if xParentStructuralNode is not None:
+            parentRow = rowBelow
+            noDescendants = True
+            rightCol = leftCol
+            widthToSpanParent = 0
+            sideBorder = not xStructuralNodes
+            if atTop and sideBorder and childrenFirst:
+                gridBorder(self.gridColHdr, self.dataFirstCol, 1, LEFTBORDER, rowspan=self.dataFirstRow)
+            for xStructuralNode in xParentStructuralNode.childStructuralNodes:
+                if not xStructuralNode.isRollUp:
+                    noDescendants = False
+                    rightCol, row, width, leafNode = self.xAxis(leftCol, topRow + 1, rowBelow, xStructuralNode, xStructuralNodes, # nested items before totals
+                                                                childrenFirst, childrenFirst, False)
+                    if row - 1 < parentRow:
+                        parentRow = row - 1
+                    #if not leafNode: 
+                    #    rightCol -= 1
+                    nonAbstract = not xStructuralNode.isAbstract
+                    if nonAbstract:
+                        width += 100 # width for this label, in screen units
+                    widthToSpanParent += width
+                    label = xStructuralNode.header(lang=self.lang,
+                                                   returnGenLabel=isinstance(xStructuralNode.definitionNode, (ModelClosedDefinitionNode, ModelEuAxisCoord)))
+                    if childrenFirst:
+                        thisCol = rightCol
+                        sideBorder = RIGHTBORDER
                     else:
-                        gridSpacer(self.gridBody, self.dataFirstCol + i, row, CENTERCELL)
-                    gridSpacer(self.gridBody, self.dataFirstCol + i, row, RIGHTBORDER)
-                    gridSpacer(self.gridBody, self.dataFirstCol + i, row, BOTTOMBORDER)
-                row += 1
-            if not yChildrenFirst:
-                row = self.bodyCells(row, yAxisHdrObj, xFilters, zFilters, yChildrenFirst)
-        return row
+                        thisCol = leftCol
+                        sideBorder = LEFTBORDER
+                    if renderNow:
+                        columnspan = (rightCol - leftCol + (1 if nonAbstract else 0))
+                        gridBorder(self.gridColHdr, leftCol, topRow, TOPBORDER, columnspan=columnspan)
+                        gridBorder(self.gridColHdr, leftCol, topRow, 
+                                   sideBorder, columnspan=columnspan,
+                                   rowspan=(rowBelow - topRow + 1) )
+                        gridHdr(self.gridColHdr, leftCol, topRow, 
+                                label if label else "         ", 
+                                anchor="center",
+                                columnspan=(rightCol - leftCol + (1 if nonAbstract else 0)),
+                                rowspan=(row - topRow + 1) if leafNode else 1,
+                                wraplength=width, # screen units
+                                objectId=xStructuralNode.objectId(),
+                                onClick=self.onClick)
+                        if nonAbstract:
+                            for i, role in enumerate(self.colHdrNonStdRoles):
+                                gridBorder(self.gridColHdr, thisCol, self.dataFirstRow - len(self.colHdrNonStdRoles) + i, TOPBORDER)
+                                gridBorder(self.gridColHdr, thisCol, self.dataFirstRow - len(self.colHdrNonStdRoles) + i, sideBorder)
+                                gridHdr(self.gridColHdr, thisCol, self.dataFirstRow - len(self.colHdrNonStdRoles) + i, 
+                                        xStructuralNode.header(role=role, lang=self.lang), 
+                                        anchor="center",
+                                        wraplength=100, # screen units
+                                        objectId=xStructuralNode.objectId(),
+                                        onClick=self.onClick)
+                            ''' was
+                            if self.colHdrDocRow:
+                                gridBorder(self.gridColHdr, thisCol, self.dataFirstRow - 1 - self.rowHdrCodeCol, TOPBORDER)
+                                gridBorder(self.gridColHdr, thisCol, self.dataFirstRow - 1 - self.rowHdrCodeCol, sideBorder)
+                                gridHdr(self.gridColHdr, thisCol, self.dataFirstRow - 1 - self.rowHdrCodeCol, 
+                                        xStructuralNode.header(role="http://www.xbrl.org/2008/role/documentation",
+                                                               lang=self.lang), 
+                                        anchor="center",
+                                        wraplength=100, # screen units
+                                        objectId=xStructuralNode.objectId(),
+                                        onClick=self.onClick)
+                            if self.colHdrCodeRow:
+                                gridBorder(self.gridColHdr, thisCol, self.dataFirstRow - 1, TOPBORDER)
+                                gridBorder(self.gridColHdr, thisCol, self.dataFirstRow - 1, sideBorder)
+                                gridHdr(self.gridColHdr, thisCol, self.dataFirstRow - 1, 
+                                        xStructuralNode.header(role="http://www.eurofiling.info/role/2010/coordinate-code"),
+                                        anchor="center",
+                                        wraplength=100, # screen units
+                                        objectId=xStructuralNode.objectId(),
+                                        onClick=self.onClick)
+                            '''
+                            gridBorder(self.gridColHdr, thisCol, self.dataFirstRow - 1, BOTTOMBORDER)
+                            xStructuralNodes.append(xStructuralNode)
+                    if nonAbstract:
+                        rightCol += 1
+                    if renderNow and not childrenFirst:
+                        self.xAxis(leftCol + (1 if nonAbstract else 0), topRow + 1, rowBelow, xStructuralNode, xStructuralNodes, childrenFirst, True, False) # render on this pass
+                    leftCol = rightCol
+            if atTop and sideBorder and not childrenFirst:
+                gridBorder(self.gridColHdr, rightCol - 1, 1, RIGHTBORDER, rowspan=self.dataFirstRow)
+            return (rightCol, parentRow, widthToSpanParent, noDescendants)
+            
+    def yAxis(self, leftCol, row, yParentStructuralNode, childrenFirst, renderNow, atLeft):
+        if yParentStructuralNode is not None:
+            nestedBottomRow = row
+            if atLeft:
+                gridBorder(self.gridRowHdr, self.rowHdrCols + len(self.rowHdrNonStdRoles), # was: self.rowHdrDocCol + self.rowHdrCodeCol, 
+                           self.dataFirstRow, 
+                           RIGHTBORDER, 
+                           rowspan=self.dataRows)
+                gridBorder(self.gridRowHdr, 1, self.dataFirstRow + self.dataRows - 1, 
+                           BOTTOMBORDER, 
+                           columnspan=(self.rowHdrCols + len(self.rowHdrNonStdRoles))) # was: self.rowHdrDocCol + self.rowHdrCodeCol))
+            for yStructuralNode in yParentStructuralNode.childStructuralNodes:
+                if not yStructuralNode.isRollUp:
+                    nestRow, nextRow = self.yAxis(leftCol + 1, row, yStructuralNode,  # nested items before totals
+                                            childrenFirst, childrenFirst, False)
+                    
+                    isAbstract = (yStructuralNode.isAbstract or 
+                                  (yStructuralNode.childStructuralNodes and
+                                   not isinstance(yStructuralNode.definitionNode, (ModelClosedDefinitionNode, ModelEuAxisCoord))))
+                    isNonAbstract = not isAbstract
+                    label = yStructuralNode.header(lang=self.lang,
+                                                   returnGenLabel=isinstance(yStructuralNode.definitionNode, (ModelClosedDefinitionNode, ModelEuAxisCoord)))
+                    topRow = row
+                    if childrenFirst and isNonAbstract:
+                        row = nextRow
+                    if renderNow:
+                        columnspan = self.rowHdrCols - leftCol + 1 if isNonAbstract or nextRow == row else None
+                        gridBorder(self.gridRowHdr, leftCol, topRow, LEFTBORDER, 
+                                   rowspan=(nestRow - topRow + 1) )
+                        gridBorder(self.gridRowHdr, leftCol, topRow, TOPBORDER, 
+                                   columnspan=(1 if childrenFirst and nextRow > row else columnspan))
+                        if childrenFirst and row > topRow:
+                            gridBorder(self.gridRowHdr, leftCol + 1, row, TOPBORDER, 
+                                       columnspan=(self.rowHdrCols - leftCol))
+                        depth = yStructuralNode.depth
+                        gridHdr(self.gridRowHdr, leftCol, row, 
+                                label if label is not None else "         ", 
+                                anchor=("w" if isNonAbstract or nestRow == row else "center"),
+                                columnspan=columnspan,
+                                rowspan=(nestRow - row if isAbstract else None),
+                                # wraplength is in screen units
+                                wraplength=(self.rowHdrColWidth[depth] if isAbstract else
+                                            self.rowHdrWrapLength - sum(self.rowHdrColWidth[0:depth])),
+                                #minwidth=self.rowHdrColWidth[leftCol],
+                                minwidth=(16 if isNonAbstract and nextRow > topRow else None),
+                                objectId=yStructuralNode.objectId(),
+                                onClick=self.onClick)
+                        if isNonAbstract:
+                            for i, role in enumerate(self.rowHdrNonStdRoles):
+                                isCode = "code" in role
+                                docCol = self.dataFirstCol - len(self.rowHdrNonStdRoles) + i
+                                gridBorder(self.gridRowHdr, docCol, row, TOPBORDER)
+                                gridBorder(self.gridRowHdr, docCol, row, LEFTBORDER)
+                                gridHdr(self.gridRowHdr, docCol, row, 
+                                        yStructuralNode.header(role=role, lang=self.lang), 
+                                        anchor="c" if isCode else "w",
+                                        wraplength=40 if isCode else 100, # screen units
+                                        objectId=yStructuralNode.objectId(),
+                                        onClick=self.onClick)
+                            ''' was:
+                            if self.rowHdrDocCol:
+                                docCol = self.dataFirstCol - 1 - self.rowHdrCodeCol
+                                gridBorder(self.gridRowHdr, docCol, row, TOPBORDER)
+                                gridBorder(self.gridRowHdr, docCol, row, LEFTBORDER)
+                                gridHdr(self.gridRowHdr, docCol, row, 
+                                        yStructuralNode.header(role="http://www.xbrl.org/2008/role/documentation",
+                                                             lang=self.lang), 
+                                        anchor="w",
+                                        wraplength=100, # screen units
+                                        objectId=yStructuralNode.objectId(),
+                                        onClick=self.onClick)
+                            if self.rowHdrCodeCol:
+                                codeCol = self.dataFirstCol - 1
+                                gridBorder(self.gridRowHdr, codeCol, row, TOPBORDER)
+                                gridBorder(self.gridRowHdr, codeCol, row, LEFTBORDER)
+                                gridHdr(self.gridRowHdr, codeCol, row, 
+                                        yStructuralNode.header(role="http://www.eurofiling.info/role/2010/coordinate-code"),
+                                        anchor="center",
+                                        wraplength=40, # screen units
+                                        objectId=yStructuralNode.objectId(),
+                                        onClick=self.onClick)
+                            # gridBorder(self.gridRowHdr, leftCol, self.dataFirstRow - 1, BOTTOMBORDER)
+                            '''
+                    if isNonAbstract:
+                        row += 1
+                    elif childrenFirst:
+                        row = nextRow
+                    if nestRow > nestedBottomRow:
+                        nestedBottomRow = nestRow + (isNonAbstract and not childrenFirst)
+                    if row > nestedBottomRow:
+                        nestedBottomRow = row
+                    #if renderNow and not childrenFirst:
+                    #    dummy, row = self.yAxis(leftCol + 1, row, yStructuralNode, childrenFirst, True, False) # render on this pass
+                    if not childrenFirst:
+                        dummy, row = self.yAxis(leftCol + 1, row, yStructuralNode, childrenFirst, renderNow, False) # render on this pass
+            return (nestedBottomRow, row)
+    
+    def bodyCells(self, row, yParentStructuralNode, xStructuralNodes, zAspects, yChildrenFirst):
+        if yParentStructuralNode is not None:
+            rendrCntx = getattr(self.modelXbrl, "rendrCntx", None) # none for EU 2010 tables
+            dimDefaults = self.modelXbrl.qnameDimensionDefaults
+            for yStructuralNode in yParentStructuralNode.childStructuralNodes:
+                if yChildrenFirst:
+                    row = self.bodyCells(row, yStructuralNode, xStructuralNodes, zAspects, yChildrenFirst)
+                if not yStructuralNode.isAbstract:
+                    yAspects = defaultdict(set)
+                    for aspect in aspectModels[self.aspectModel]:
+                        for ruleAspect in aspectRuleAspects.get(aspect, (aspect,)):
+                            if yStructuralNode.hasAspect(ruleAspect):
+                                if ruleAspect == Aspect.DIMENSIONS:
+                                    for dim in (yStructuralNode.aspectValue(Aspect.DIMENSIONS) or emptyList):
+                                        yAspects[dim].add(yStructuralNode)
+                                else:
+                                    yAspects[ruleAspect].add(yStructuralNode)
+                        
+                    gridSpacer(self.gridBody, self.dataFirstCol, row, LEFTBORDER)
+                    # data for columns of row
+                    ignoreDimValidity = self.ignoreDimValidity.get()
+                    for i, xStructuralNode in enumerate(xStructuralNodes):
+                        xAspects = defaultdict(set)
+                        for aspect in aspectModels[self.aspectModel]:
+                            for ruleAspect in aspectRuleAspects.get(aspect, (aspect,)):
+                                if xStructuralNode.hasAspect(ruleAspect):
+                                    if ruleAspect == Aspect.DIMENSIONS:
+                                        for dim in (xStructuralNode.aspectValue(Aspect.DIMENSIONS) or emptyList):
+                                            xAspects[dim].add(xStructuralNode)
+                                    else:
+                                        xAspects[ruleAspect].add(xStructuralNode)
+                        cellAspectValues = {}
+                        matchableAspects = set()
+                        for aspect in _DICT_SET(xAspects.keys()) | _DICT_SET(yAspects.keys()) | _DICT_SET(zAspects.keys()):
+                            aspectValue = inheritedAspectValue(self, aspect, xAspects, yAspects, zAspects, xStructuralNode, yStructuralNode)
+                            if dimDefaults.get(aspect) != aspectValue: # don't include defaulted dimensions
+                                cellAspectValues[aspect] = aspectValue
+                            matchableAspects.add(aspectModelAspect.get(aspect,aspect)) #filterable aspect from rule aspect
+                        cellDefaultedDims = _DICT_SET(dimDefaults) - _DICT_SET(cellAspectValues.keys())
+                        priItemQname = cellAspectValues.get(Aspect.CONCEPT)
+                            
+                        concept = self.modelXbrl.qnameConcepts.get(priItemQname)
+                        conceptNotAbstract = concept is None or not concept.isAbstract
+                        from arelle.ValidateXbrlDimensions import isFactDimensionallyValid
+                        value = None
+                        objectId = None
+                        justify = None
+                        fp = FactPrototype(self, cellAspectValues)
+                        if conceptNotAbstract:
+                            # reduce set of matchable facts to those with pri item qname and have dimension aspects
+                            facts = self.modelXbrl.factsByQname[priItemQname] if priItemQname else self.modelXbrl.factsInInstance
+                            for aspect in matchableAspects:  # trim down facts with explicit dimensions match or just present
+                                if isinstance(aspect, QName):
+                                    aspectValue = cellAspectValues.get(aspect, None)
+                                    if isinstance(aspectValue, ModelDimensionValue):
+                                        if aspectValue.isExplicit:
+                                            dimMemQname = aspectValue.memberQname # match facts with this explicit value
+                                        else:
+                                            dimMemQname = None  # match facts that report this dimension
+                                    elif isinstance(aspectValue, QName): 
+                                        dimMemQname = aspectValue  # match facts that have this explicit value
+                                    else:
+                                        dimMemQname = None # match facts that report this dimension
+                                    facts = facts & self.modelXbrl.factsByDimMemQname(aspect, dimMemQname)
+                            for fact in facts:
+                                if (all(aspectMatches(rendrCntx, fact, fp, aspect) 
+                                        for aspect in matchableAspects) and
+                                    all(fact.context.dimMemberQname(dim,includeDefaults=True) in (dimDefaults[dim], None)
+                                        for dim in cellDefaultedDims)):
+                                    if yStructuralNode.hasValueExpression(xStructuralNode):
+                                        value = yStructuralNode.evalValueExpression(fact, xStructuralNode)
+                                    else:
+                                        value = fact.effectiveValue
+                                    objectId = fact.objectId()
+                                    justify = "right" if fact.isNumeric else "left"
+                                    break
+                        if (conceptNotAbstract and
+                            (value is not None or ignoreDimValidity or isFactDimensionallyValid(self, fp))):
+                            if objectId is None:
+                                objectId = "f{0}".format(len(self.factPrototypes))
+                                self.factPrototypes.append(fp)  # for property views
+                            gridCell(self.gridBody, self.dataFirstCol + i, row, value, justify=justify, 
+                                     width=12, # width is in characters, not screen units
+                                     objectId=objectId, onClick=self.onClick)
+                        else:
+                            fp.clear()  # dereference
+                            gridSpacer(self.gridBody, self.dataFirstCol + i, row, CENTERCELL)
+                        gridSpacer(self.gridBody, self.dataFirstCol + i, row, RIGHTBORDER)
+                        gridSpacer(self.gridBody, self.dataFirstCol + i, row, BOTTOMBORDER)
+                    row += 1
+                if not yChildrenFirst:
+                    row = self.bodyCells(row, yStructuralNode, xStructuralNodes, zAspects, yChildrenFirst)
+            return row
     def onClick(self, event):
         objId = event.widget.objectId
         if objId and objId[0] == "f":
@@ -402,9 +501,11 @@ class ViewRenderedGrid(ViewWinGrid.ViewGrid):
         else:
             viewableObject = objId
         self.modelXbrl.viewModelObject(viewableObject)
+        self.modelXbrl.modelManager.cntlr.currentView = self
             
     def cellEnter(self, *args):
         self.blockSelectEvent = 0
+        self.modelXbrl.modelManager.cntlr.currentView = self
 
     def cellLeave(self, *args):
         self.blockSelectEvent = 1
@@ -437,12 +538,14 @@ class ViewRenderedGrid(ViewWinGrid.ViewGrid):
             '''
             self.blockViewModelObject -= 1
     
-    def saveInstance(self):
-        if not self.newFactItemOptions.entityIdentScheme:  # not initialized yet
+    def saveInstance(self, newFilename=None):
+        if (not self.newFactItemOptions.entityIdentScheme or  # not initialized yet
+            not self.newFactItemOptions.entityIdentValue or
+            not self.newFactItemOptions.startDateDate or not self.newFactItemOptions.endDateDate):
             if not getNewFactItemOptions(self.modelXbrl.modelManager.cntlr, self.newFactItemOptions):
                 return # new instance not set
-        newFilename = None # only used when a new instance must be created
-        if self.modelXbrl.modelDocument.type != ModelDocument.Type.INSTANCE:
+        # newFilename = None # only used when a new instance must be created
+        if self.modelXbrl.modelDocument.type != ModelDocument.Type.INSTANCE and newFilename is None:
             newFilename = self.modelXbrl.modelManager.cntlr.fileSave(view=self, fileType="xbrl")
             if not newFilename:
                 return  # saving cancelled
@@ -453,7 +556,7 @@ class ViewRenderedGrid(ViewWinGrid.ViewGrid):
 
     def backgroundSaveInstance(self, newFilename=None):
         cntlr = self.modelXbrl.modelManager.cntlr
-        if newFilename:
+        if newFilename and self.modelXbrl.modelDocument.type != ModelDocument.Type.INSTANCE:
             self.modelXbrl.modelManager.showStatus(_("creating new instance {0}").format(os.path.basename(newFilename)))
             self.modelXbrl.modelManager.cntlr.waitForUiThreadQueue() # force status update
             self.modelXbrl.createInstance(newFilename) # creates an instance as this modelXbrl's entrypoing
@@ -475,8 +578,8 @@ class ViewRenderedGrid(ViewWinGrid.ViewGrid):
                         entityIdentScheme = self.newFactItemOptions.entityIdentScheme
                         entityIdentValue = self.newFactItemOptions.entityIdentValue
                         periodType = factPrototype.concept.periodType
-                        periodStart = self.newFactItemOptions.startDate if periodType == "duration" else None
-                        periodEndInstant = self.newFactItemOptions.endDate
+                        periodStart = self.newFactItemOptions.startDateDate if periodType == "duration" else None
+                        periodEndInstant = self.newFactItemOptions.endDateDate
                         qnameDims = factPrototype.context.qnameDims
                         prevCntx = instance.matchContext(
                              entityIdentScheme, entityIdentValue, periodType, periodStart, periodEndInstant, 
@@ -514,15 +617,23 @@ class ViewRenderedGrid(ViewWinGrid.ViewGrid):
                             value = Locale.atof(self.modelXbrl.locale, value, str.strip)
                         newFact = instance.createFact(concept.qname, attributes=attrs, text=value)
                         bodyCell.objectId = newFact.objectId()  # switch cell to now use fact ID
+                        if self.factPrototypes[factPrototypeIndex] is not None:
+                            self.factPrototypes[factPrototypeIndex].clear()
                         self.factPrototypes[factPrototypeIndex] = None #dereference fact prototype
                     else: # instance fact, not prototype
                         fact = self.modelXbrl.modelObject(objId)
                         if fact.concept.isNumeric:
                             value = Locale.atof(self.modelXbrl.locale, value, str.strip)
                         if fact.value != value:
+                            if fact.concept.isNumeric and fact.isNil != (not value):
+                                fact.isNil = not value
+                                if value: # had been nil, now it needs decimals
+                                    fact.decimals = (self.newFactItemOptions.monetaryDecimals
+                                                     if fact.concept.isMonetary else
+                                                     self.newFactItemOptions.nonMonetaryDecimals)
                             fact.text = value
                             XmlValidate.validate(instance, fact)
                     bodyCell.isChanged = False  # clear change flag
-        instance.saveInstance()
+        instance.saveInstance(newFilename) # may override prior filename for instance from main menu
         cntlr.showStatus(_("Saved {0}").format(instance.modelDocument.basename), clearAfter=3000)
             

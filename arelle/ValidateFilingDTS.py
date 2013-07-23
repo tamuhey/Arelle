@@ -10,34 +10,73 @@ from arelle.ModelObject import ModelObject
 from arelle.ModelDtsObject import ModelConcept
 
 targetNamespaceDatePattern = None
+efmFilenamePattern = None
 roleTypePattern = None
 arcroleTypePattern = None
 arcroleDefinitionPattern = None
+namePattern = None
+namespacesConflictPattern = None
+linkroleDefinitionBalanceIncomeSheet = None
+extLinkEltFileNameEnding = {
+    "calculationLink": "_cal",
+    "definitionLink": "_def",
+    "labelLink": "_lab",
+    "presentationLink": "_pre",
+    "referenceLink": "_ref"}
 
 def checkDTS(val, modelDocument, visited):
-    global targetNamespaceDatePattern, roleTypePattern, arcroleTypePattern, arcroleDefinitionPattern
+    global targetNamespaceDatePattern, efmFilenamePattern, roleTypePattern, arcroleTypePattern, \
+            arcroleDefinitionPattern, namePattern, linkroleDefinitionBalanceIncomeSheet, \
+            namespacesConflictPattern
     if targetNamespaceDatePattern is None:
         targetNamespaceDatePattern = re.compile(r"/([12][0-9]{3})-([01][0-9])-([0-3][0-9])|"
                                             r"/([12][0-9]{3})([01][0-9])([0-3][0-9])|")
-        roleTypePattern = re.compile(r".*/role/[^/]+")
-        arcroleTypePattern = re.compile(r".*/arcrole/[^/]+")
+        efmFilenamePattern = re.compile(r"^[a-z0-9][a-zA-Z0-9_\.\-]*(\.xsd|\.xml)$")
+        roleTypePattern = re.compile(r"^.*/role/[^/\s]+$")
+        arcroleTypePattern = re.compile(r"^.*/arcrole/[^/\s]+$")
         arcroleDefinitionPattern = re.compile(r"^.*[^\\s]+.*$")  # at least one non-whitespace character
+        namePattern = re.compile("[][()*+?\\\\/^{}|@#%^=~`\"';:,<>&$\u00a3\u20ac]") # u20ac=Euro, u00a3=pound sterling 
+        linkroleDefinitionBalanceIncomeSheet = re.compile(r"[^-]+-\s+Statement\s+-\s+.*(income|balance|financial\W+position)",
+                                                          re.IGNORECASE)
+        namespacesConflictPattern = re.compile(r"http://(xbrl\.us|fasb\.org|xbrl\.sec\.gov)/(dei|us-types|us-roles|rr)/([0-9]{4}-[0-9]{2}-[0-9]{2})$")
+    nonDomainItemNameProblemPattern = re.compile(
+        r"({0})|(FirstQuarter|SecondQuarter|ThirdQuarter|FourthQuarter|[1-4]Qtr|Qtr[1-4]|ytd|YTD|HalfYear)(?:$|[A-Z\W])"
+        .format(re.sub(r"\W", "", (val.entityRegistrantName or "").title())))
+    
         
     visited.append(modelDocument)
     definesLabelLinkbase = False
-    for referencedDocument in modelDocument.referencesDocument.items():
+    for referencedDocument, modelDocumentReference in modelDocument.referencesDocument.items():
         #6.07.01 no includes
-        if referencedDocument[1] == "include":
+        if modelDocumentReference.referenceType == "include":
             val.modelXbrl.error(("EFM.6.07.01", "GFM.1.03.01", "SBR.NL.2.2.0.18"),
                 _("Taxonomy schema %(schema)s includes %(include)s, only import is allowed"),
-                modelObject=modelDocument,
+                modelObject=modelDocumentReference.referringModelObject,
                     schema=os.path.basename(modelDocument.uri), 
-                    include=os.path.basename(referencedDocument[0].uri))
-        if referencedDocument[0] not in visited:
-            checkDTS(val, referencedDocument[0], visited)
+                    include=os.path.basename(referencedDocument.uri))
+        if referencedDocument not in visited:
+            checkDTS(val, referencedDocument, visited)
             
     if val.disclosureSystem.standardTaxonomiesDict is None:
         pass
+
+    if val.validateEFM: 
+        if modelDocument.uri in val.disclosureSystem.standardTaxonomiesDict:
+            if modelDocument.targetNamespace:
+                # check for duplicates of us-types, dei, and rr taxonomies
+                match = namespacesConflictPattern.match(modelDocument.targetNamespace)
+                if match is not None:
+                    val.standardNamespaceConflicts[match.group(2)].add(modelDocument)
+        else:
+            if len(modelDocument.basename) > 32:
+                val.modelXbrl.error("EFM.5.01.01.tooManyCharacters",
+                    _("Document file name %(filename)s must not exceed 32 characters."),
+                    modelObject=modelDocument, filename=modelDocument.basename)
+            if not efmFilenamePattern.match(modelDocument.basename):
+                val.modelXbrl.error("EFM.5.01.01",
+                    _("Document file name %(filename)s must start with a-z or 0-9, contain upper or lower case letters, ., -, _, and end with .xsd or .xml."),
+                    modelObject=modelDocument, filename=modelDocument.basename)
+    
     if (modelDocument.type == ModelDocument.Type.SCHEMA and 
         modelDocument.targetNamespace not in val.disclosureSystem.baseTaxonomyNamespaces and
         modelDocument.uri.startswith(val.modelXbrl.uriDir)):
@@ -64,10 +103,11 @@ def checkDTS(val, modelDocument, visited):
         if targetNamespaceAuthority in val.disclosureSystem.standardAuthorities:
             val.modelXbrl.error(("EFM.6.07.03", "GFM.1.03.03"),
                 _("Taxonomy schema %(schema)s namespace %(targetNamespace)s is a disallowed authority"),
-                modelObject=modelDocument, schema=os.path.basename(modelDocument.uri), targetNamespace=modelDocument.targetNamespace)
+                modelObject=modelDocument, schema=os.path.basename(modelDocument.uri), targetNamespace=modelDocument.targetNamespace, 
+                targetNamespaceAuthority=UrlUtil.authority(modelDocument.targetNamespace, includeScheme=False))
             
         # 6.7.4 check namespace format
-        if modelDocument.targetNamespace is None:
+        if modelDocument.targetNamespace is None or not modelDocument.targetNamespace.startswith("http://"):
             match = None
         elif val.validateEFMorGFM:
             targetNamespaceDate = modelDocument.targetNamespace[len(targetNamespaceAuthority):]
@@ -77,9 +117,9 @@ def checkDTS(val, modelDocument, visited):
         if match is not None:
             try:
                 if match.lastindex == 3:
-                    datetime.date(int(match.group(1)),int(match.group(2)),int(match.group(3)))
+                    date = datetime.date(int(match.group(1)),int(match.group(2)),int(match.group(3)))
                 elif match.lastindex == 6:
-                    datetime.date(int(match.group(4)),int(match.group(5)),int(match.group(6)))
+                    date = datetime.date(int(match.group(4)),int(match.group(5)),int(match.group(6)))
                 else:
                     match = None
             except ValueError:
@@ -88,11 +128,25 @@ def checkDTS(val, modelDocument, visited):
             val.modelXbrl.error(("EFM.6.07.04", "GFM.1.03.04"),
                 _("Taxonomy schema %(schema)s namespace %(targetNamespace)s must have format http://{authority}/{versionDate}"),
                 modelObject=modelDocument, schema=os.path.basename(modelDocument.uri), targetNamespace=modelDocument.targetNamespace)
+        elif val.fileNameDate and date > val.fileNameDate:
+            val.modelXbrl.info(("EFM.6.07.06", "GFM.1.03.06"),
+                _("Warning: Taxonomy schema %(schema)s namespace %(targetNamespace)s has date later than document name date %(docNameDate)s"),
+                modelObject=modelDocument, schema=os.path.basename(modelDocument.uri), targetNamespace=modelDocument.targetNamespace,
+                docNameDate=val.fileNameDate)
 
         if modelDocument.targetNamespace is not None:
             # 6.7.5 check prefix for _
+            authority = UrlUtil.authority(modelDocument.targetNamespace)
+            if not re.match(r"(http://|https://|ftp://|urn:)\w+",authority):
+                val.modelXbrl.error(("EFM.6.07.05", "GFM.1.03.05"),
+                    _("Taxonomy schema %(schema)s namespace %(targetNamespace)s must be a valid URL with a valid authority for the namespace."),
+                    modelObject=modelDocument, schema=os.path.basename(modelDocument.uri), targetNamespace=modelDocument.targetNamespace)
             prefix = XmlUtil.xmlnsprefix(modelDocument.xmlRootElement,modelDocument.targetNamespace)
-            if prefix and "_" in prefix:
+            if not prefix:
+                val.modelXbrl.error(("EFM.6.07.07", "GFM.1.03.07"),
+                    _("Taxonomy schema %(schema)s namespace %(targetNamespace)s missing prefix for the namespace."),
+                    modelObject=modelDocument, schema=os.path.basename(modelDocument.uri), targetNamespace=modelDocument.targetNamespace)
+            elif "_" in prefix:
                 val.modelXbrl.error(("EFM.6.07.07", "GFM.1.03.07"),
                     _("Taxonomy schema %(schema)s namespace %(targetNamespace)s prefix %(prefix)s must not have an '_'"),
                     modelObject=modelDocument, schema=os.path.basename(modelDocument.uri), targetNamespace=modelDocument.targetNamespace, prefix=prefix)
@@ -113,7 +167,7 @@ def checkDTS(val, modelDocument, visited):
                                   not c.modelDocument.uri.startswith(val.modelXbrl.uriDir)):
                                 val.modelXbrl.error(("EFM.6.07.16", "GFM.1.03.18"),
                                     _("Concept %(concept)s is also defined in standard taxonomy schema schema %(standardSchema)s"),
-                                    modelObject=c, concept=modelConcept.qname, standardSchema=os.path.basename(c.modelDocument.uri))
+                                    modelObject=(modelConcept,c), concept=modelConcept.qname, standardSchema=os.path.basename(c.modelDocument.uri), standardConcept=c.qname)
                             elif val.validateSBRNL:
                                 if not (genrlSpeclRelSet.isRelated(modelConcept, "child", c) or genrlSpeclRelSet.isRelated(c, "child", modelConcept)):
                                     val.modelXbrl.error("SBR.NL.2.2.2.02",
@@ -164,7 +218,7 @@ def checkDTS(val, modelDocument, visited):
                     if modelConcept.abstract == "true" and not isDuration:
                         val.modelXbrl.error(("EFM.6.07.21", "GFM.1.03.23"),
                             _("Taxonomy schema %(schema)s element %(concept)s is abstract but period type is not duration"),
-                            modelObject=modelConcept, schema=os.path.basename(modelDocument.uri), concept=name)
+                            modelObject=modelConcept, schema=os.path.basename(modelDocument.uri), concept=modelConcept.qname)
                         
                     # 6.7.22 abstract must be stringItemType
                     ''' removed SEC EFM v.17, Edgar release 10.4, and GFM 2011-04-08
@@ -216,7 +270,75 @@ def checkDTS(val, modelDocument, visited):
                         val.modelXbrl.error(("EFM.6.07.28", "GFM.1.03.30"),
                             _("Concept %(concept)s is a domainItemType and must be periodType duration"),
                             modelObject=modelConcept, concept=modelConcept.qname)
-                    
+                        
+                    # 6.8.5 semantic check, check LC3 name
+                    if name:
+                        if not name[0].isupper():
+                            val.modelXbrl.log("ERROR-SEMANTIC", ("EFM.6.08.05.firstLetter", "GFM.2.03.05.firstLetter"),
+                                _("Concept %(concept)s name must start with a capital letter"),
+                                modelObject=modelConcept, concept=modelConcept.qname)
+                        if namePattern.search(name):
+                            val.modelXbrl.log("ERROR-SEMANTIC", ("EFM.6.08.05.disallowedCharacter", "GFM.2.03.05.disallowedCharacter"),
+                                _("Concept %(concept)s has disallowed name character"),
+                                modelObject=modelConcept, concept=modelConcept.qname)
+                        if len(name) > 200:
+                            val.modelXbrl.log("ERROR-SEMANTIC", "EFM.6.08.05.nameLength",
+                                _("Concept %(concept)s name length %(namelength)s exceeds 200 characters"),
+                                modelObject=modelConcept, concept=modelConcept.qname, namelength=len(name))
+                        
+                    if val.validateEFM:
+                        label = modelConcept.label(lang="en-US", fallbackToQname=False)
+                        if label:
+                            # allow Joe's Bar, N.A.  to be JoesBarNA -- remove ', allow A. as not article "a"
+                            lc3name = ''.join(re.sub(r"['.-]", "", (w[0] or w[2] or w[3] or w[4])).title()
+                                              for w in re.findall(r"((\w+')+\w+)|(A[.-])|([.-]A(?=\W|$))|(\w+)", label) # EFM implies this should allow - and . re.findall(r"[\w\-\.]+", label)
+                                              if w[4].lower() not in ("the", "a", "an"))
+                            if not(name == lc3name or 
+                                   (name and lc3name and lc3name[0].isdigit() and name[1:] == lc3name and (name[0].isalpha() or name[0] == '_'))):
+                                val.modelXbrl.log("WARNING-SEMANTIC", "EFM.6.08.05.LC3",
+                                    _("Concept %(concept)s should match expected LC3 composition %(lc3name)s"),
+                                    modelObject=modelConcept, concept=modelConcept.qname, lc3name=lc3name)
+                                
+                    if conceptType is not None:
+                        # 6.8.6 semantic check
+                        if not isDomainItemType and conceptType.qname != XbrlConst.qnXbrliDurationItemType:
+                            nameProblems = nonDomainItemNameProblemPattern.findall(name)
+                            if any(any(t) for t in nameProblems):  # list of tuples with possibly nonempty strings
+                                val.modelXbrl.log("WARNING-SEMANTIC", ("EFM.6.08.06", "GFM.2.03.06"),
+                                    _("Concept %(concept)s should not contain company or period information, found: %(matches)s"),
+                                    modelObject=modelConcept, concept=modelConcept.qname, 
+                                    matches=", ".join(''.join(t) for t in nameProblems))
+                        
+                        if conceptType.qname == XbrlConst.qnXbrliMonetaryItemType:
+                            if not modelConcept.balance:
+                                # 6.8.11 may not appear on a income or balance statement
+                                if any(linkroleDefinitionBalanceIncomeSheet.match(roleType.definition)
+                                       for rel in val.modelXbrl.relationshipSet(XbrlConst.parentChild).toModelObject(modelConcept)
+                                       for roleType in val.modelXbrl.roleTypes.get(rel.linkrole,())):
+                                    val.modelXbrl.log("ERROR-SEMANTIC", ("EFM.6.08.11", "GFM.2.03.11"),
+                                        _("Concept %(concept)s must have a balance because it appears in a statement of income or balance sheet"),
+                                        modelObject=modelConcept, concept=modelConcept.qname)
+                                # 6.11.5 semantic check, must have a documentation label
+                                stdLabel = modelConcept.label(lang="en-US", fallbackToQname=False)
+                                defLabel = modelConcept.label(preferredLabel=XbrlConst.documentationLabel, lang="en-US", fallbackToQname=False)
+                                if not defLabel or ( # want different words than std label
+                                    stdLabel and re.findall(r"\w+", stdLabel) == re.findall(r"\w+", defLabel)):
+                                    val.modelXbrl.log("ERROR-SEMANTIC", ("EFM.6.11.05", "GFM.2.04.04"),
+                                        _("Concept %(concept)s is monetary without a balance and must have a documentation label that disambiguates its sign"),
+                                        modelObject=modelConcept, concept=modelConcept.qname)
+                        
+                        # 6.8.16 semantic check
+                        if conceptType.qname == XbrlConst.qnXbrliDateItemType and modelConcept.periodType != "duration":
+                            val.modelXbrl.log("ERROR-SEMANTIC", ("EFM.6.08.16", "GFM.2.03.16"),
+                                _("Concept %(concept)s of type xbrli:dateItemType must have periodType duration"),
+                                modelObject=modelConcept, concept=modelConcept.qname)
+                        
+                        # 6.8.17 semantic check
+                        if conceptType.qname == XbrlConst.qnXbrliStringItemType and modelConcept.periodType != "duration":
+                            val.modelXbrl.log("ERROR-SEMANTIC", ("EFM.6.08.17", "GFM.2.03.17"),
+                                _("Concept %(concept)s of type xbrli:stringItemType must have periodType duration"),
+                                modelObject=modelConcept, concept=modelConcept.qname)
+                        
                     if val.validateSBRNL:
                         if modelConcept.isTuple:
                             if modelConcept.substitutionGroupQname.localName == "presentationTuple" and modelConcept.substitutionGroupQname.namespaceURI.endswith("/basis/sbr/xbrl/xbrl-syntax-extension"): # namespace may change each year
@@ -290,12 +412,19 @@ def checkDTS(val, modelDocument, visited):
             if isinstance(e,ModelObject):
                 val.modelXbrl.error(("EFM.6.07.08", "GFM.1.03.08"),
                     _("Taxonomy schema %(schema)s contains an embedded linkbase"),
-                    modelObject=e, schema=os.path.basename(modelDocument.uri))
+                    modelObject=e, schema=modelDocument.basename)
                 break
 
         requiredUsedOns = {XbrlConst.qnLinkPresentationLink,
                            XbrlConst.qnLinkCalculationLink,
                            XbrlConst.qnLinkDefinitionLink}
+        
+        standardUsedOns = {XbrlConst.qnLinkLabel, XbrlConst.qnLinkReference, 
+                           XbrlConst.qnLinkDefinitionArc, XbrlConst.qnLinkCalculationArc, XbrlConst.qnLinkPresentationArc, 
+                           XbrlConst.qnLinkLabelArc, XbrlConst.qnLinkReferenceArc, 
+                           # per WH, private footnote arc and footnore resource roles are not allowed
+                           XbrlConst.qnLinkFootnoteArc, XbrlConst.qnLinkFootnote,
+                           }
 
         # 6.7.9 role types authority
         for e in modelDocument.xmlRootElement.iterdescendants(tag="{http://www.xbrl.org/2003/linkbase}roleType"):
@@ -304,10 +433,10 @@ def checkDTS(val, modelDocument, visited):
                 if targetNamespaceAuthority != UrlUtil.authority(roleURI):
                     val.modelXbrl.error(("EFM.6.07.09", "GFM.1.03.09"),
                         _("RoleType %(roleType)s does not match authority %(targetNamespaceAuthority)s"),
-                        modelObject=e, roleType=roleURI, targetNamespaceAuthority=targetNamespaceAuthority)
+                        modelObject=e, roleType=roleURI, targetNamespaceAuthority=targetNamespaceAuthority, targetNamespace=modelDocument.targetNamespace)
                 # 6.7.9 end with .../role/lc3 name
                 if not roleTypePattern.match(roleURI):
-                    val.modelXbrl.warning(("EFM.6.07.09", "GFM.1.03.09"),
+                    val.modelXbrl.warning(("EFM.6.07.09.roleEnding", "GFM.1.03.09"),
                         "RoleType %(roleType)s should end with /role/{LC3name}",
                         modelObject=e, roleType=roleURI)
                     
@@ -317,11 +446,7 @@ def checkDTS(val, modelDocument, visited):
                     modelRoleType = modelRoleTypes[0]
                     definition = modelRoleType.definitionNotStripped
                     usedOns = modelRoleType.usedOns
-                    if len(modelRoleTypes) > 1:
-                        val.modelXbrl.error(("EFM.6.07.10", "GFM.1.03.10"),
-                            _("RoleType %(roleType)s is defined in multiple taxonomies"),
-                            modelObject=e, roleType=roleURI)
-                    elif len(modelRoleTypes) == 1:
+                    if len(modelRoleTypes) == 1:
                         # 6.7.11 used on's for pre, cal, def if any has a used on
                         if not usedOns.isdisjoint(requiredUsedOns) and len(requiredUsedOns - usedOns) > 0:
                             val.modelXbrl.error(("EFM.6.07.11", "GFM.1.03.11"),
@@ -333,8 +458,13 @@ def checkDTS(val, modelDocument, visited):
                             (definition is None or not val.disclosureSystem.roleDefinitionPattern.match(definition))):
                             val.modelXbrl.error(("EFM.6.07.12", "GFM.1.03.12-14"),
                                 _("RoleType %(roleType)s definition \"%(definition)s\" must match {Sortcode} - {Type} - {Title}"),
-                                modelObject=e, roleType=roleURI, definition=definition)
-                        
+                                modelObject=e, roleType=roleURI, definition=(definition or ""))
+
+                    if usedOns & standardUsedOns: # semantics check
+                        val.modelXbrl.log("ERROR-SEMANTIC", ("EFM.6.08.03", "GFM.2.03.03"),
+                            _("RoleType %(roleuri)s is defined using role types already defined by standard roles for: %(qnames)s"),
+                            modelObject=e, roleuri=roleURI, qnames=', '.join(str(qn) for qn in usedOns & standardUsedOns))
+
                     if val.validateSBRNL:
                         if usedOns & XbrlConst.standardExtLinkQnames or XbrlConst.qnGenLink in usedOns:
                             definesLinkroles = True
@@ -359,27 +489,28 @@ def checkDTS(val, modelDocument, visited):
                 if targetNamespaceAuthority != UrlUtil.authority(arcroleURI):
                     val.modelXbrl.error(("EFM.6.07.13", "GFM.1.03.15"),
                         _("ArcroleType %(arcroleType)s does not match authority %(targetNamespaceAuthority)s"),
-                        modelObject=e, arcroleType=arcroleURI, targetNamespaceAuthority=targetNamespaceAuthority)
+                        modelObject=e, arcroleType=arcroleURI, targetNamespaceAuthority=targetNamespaceAuthority, targetNamespace=modelDocument.targetNamespace)
                 # 6.7.13 end with .../arcrole/lc3 name
                 if not arcroleTypePattern.match(arcroleURI):
-                    val.modelXbrl.warning(("EFM.6.07.13", "GFM.1.03.15"),
+                    val.modelXbrl.warning(("EFM.6.07.13.arcroleEnding", "GFM.1.03.15"),
                         _("ArcroleType %(arcroleType)s should end with /arcrole/{LC3name}"),
                         modelObject=e, arcroleType=arcroleURI)
                     
-                # 6.7.14 only one arcrole type declaration in DTS
-                modelRoleTypes = val.modelXbrl.arcroleTypes[arcroleURI]
-                if len(modelRoleTypes) > 1:
-                    val.modelXbrl.error(("EFM.6.07.14", "GFM.1.03.16"),
-                        _("ArcroleType %(arcroleType)s is defined in multiple taxonomies"),
-                        modelObject=e, arcroleType=arcroleURI)
-                    
                 # 6.7.15 definition match pattern
+                modelRoleTypes = val.modelXbrl.arcroleTypes[arcroleURI]
                 definition = modelRoleTypes[0].definition
                 if definition is None or not arcroleDefinitionPattern.match(definition):
                     val.modelXbrl.error(("EFM.6.07.15", "GFM.1.03.17"),
                         _("ArcroleType %(arcroleType)s definition must be non-empty"),
                         modelObject=e, arcroleType=arcroleURI)
     
+                # semantic checks
+                usedOns = modelRoleTypes[0].usedOns
+                if usedOns & standardUsedOns: # semantics check
+                    val.modelXbrl.log("ERROR-SEMANTIC", ("EFM.6.08.03", "GFM.2.03.03"),
+                        _("ArcroleType %(arcroleuri)s is defined using role types already defined by standard arcroles for: %(qnames)s"),
+                        modelObject=e, arcroleuri=arcroleURI, qnames=', '.join(str(qn) for qn in usedOns & standardUsedOns))
+
                 if val.validateSBRNL:
                     definesArcroles = True
                     val.modelXbrl.error("SBR.NL.2.2.4.01",
@@ -409,6 +540,15 @@ def checkDTS(val, modelDocument, visited):
 
             definesTypes = (modelDocument.xmlRootElement.find("{http://www.w3.org/2001/XMLSchema}complexType") is not None or
                             modelDocument.xmlRootElement.find("{http://www.w3.org/2001/XMLSchema}simpleType") is not None)
+            
+            for enumElt in modelDocument.xmlRootElement.iter(tag="{http://www.w3.org/2001/XMLSchema}enumeration"):
+                definesEnumerations = True
+                if any(not valueElt.genLabel(lang="nl")
+                       for valueElt in enumElt.iter(tag="{http://www.w3.org/2001/XMLSchema}value")):
+                    val.modelXbrl.error("SBR.NL.2.2.7.05",
+                        _("Enumeration element has value(s) without generic label."),
+                        modelObject=enumElt)
+
             if (definesLinkroles + definesArcroles + definesLinkParts +
                 definesAbstractItems + definesNonabstractItems + 
                 definesTuples + definesPresentationTuples + definesSpecificationTuples + definesTypes +
@@ -429,9 +569,12 @@ def checkDTS(val, modelDocument, visited):
                 if definesDomains: schemaContents.append(_("domains"))
                 if definesHypercubes: schemaContents.append(_("hypercubes"))
                 if schemaContents:
-                    val.modelXbrl.error("SBR.NL.2.2.1.01",
-                        _("Taxonomy schema may only define one of these: %(contents)s"),
-                        modelObject=modelDocument, contents=', '.join(schemaContents))
+                    if not ((definesTuples or definesPresentationTuples or definesSpecificationTuples) and
+                            not (definesLinkroles or definesArcroles or definesLinkParts or definesAbstractItems or
+                                 definesTypes or definesDimensions or definesDomains or definesHypercubes)):
+                        val.modelXbrl.error("SBR.NL.2.2.1.01",
+                            _("Taxonomy schema may only define one of these: %(contents)s"),
+                            modelObject=modelDocument, contents=', '.join(schemaContents))
                 elif not any(refDoc.inDTS and refDoc.targetNamespace not in val.disclosureSystem.baseTaxonomyNamespaces
                              for refDoc in modelDocument.referencesDocument.keys()): # no linkbase ref or includes
                     val.modelXbrl.error("SBR.NL.2.2.1.01",
@@ -453,6 +596,61 @@ def checkDTS(val, modelDocument, visited):
                     _("A schema that defines non-abstract items MUST have a linked (2.1) reference linkbase AND/OR a label linkbase with @xlink:role=documentation"),
                     modelObject=modelDocument)
 
+        #6.3.3 filename check
+        m = re.match(r"^\w+-([12][0-9]{3}[01][0-9][0-3][0-9]).xsd$", modelDocument.basename)
+        if m:
+            try: # check date value
+                datetime.datetime.strptime(m.group(1),"%Y%m%d").date()
+                # date and format are ok, check "should" part of 6.3.3
+                if val.fileNameBasePart:
+                    expectedFilename = "{0}-{1}.xsd".format(val.fileNameBasePart, val.fileNameDatePart)
+                    if modelDocument.basename != expectedFilename:
+                        val.modelXbrl.log("WARNING-SEMANTIC", ("EFM.6.03.03.matchInstance", "GFM.1.01.01.matchInstance"),
+                            _('Schema file name warning: %(filename)s, should match %(expectedFilename)s'),
+                            modelObject=modelDocument, filename=modelDocument.basename, expectedFilename=expectedFilename)
+            except ValueError:
+                val.modelXbrl.error((val.EFM60303, "GFM.1.01.01"),
+                    _('Invalid schema file base name part (date) in "{base}-{yyyymmdd}.xsd": %(filename)s'),
+                    modelObject=modelDocument, filename=modelDocument.basename)
+        else:
+            val.modelXbrl.error((val.EFM60303, "GFM.1.01.01"),
+                _('Invalid schema file name, must match "{base}-{yyyymmdd}.xsd": %(filename)s'),
+                modelObject=modelDocument, filename=modelDocument.basename)
+
+    elif modelDocument.type == ModelDocument.Type.LINKBASE:
+        # if it is part of the submission (in same directory) check name
+        if modelDocument.filepath.startswith(val.modelXbrl.modelDocument.filepathdir):
+            #6.3.3 filename check
+            extLinkElt = XmlUtil.descendant(modelDocument.xmlRootElement, XbrlConst.link, "*", "{http://www.w3.org/1999/xlink}type", "extended")
+            if extLinkElt is None:# no ext link element
+                val.modelXbrl.error((val.EFM60303 + ".noLinkElement", "GFM.1.01.01.noLinkElement"),
+                    _('Invalid linkbase file name: %(filename)s, has no extended link element, cannot determine link type.'),
+                    modelObject=modelDocument, filename=modelDocument.basename)
+            elif extLinkElt.localName not in extLinkEltFileNameEnding:
+                val.modelXbrl.error("EFM.6.03.02",
+                    _('Invalid linkbase link element %(linkElement)s in %(filename)s'),
+                    modelObject=modelDocument, linkElement=extLinkElt.localName, filename=modelDocument.basename)
+            else:
+                m = re.match(r"^\w+-([12][0-9]{3}[01][0-9][0-3][0-9])(_[a-z]{3}).xml$", modelDocument.basename)
+                expectedSuffix = extLinkEltFileNameEnding[extLinkElt.localName]
+                if m and m.group(2) == expectedSuffix:
+                    try: # check date value
+                        datetime.datetime.strptime(m.group(1),"%Y%m%d").date()
+                        # date and format are ok, check "should" part of 6.3.3
+                        if val.fileNameBasePart:
+                            expectedFilename = "{0}-{1}{2}.xml".format(val.fileNameBasePart, val.fileNameDatePart, expectedSuffix)
+                            if modelDocument.basename != expectedFilename:
+                                val.modelXbrl.log("WARNING-SEMANTIC", ("EFM.6.03.03.matchInstance", "GFM.1.01.01.matchInstance"),
+                                    _('Linkbase name warning: %(filename)s should match %(expectedFilename)s'),
+                                    modelObject=modelDocument, filename=modelDocument.basename, expectedFilename=expectedFilename)
+                    except ValueError:
+                        val.modelXbrl.error((val.EFM60303, "GFM.1.01.01"),
+                            _('Invalid linkbase base file name part (date) in "{base}-{yyyymmdd}_{suffix}.xml": %(filename)s'),
+                            modelObject=modelDocument, filename=modelDocument.basename)
+                else:
+                    val.modelXbrl.error((val.EFM60303, "GFM.1.01.01"),
+                        _('Invalid linkbase name, must match "{base}-{yyyymmdd}%(expectedSuffix)s.xml": %(filename)s'),
+                        modelObject=modelDocument, filename=modelDocument.basename, expectedSuffix=expectedSuffix)
     visited.remove(modelDocument)
     
 def tupleCycle(val, concept, ancestorTuples=None):

@@ -10,6 +10,7 @@ def package(dts):
         return
     import os
     from zipfile import ZipFile, ZIP_STORED, ZIP_DEFLATED 
+    from arelle.UrlUtil import isHttpUrl
     try:
         import zlib
         compression = ZIP_DEFLATED
@@ -23,7 +24,7 @@ def package(dts):
     with ZipFile(pkgFilename, 'w', compression) as zipFile:
         numFiles = 0
         for fileUri in sorted(dts.urlDocs.keys()):
-            if not (fileUri.startswith("http://") or fileUri.startswith("https://")):
+            if not isHttpUrl(fileUri):
                 numFiles += 1
                 # this has to be a relative path because the hrefs will break
                 zipFile.write(fileUri, os.path.basename(fileUri))
@@ -54,7 +55,7 @@ def saveDtsCommandLineOptionExtender(parser):
 
 def saveDtsCommandLineXbrlRun(cntlr, options, modelXbrl):
     # extend XBRL-loaded run processing for this option
-    if options.packageDTS:
+    if getattr(options, "packageDTS", False):
         if cntlr.modelManager is None or cntlr.modelManager.modelXbrl is None:
             cntlr.addToLog("No taxonomy loaded.")
             return

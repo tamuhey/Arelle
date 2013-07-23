@@ -9,7 +9,10 @@ based on pull request 4
 '''
 from tkinter import Toplevel, font, messagebox, VERTICAL, HORIZONTAL, N, S, E, W
 from tkinter.constants import DISABLED, ACTIVE
-from tkinter.ttk import Treeview, Scrollbar, Frame, Label, Button
+try:
+    from tkinter.ttk import Treeview, Scrollbar, Frame, Label, Button
+except ImportError:
+    from ttk import Treeview, Scrollbar, Frame, Label, Button
 from arelle import PluginManager, DialogURL
 from arelle.CntlrWinTooltip import ToolTip
 import re, os, time
@@ -45,6 +48,7 @@ class DialogPluginManager(Toplevel):
         self.pluginConfig = PluginManager.pluginConfig
         self.pluginConfigChanged = False
         self.uiClassMethodsChanged = False
+        self.modelClassesChanged = False
         self.modulesWithNewerFileDates = modulesWithNewerFileDates
         
         parentGeometry = re.match("(\d+)x(\d+)[+]?([-]?\d+)[+]?([-]?\d+)", self.parent.geometry())
@@ -226,12 +230,22 @@ class DialogPluginManager(Toplevel):
             PluginManager.pluginConfig = self.pluginConfig
             PluginManager.pluginConfigChanged = True
             PluginManager.reset()  # force reloading of modules
-        if self.uiClassMethodsChanged:  # may require reloading UI
-            messagebox.showwarning(_("User interface plug-in change"),
-                                   _("A change in plug-in class methods may have affected the menus "
-                                     "of the user interface.  It may be necessary to restart Arelle to "
-                                     "access the menu entries or the changes to their plug-in methods."),
-                                   parent=self)
+        if self.uiClassMethodsChanged or self.modelClassesChanged:  # may require reloading UI
+            affectedItems = ""
+            if self.uiClassMethodsChanged:
+                affectedItems += _("menus of the user interface")
+            if self.uiClassMethodsChanged and self.modelClassesChanged:
+                affectedItems += _(" and ")
+            if self.modelClassesChanged:
+                affectedItems += _("model objects of the processor")
+            if messagebox.askyesno(_("User interface plug-in change"),
+                                   _("A change in plug-in class methods may have affected {0}.  " 
+                                     "Please restart Arelle to due to these changes.  \n\n"
+                                     "Should Arelle restart itself now "
+                                     "(if there are any unsaved changes they would be lost!)?"
+                                     ).format(affectedItems),
+                                   parent=self):
+                self.cntlr.uiThreadQueue.put((self.cntlr.quit, [None, True]))
         self.close()
         
     def close(self, event=None):
@@ -283,13 +297,20 @@ class DialogPluginManager(Toplevel):
             self.moduleRemoveButton.config(state=DISABLED)
         
     def findLocally(self):
+        initialdir = self.cntlr.pluginDir # default plugin directory
+        if not self.cntlr.isMac: # can't navigate within app easily, always start in default directory
+            initialdir = self.cntlr.config.setdefault("pluginOpenDir", initialdir)
         filename = self.cntlr.uiFileDialog("open",
                                            owner=self,
                                            title=_("Choose plug-in module file"),
-                                           initialdir=self.cntlr.config.setdefault("pluginOpenDir","."),
+                                           initialdir=initialdir,
                                            filetypes=[(_("Python files"), "*.py")],
                                            defaultextension=".py")
         if filename:
+            # check if a package is selected (any file in a directory containing an __init__.py
+            if (os.path.isdir(os.path.dirname(filename)) and
+                os.path.isfile(os.path.join(os.path.dirname(filename), "__init__.py"))):
+                filename = os.path.dirname(filename) # refer to the package instead
             self.cntlr.config["pluginOpenDir"] = os.path.dirname(filename)
             moduleInfo = PluginManager.moduleModuleInfo(filename)
             self.loadFoundModuleInfo(moduleInfo, filename)
@@ -307,8 +328,8 @@ class DialogPluginManager(Toplevel):
             self.addPluginConfigModuleInfo(moduleInfo)
             self.loadTreeViews()
         else:
-            messagebox.showwarning(_("Module is not a plug-in"),
-                                   _("File does not contain a python program with an appropriate __pluginInfo__ declaration: \n\n{0}")
+            messagebox.showwarning(_("Module is not itself a plug-in or in a directory with package __init__.py plug-in.  "),
+                                   _("File does not itself contain a python program with an appropriate __pluginInfo__ declaration: \n\n{0}")
                                    .format(url),
                                    parent=self)
             
@@ -323,6 +344,8 @@ class DialogPluginManager(Toplevel):
                         del self.pluginConfig["classes"][classMethod] # remove class
                     if classMethod.startswith("CntlrWinMain.Menu"):
                         self.uiClassMethodsChanged = True  # may require reloading UI
+                    elif classMethod == "ModelObjectFactory.ElementSubstitutionClasses":
+                        self.modelClassesChanged = True # model object factor classes changed
             del self.pluginConfig["modules"][name]
             self.pluginConfigChanged = True
 
@@ -338,6 +361,8 @@ class DialogPluginManager(Toplevel):
                 classMethods.append(name)
             if classMethod.startswith("CntlrWinMain.Menu"):
                 self.uiClassMethodsChanged = True  # may require reloading UI
+            elif classMethod == "ModelObjectFactory.ElementSubstitutionClasses":
+                self.modelClassesChanged = True # model object factor classes changed
         self.pluginConfigChanged = True
 
     def moduleEnable(self):
@@ -360,7 +385,12 @@ class DialogPluginManager(Toplevel):
                 if moduleInfo:
                     self.addPluginConfigModuleInfo(moduleInfo)
                     self.loadTreeViews()
-                self.cntlr.showStatus(_("{0} reloaded").format(moduleInfo.get("name")), clearAfter=5000)
+                    self.cntlr.showStatus(_("{0} reloaded").format(moduleInfo.get("name")), clearAfter=5000)
+                else:
+                    messagebox.showwarning(_("Module error"),
+                                           _("File or module cannot be reloaded: \n\n{0}")
+                                           .format(url),
+                                           parent=self)
 
     def moduleRemove(self):
         if self.selectedModule in self.pluginConfig["modules"]:

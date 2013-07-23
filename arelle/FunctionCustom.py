@@ -20,7 +20,9 @@ def call(xc, p, qname, contextItem, args):
         cfSig = xc.modelXbrl.modelCustomFunctionSignatures[qname]
         if cfSig is not None and cfSig.customFunctionImplementation is not None:
             return callCfi(xc, p, qname, cfSig, contextItem, args)
-        elif qname not in customFunctions: 
+        elif qname in xc.customFunctions: # plug in method custom functions 
+            return xc.customFunctions[qname](xc, p, contextItem, args) # use plug-in's method
+        elif qname not in customFunctions: # compiled functions in this module
             raise fnFunctionNotAvailable
         return customFunctions[qname](xc, p, contextItem, args)
     except (fnFunctionNotAvailable, KeyError):
@@ -81,6 +83,8 @@ def callCfi(xc, p, qname, cfSig, contextItem, args):
         else:
             del xc.inScopeVars[argName]
 
+    if result is None:  # atomic value failed the result cast expression
+        raise XPathContext.FunctionArgType("output",cfSig.outputType,result)
     return result
 
 # for test case 22015 v01        

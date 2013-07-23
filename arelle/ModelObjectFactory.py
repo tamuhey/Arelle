@@ -19,12 +19,12 @@ from arelle.ModelDtsObject import (ModelConcept, ModelAttribute, ModelAttributeG
 from arelle.ModelRssItem import ModelRssItem
 from arelle.ModelTestcaseObject import ModelTestcaseVariation
 from arelle.ModelVersObject import (ModelAssignment, ModelAction, ModelNamespaceRename,
-                                    ModelRoleChange, ModelVersObject, ModelConceptBasicChange,
-                                    ModelConceptExtendedChange, ModelRelationshipSetChange,
+                                    ModelRoleChange, ModelVersObject, ModelConceptUseChange,
+                                    ModelConceptDetailsChange, ModelRelationshipSetChange,
                                     ModelRelationshipSet, ModelRelationships)
 
 def parser(modelXbrl, baseUrl):
-    parser = etree.XMLParser()
+    parser = etree.XMLParser(recover=True, huge_tree=True)
     classLookup = DiscoveringClassLookup(modelXbrl, baseUrl)
     nsNameLookup = KnownNamespacesModelObjectClassLookup(modelXbrl, fallback=classLookup)
     parser.set_element_class_lookup(nsNameLookup)
@@ -66,7 +66,7 @@ class KnownNamespacesModelObjectClassLookup(etree.CustomElementClassLookup):
                 elif ln == "any":
                     return ModelAny
                 elif ln == "anyAttribute":
-                    return ModelAttribute
+                    return ModelAnyAttribute
                 elif ln == "enumeration":
                     return ModelEnumeration
             elif ns == XbrlConst.link:
@@ -85,6 +85,10 @@ class KnownNamespacesModelObjectClassLookup(etree.CustomElementClassLookup):
                 return ModelObject
             elif ln == "variation" and (
                 ns is None or ns in ("http://edgar/2009/conformance",) or ns.startswith("http://xbrl.org/")):
+                return ModelTestcaseVariation
+            elif ln == "testGroup" and ns == "http://www.w3.org/XML/2004/xml-schema-test-suite/":
+                return ModelTestcaseVariation
+            elif ln == "test-case" and ns == "http://www.w3.org/2005/02/query-test-XQTSCatalog":
                 return ModelTestcaseVariation
             elif ns == XbrlConst.ver:
                 if self.type is None:

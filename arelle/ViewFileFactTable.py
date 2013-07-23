@@ -4,7 +4,7 @@ Created on Jan 24, 2011
 @author: Mark V Systems Limited
 (c) Copyright 2011 Mark V Systems Limited, All rights reserved.
 '''
-from arelle import ViewFile, XbrlConst, XmlUtil
+from arelle import ViewFile, ModelDtsObject, XbrlConst, XmlUtil
 from arelle.ViewFile import CSV, HTML, XML, JSON
 import datetime
 from collections import defaultdict
@@ -35,7 +35,7 @@ class ViewFacts(ViewFile.View):
             for linkroleUri in relationshipSet.linkRoleUris:
                 modelRoleTypes = self.modelXbrl.roleTypes.get(linkroleUri)
                 if modelRoleTypes:
-                    roledefinition = (modelRoleTypes[0].definition or linkroleUri)                    
+                    roledefinition = (modelRoleTypes[0].genLabel(lang=self.lang, strip=True) or modelRoleTypes[0].definition or linkroleUri)                    
                 else:
                     roledefinition = linkroleUri
                 linkroleUris.append((roledefinition, linkroleUri))
@@ -72,7 +72,9 @@ class ViewFacts(ViewFile.View):
                         for dimQname in sorted(dims.keys(), key=lambda d: str(d)):
                             dimvalue = dims[dimQname]
                             if dimvalue.isExplicit:
-                                values.append(dimvalue.member.label(self.labelrole,lang=self.lang))
+                                values.append(dimvalue.member.label(self.labelrole,lang=self.lang)
+                                              if dimvalue.member is not None 
+                                              else str(dimvalue.memberQname))
                             else:
                                 values.append(XmlUtil.innerText(dimvalue.typedMember))
                                 
@@ -150,10 +152,12 @@ class ViewFacts(ViewFile.View):
             visited.remove(concept)
             
     def viewConcept(self, concept, modelObject, labelPrefix, preferredLabel, n, relationshipSet, visited):
-        if concept is None or concept.substitutionGroupQname == XbrlConst.qnXbrldtDimensionItem:
+        # bad relationship could identify non-concept or be None
+        if (not isinstance(concept, ModelDtsObject.ModelConcept) or 
+            concept.substitutionGroupQname == XbrlConst.qnXbrldtDimensionItem):
             return
         cols = ['' for i in range(self.numCols)]
-        cols[0] = labelPrefix + concept.label(preferredLabel,lang=self.lang)
+        cols[0] = labelPrefix + concept.label(preferredLabel,lang=self.lang,linkroleHint=relationshipSet.linkrole)
         self.setRowFacts(cols,concept,preferredLabel)
         attr = {"concept": str(concept.qname)}
         self.addRow(cols, treeIndent=n, 

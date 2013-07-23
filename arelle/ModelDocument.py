@@ -4,16 +4,37 @@ Created on Oct 3, 2010
 @author: Mark V Systems Limited
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
-import os
+import os, sys
 from lxml import etree
-from arelle import (XbrlConst, XmlUtil, UrlUtil, ValidateFilingText, XmlValidate)
-from arelle.ModelObject import ModelObject
+from xml.sax import SAXParseException
+from arelle import (XbrlConst, XmlUtil, UrlUtil, ValidateFilingText, XmlValidate, XmlValidateSchema)
+from arelle.ModelObject import ModelObject, ModelComment
 from arelle.ModelValue import qname
 from arelle.ModelDtsObject import ModelLink, ModelResource, ModelRelationship
 from arelle.ModelInstanceObject import ModelFact
 from arelle.ModelObjectFactory import parser
+from arelle.PluginManager import pluginClassMethods
 
 def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDiscovered=False, isIncluded=None, namespace=None, reloadCache=False):
+    """Returns a new modelDocument, performing DTS discovery for instance, inline XBRL, schema, 
+    linkbase, and versioning report entry urls.
+    
+    :param uri: Identification of file to load by string filename or by a FileSource object with a selected content file.
+    :type uri: str or FileSource
+    :param referringElement: Source element causing discovery or loading of this document, such as an import or xlink:href
+    :type referringElement: ModelObject
+    :param isEntry: True for an entry document
+    :type isEntry: bool
+    :param isDiscovered: True if this document is discovered by XBRL rules, otherwise False (such as when schemaLocation and xmlns were the cause of loading the schema)
+    :type isDiscovered: bool
+    :param isIncluded: True if this document is the target of an xs:include
+    :type isIncluded: bool
+    :param namespace: The schema namespace of this document, if known and applicable
+    :type namespace: str
+    :param reloadCache: True if desired to reload the web cache for any web-referenced files.
+    :type reloadCache: bool
+    """
+    
     if referringElement is None: # used for error messages
         referringElement = modelXbrl
     normalizedUri = modelXbrl.modelManager.cntlr.webCache.normalizeUrl(uri, base)
@@ -27,21 +48,24 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
        not normalizedUri.startswith(modelXbrl.uriDir) and \
        not modelXbrl.modelManager.disclosureSystem.hrefValid(normalizedUri):
         blocked = modelXbrl.modelManager.disclosureSystem.blockDisallowedReferences
-        modelXbrl.error(("EFM.6.22.02", "GFM.1.1.3", "SBR.NL.2.1.0.06" if normalizedUri.startswith("http") else "SBR.NL.2.2.0.17"),
-                _("Prohibited file for filings %(blockedIndicator)s: %(url)s"),
-                modelObject=referringElement, url=normalizedUri, blockedIndicator=_(" blocked") if blocked else "")
+        if normalizedUri not in modelXbrl.urlUnloadableDocs:
+            modelXbrl.error(("EFM.6.22.02", "GFM.1.1.3", "SBR.NL.2.1.0.06" if normalizedUri.startswith("http") else "SBR.NL.2.2.0.17"),
+                    _("Prohibited file for filings %(blockedIndicator)s: %(url)s"),
+                    modelObject=referringElement, url=normalizedUri,
+                    blockedIndicator=_(" blocked") if blocked else "")
+            modelXbrl.urlUnloadableDocs.add(normalizedUri)
         if blocked:
             return None
-    if normalizedUri in modelXbrl.modelManager.disclosureSystem.mappedFiles:
-        mappedUri = modelXbrl.modelManager.disclosureSystem.mappedFiles[normalizedUri]
-    else:  # handle mapped paths
-        mappedUri = normalizedUri
-        for mapFrom, mapTo in modelXbrl.modelManager.disclosureSystem.mappedPaths:
-            if normalizedUri.startswith(mapFrom):
-                mappedUri = mapTo + normalizedUri[len(mapFrom):]
-                break
+    if modelXbrl.fileSource.isMappedUrl(normalizedUri):
+        mappedUri = modelXbrl.fileSource.mappedUrl(normalizedUri)
+    else:
+        mappedUri = modelXbrl.modelManager.disclosureSystem.mappedUrl(normalizedUri)
+        
     if isEntry:
         modelXbrl.entryLoadingUrl = mappedUri   # for error loggiong during loading
+        
+    # don't try reloading if not loadable
+    
     if modelXbrl.fileSource.isInArchive(mappedUri):
         filepath = mappedUri
     else:
@@ -49,14 +73,24 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
         if filepath:
             uri = modelXbrl.modelManager.cntlr.webCache.normalizeUrl(filepath)
     if filepath is None: # error such as HTTPerror is already logged
-        modelXbrl.error("FileNotLoadable",
-                _("File can not be loaded: %(fileName)s"),
-                modelObject=referringElement, fileName=mappedUri)
+        if modelXbrl.modelManager.abortOnMajorError and (isEntry or isDiscovered):
+            modelXbrl.error("FileNotLoadable",
+                    _("File can not be loaded: %(fileName)s \nLoading terminated."),
+                    modelObject=referringElement, fileName=mappedUri)
+            raise LoadingException()
+        if normalizedUri not in modelXbrl.urlUnloadableDocs:
+            modelXbrl.error("FileNotLoadable",
+                    _("File can not be loaded: %(fileName)s"),
+                    modelObject=referringElement, fileName=normalizedUri)
+            modelXbrl.urlUnloadableDocs.add(normalizedUri)
         return None
     
-    modelDocument = modelXbrl.urlDocs.get(mappedUri)
+    modelDocument = modelXbrl.urlDocs.get(normalizedUri)
     if modelDocument:
         return modelDocument
+    elif normalizedUri in modelXbrl.urlUnloadableDocs:
+        return None
+
     
     # load XML and determine type of model document
     modelXbrl.modelManager.showStatus(_("parsing {0}").format(uri))
@@ -68,7 +102,18 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
         else:
             file, _encoding = modelXbrl.fileSource.file(filepath)
         _parser, _parserLookupName, _parserLookupClass = parser(modelXbrl,filepath)
+        xmlDocument = None
+        isPluginParserDocument = False
+        for pluginMethod in pluginClassMethods("ModelDocument.CustomLoader"):
+            modelDocument = pluginMethod(modelXbrl, file, mappedUri, filepath)
+            if modelDocument is not None:
+                return modelDocument
         xmlDocument = etree.parse(file,parser=_parser,base_url=filepath)
+        for error in _parser.error_log:
+            modelXbrl.error("xmlSchema:syntax",
+                    _("%(error)s, %(fileName)s, line %(line)s, column %(column)s, %(sourceAction)s source element"),
+                    modelObject=referringElement, fileName=os.path.basename(uri), 
+                    error=error.message, line=error.line, column=error.column, sourceAction=("including" if isIncluded else "importing"))
         file.close()
     except (EnvironmentError, KeyError) as err:  # missing zip file raises KeyError
         if file:
@@ -77,22 +122,37 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
         if not isIncluded and namespace and namespace in XbrlConst.standardNamespaceSchemaLocations and uri != XbrlConst.standardNamespaceSchemaLocations[namespace]:
             return load(modelXbrl, XbrlConst.standardNamespaceSchemaLocations[namespace], 
                         base, referringElement, isEntry, isDiscovered, isIncluded, namespace, reloadCache)
+        if modelXbrl.modelManager.abortOnMajorError and (isEntry or isDiscovered):
+            modelXbrl.error("IOerror",
+                _("%(fileName)s: file error: %(error)s \nLoading terminated."),
+                modelObject=referringElement, fileName=os.path.basename(uri), error=str(err))
+            raise LoadingException()
         modelXbrl.error("IOerror",
                 _("%(fileName)s: file error: %(error)s"),
                 modelObject=referringElement, fileName=os.path.basename(uri), error=str(err))
+        modelXbrl.urlUnloadableDocs.add(normalizedUri)
         return None
     except (etree.LxmlError,
+            SAXParseException,
             ValueError) as err:  # ValueError raised on bad format of qnames, xmlns'es, or parameters
         if file:
             file.close()
         if not isEntry and str(err) == "Start tag expected, '<' not found, line 1, column 1":
-            return ModelDocument(modelXbrl, Type.UnknownNonXML, mappedUri, filepath, None)
+            return ModelDocument(modelXbrl, Type.UnknownNonXML, normalizedUri, filepath, None)
         else:
             modelXbrl.error("xmlSchema:syntax",
-                    _("%(error)s, %(fileName)s, %(sourceAction)s source element"),
+                    _("Unrecoverable error: %(error)s, %(fileName)s, %(sourceAction)s source element"),
                     modelObject=referringElement, fileName=os.path.basename(uri), 
-                    error=str(err), sourceAction=("including" if isIncluded else "importing"))
+                    error=str(err), sourceAction=("including" if isIncluded else "importing"), exc_info=True)
+            modelXbrl.urlUnloadableDocs.add(normalizedUri)
             return None
+    except Exception as err:
+        modelXbrl.error(type(err).__name__,
+                _("Unrecoverable error: %(error)s, %(fileName)s, %(sourceAction)s source element"),
+                modelObject=referringElement, fileName=os.path.basename(uri), 
+                error=str(err), sourceAction=("including" if isIncluded else "importing"))
+        modelXbrl.urlUnloadableDocs.add(normalizedUri)
+        return None
     
     # identify document
     #modelXbrl.modelManager.addToLog("discovery: {0}".format(
@@ -106,59 +166,78 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
         ns = rootNode.namespaceURI
         
         # type classification
+        _type = None
+        _class = ModelDocument
         if ns == XbrlConst.xsd and ln == "schema":
-            type = Type.SCHEMA
+            _type = Type.SCHEMA
+            if not isEntry and not isIncluded:
+                # check if already loaded under a different url
+                targetNamespace = rootNode.get("targetNamespace")
+                if targetNamespace and modelXbrl.namespaceDocs.get(targetNamespace):
+                    otherModelDoc = modelXbrl.namespaceDocs[targetNamespace][0]
+                    if otherModelDoc.basename == os.path.basename(uri):
+                        if os.path.normpath(otherModelDoc.uri) != os.path.normpath(uri): # tolerate \ vs / or ../ differences
+                            modelXbrl.urlDocs[uri] = otherModelDoc
+                            modelXbrl.warning("info:duplicatedSchema",
+                                    _("Schema file with same targetNamespace %(targetNamespace)s loaded from %(fileName)s and %(otherFileName)s"),
+                                    modelObject=referringElement, targetNamespace=targetNamespace, fileName=uri, otherFileName=otherModelDoc.uri)
+                        return otherModelDoc 
         elif ns == XbrlConst.link:
             if ln == "linkbase":
-                type = Type.LINKBASE
+                _type = Type.LINKBASE
             elif ln == "xbrl":
-                type = Type.INSTANCE
+                _type = Type.INSTANCE
         elif ns == XbrlConst.xbrli:
             if ln == "xbrl":
-                type = Type.INSTANCE
+                _type = Type.INSTANCE
         elif ns == XbrlConst.xhtml and \
              (ln == "html" or ln == "xhtml"):
-            type = Type.UnknownXML
+            _type = Type.UnknownXML
             if XbrlConst.ixbrl in rootNode.nsmap.values():
-                type = Type.INLINEXBRL
+                _type = Type.INLINEXBRL
         elif ln == "report" and ns == XbrlConst.ver:
-            type = Type.VERSIONINGREPORT
-        elif ln == "testcases" or ln == "documentation":
-            type = Type.TESTCASESINDEX
-        elif ln == "testcase":
-            type = Type.TESTCASE
+            _type = Type.VERSIONINGREPORT
+            from arelle.ModelVersReport import ModelVersReport
+            _class = ModelVersReport
+        elif ln in ("testcases", "documentation", "testSuite"):
+            _type = Type.TESTCASESINDEX
+        elif ln in ("testcase", "testSet"):
+            _type = Type.TESTCASE
         elif ln == "registry" and ns == XbrlConst.registry:
-            type = Type.REGISTRY
+            _type = Type.REGISTRY
+        elif ln == "test-suite" and ns == "http://www.w3.org/2005/02/query-test-XQTSCatalog":
+            _type = Type.XPATHTESTSUITE
         elif ln == "rss":
-            type = Type.RSSFEED
+            _type = Type.RSSFEED
+            from arelle.ModelRssObject import ModelRssObject 
+            _class = ModelRssObject
         elif ln == "ptvl":
-            type = Type.ARCSINFOSET
+            _type = Type.ARCSINFOSET
         elif ln == "facts":
-            type = Type.FACTDIMSINFOSET
+            _type = Type.FACTDIMSINFOSET
         else:
-            type = Type.UnknownXML
-            nestedInline = None
-            for htmlElt in rootNode.iter(tag="{http://www.w3.org/1999/xhtml}html"):
-                nestedInline = htmlElt
-                break
-            if nestedInline is None:
-                for htmlElt in rootNode.iter(tag="{http://www.w3.org/1999/xhtml}xhtml"):
+            for pluginMethod in pluginClassMethods("ModelDocument.IdentifyType"):
+                _identifiedType = pluginMethod(modelXbrl, rootNode, filepath)
+                if _identifiedType is not None:
+                    _type, _class, rootNode = _identifiedType
+                    break
+            if _type is None:
+                _type = Type.UnknownXML
+                    
+                nestedInline = None
+                for htmlElt in rootNode.iter(tag="{http://www.w3.org/1999/xhtml}html"):
                     nestedInline = htmlElt
                     break
-            if nestedInline is not None:
-                if XbrlConst.ixbrl in nestedInline.nsmap.values():
-                    type = Type.INLINEXBRL
-                    rootNode = nestedInline
+                if nestedInline is None:
+                    for htmlElt in rootNode.iter(tag="{http://www.w3.org/1999/xhtml}xhtml"):
+                        nestedInline = htmlElt
+                        break
+                if nestedInline is not None:
+                    if XbrlConst.ixbrl in nestedInline.nsmap.values():
+                        _type = Type.INLINEXBRL
+                        rootNode = nestedInline
 
-        #create modelDocument object or subtype as identified
-        if type == Type.VERSIONINGREPORT:
-            from arelle.ModelVersReport import ModelVersReport
-            modelDocument = ModelVersReport(modelXbrl, type, mappedUri, filepath, xmlDocument)
-        elif type == Type.RSSFEED:
-            from arelle.ModelRssObject import ModelRssObject 
-            modelDocument = ModelRssObject(modelXbrl, type, mappedUri, filepath, xmlDocument)
-        else:
-            modelDocument = ModelDocument(modelXbrl, type, mappedUri, filepath, xmlDocument)
+        modelDocument = _class(modelXbrl, _type, normalizedUri, filepath, xmlDocument)
         rootNode.init(modelDocument)
         modelDocument.parser = _parser # needed for XmlUtil addChild's makeelement 
         modelDocument.parserLookupName = _parserLookupName
@@ -171,25 +250,32 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
             modelDocument.inDTS = True
         
         # discovery (parsing)
-        if type == Type.SCHEMA:
+        for pluginMethod in pluginClassMethods("ModelDocument.Discover"):
+            if pluginMethod(modelDocument):
+                # discovery was performed by plug-in, we're done
+                return modelDocument
+        
+        if _type == Type.SCHEMA:
             modelDocument.schemaDiscover(rootNode, isIncluded, namespace)
-        elif type == Type.LINKBASE:
+        elif _type == Type.LINKBASE:
             modelDocument.linkbaseDiscover(rootNode)
-        elif type == Type.INSTANCE:
+        elif _type == Type.INSTANCE:
             modelDocument.instanceDiscover(rootNode)
-        elif type == Type.INLINEXBRL:
+        elif _type == Type.INLINEXBRL:
             modelDocument.inlineXbrlDiscover(rootNode)
-        elif type == Type.VERSIONINGREPORT:
+        elif _type == Type.VERSIONINGREPORT:
             modelDocument.versioningReportDiscover(rootNode)
-        elif type == Type.TESTCASESINDEX:
+        elif _type == Type.TESTCASESINDEX:
             modelDocument.testcasesIndexDiscover(xmlDocument)
-        elif type == Type.TESTCASE:
+        elif _type == Type.TESTCASE:
             modelDocument.testcaseDiscover(rootNode)
-        elif type == Type.REGISTRY:
+        elif _type == Type.REGISTRY:
             modelDocument.registryDiscover(rootNode)
-        elif type == Type.VERSIONINGREPORT:
+        elif _type == Type.XPATHTESTSUITE:
+            modelDocument.xPathTestSuiteDiscover(rootNode)
+        elif _type == Type.VERSIONINGREPORT:
             modelDocument.versioningReportDiscover(rootNode)
-        elif type == Type.RSSFEED:
+        elif _type == Type.RSSFEED:
             modelDocument.rssFeedDiscover(rootNode)
     return modelDocument
 
@@ -197,10 +283,28 @@ def loadSchemalocatedSchema(modelXbrl, element, relativeUrl, namespace, baseUrl)
     importSchemaLocation = modelXbrl.modelManager.cntlr.webCache.normalizeUrl(relativeUrl, baseUrl)
     doc = load(modelXbrl, importSchemaLocation, isIncluded=False, isDiscovered=False, namespace=namespace, referringElement=element)
     if doc:
-        doc.inDTS = False
+        if doc.targetNamespace != namespace:
+            modelXbrl.error("xmlSchema1.4.2.3:refSchemaNamespace",
+                _("SchemaLocation of %(fileName)s expected namespace %(namespace)s found targetNamespace %(targetNamespace)s"),
+                modelObject=element, fileName=baseUrl,
+                namespace=namespace, targetNamespace=doc.targetNamespace)
+        else:
+            doc.inDTS = False
     return doc
             
-def create(modelXbrl, type, uri, schemaRefs=None, isEntry=False):
+def create(modelXbrl, type, uri, schemaRefs=None, isEntry=False, initialXml=None):
+    """Returns a new modelDocument, created from scratch, with any necessary header elements 
+    
+    (such as the schema, instance, or RSS feed top level elements)
+    :param type: type of model document (value of ModelDocument.Types, an integer)
+    :type type: Types
+    :param schemaRefs: list of URLs when creating an empty INSTANCE, to use to discover (load) the needed DTS modelDocument objects.
+    :type schemaRefs: [str]
+    :param isEntry is True when creating an entry (e.g., instance)
+    :type isEntry: bool
+    :param initialXml is initial xml content for xml documents
+    :type isEntry: str
+    """
     normalizedUri = modelXbrl.modelManager.cntlr.webCache.normalizeUrl(uri, None)
     if isEntry:
         modelXbrl.uri = normalizedUri
@@ -208,7 +312,7 @@ def create(modelXbrl, type, uri, schemaRefs=None, isEntry=False):
         modelXbrl.uriDir = os.path.dirname(normalizedUri)
         for i in range(modelXbrl.modelManager.disclosureSystem.maxSubmissionSubdirectoryEntryNesting):
             modelXbrl.uriDir = os.path.dirname(modelXbrl.uriDir)
-    filepath = modelXbrl.modelManager.cntlr.webCache.getfilename(normalizedUri)
+    filepath = modelXbrl.modelManager.cntlr.webCache.getfilename(normalizedUri, filenameOnly=True)
     # XML document has nsmap root element to replace nsmap as new xmlns entries are required
     if type == Type.INSTANCE:
         # modelXbrl.uriDir = os.path.dirname(normalizedUri)
@@ -228,7 +332,7 @@ def create(modelXbrl, type, uri, schemaRefs=None, isEntry=False):
         Xml = None
     else:
         type = Type.UnknownXML
-        Xml = '<nsmap/>'
+        Xml = '<nsmap>{0}</nsmap>'.format(initialXml or '')
     if Xml:
         import io
         file = io.StringIO(Xml)
@@ -267,6 +371,11 @@ def create(modelXbrl, type, uri, schemaRefs=None, isEntry=False):
 
     
 class Type:
+    """
+    .. class:: Type
+    
+    Static class of Enumerated type representing modelDocument type
+    """
     UnknownXML=0
     UnknownNonXML=1
     UnknownTypes=1  # to test if any unknown type, use <= Type.UnknownTypes
@@ -277,14 +386,18 @@ class Type:
     INLINEXBRL=5
     lastXBRLtype=5  # first filetype that is XBRL and can hold a linkbase, etc inside it
     DTSENTRIES=6  # multiple schema/linkbase Refs composing a DTS but not from an instance document
-    VERSIONINGREPORT=7
-    TESTCASESINDEX=8
-    TESTCASE=9
-    REGISTRY=10
-    REGISTRYTESTCASE=11
-    RSSFEED=12
-    ARCSINFOSET=13
-    FACTDIMSINFOSET=14
+    INLINEXBRLDOCUMENTSET=7
+    VERSIONINGREPORT=8
+    TESTCASESINDEX=9
+    TESTCASE=10
+    REGISTRY=11
+    REGISTRYTESTCASE=12
+    XPATHTESTSUITE=13
+    RSSFEED=14
+    ARCSINFOSET=15
+    FACTDIMSINFOSET=16
+    
+    TESTCASETYPES = (TESTCASESINDEX, TESTCASE, REGISTRY, REGISTRYTESTCASE, XPATHTESTSUITE)
 
     typeName = ("unknown XML",
                 "unknown non-XML", 
@@ -293,11 +406,13 @@ class Type:
                 "instance", 
                 "inline XBRL instance",
                 "entry point set",
+                "inline XBRL document set",
                 "versioning report",
                 "testcases index", 
                 "testcase",
                 "registry",
                 "registry testcase",
+                "xpath test suite",
                 "RSS feed",
                 "arcs infoset",
                 "fact dimensions infoset")
@@ -310,6 +425,92 @@ fractionParts = {"{http://www.xbrl.org/2003/instance}numerator",
 
 
 class ModelDocument:
+    """
+    .. class:: ModelDocment(modelXbrl, type, uri, filepath, xmlDocument)
+
+    The modelDocument performs discovery and initialization when loading documents.  
+    For instances, schema and linkbase references are resolved, as well as non-DTS schema locations needed 
+    to ensure PSVI-validated XML elements in the instance document (for formula processing).  
+    For DTSes, schema includes and imports are resolved, linkbase references discovered, and 
+    concepts made accessible by qname by the modelXbrl and ID at the modelDocument scope.  
+    Testcase documents (and their indexing files) are loaded as modelDocument objects.
+      
+    Specialized modelDocuments are the versioning report, which must discover from and to DTSes, 
+    and an RSS feed, which has a unique XML structure.
+
+    :param modelXbrl: The ModelXbrl (DTS) object owning this modelDocument.
+    :type modelXbrl: ModelXbrl
+    :param uri:  The document's source entry URI (such as web site URL)
+    :type uri: str
+    :param filepath:  The file path of the source for the document (local file or web cache file name)
+    :type filepath: str
+    :param xmlDocument: lxml parsed xml document tree model of lxml proxy objects
+    :type xmlDocument: lxml document
+
+        .. attribute:: modelDocument
+        
+        Self (provided for consistency with modelObjects)
+
+        .. attribute:: modelXbrl
+        
+        The owning modelXbrl
+
+        .. attribute:: type
+        
+        The enumerated document type
+
+        .. attribute:: uri
+
+        Uri as discovered
+
+        .. attribute:: filepath
+        
+        File path as loaded (e.g., from web cache on local drive)
+
+        .. attribute:: basename
+        
+        Python basename (last segment of file path)
+
+        .. attribute:: xmlDocument
+        
+        The lxml tree model of xml proxies
+
+        .. attribute:: targetNamespace
+        
+        Target namespace (if a schema)
+
+        .. attribute:: objectIndex
+        
+        Position in lxml objects table, for use as a surrogate
+
+        .. attribute:: referencesDocument
+        
+        Dict of referenced documents, key is the modelDocument, value is why loaded (import, include, href)
+
+        .. attribute:: idObjects
+        
+        Dict by id of modelObjects in document
+
+        .. attribute:: modelObjects
+        
+        List of modelObjects discovered in document in document order
+
+        .. attribute:: hrefObjects
+        
+        List of (modelObject, modelDocument, id) for each xlink:href
+
+        .. attribute:: schemaLocationElements
+        
+        Set of modelObject elements that have xsi:schemaLocations
+
+        .. attribute:: referencedNamespaces
+        
+        Set of referenced namespaces (by import, discovery, etc)
+
+        .. attribute:: inDTS
+        
+        Qualifies as a discovered schema per XBRL 2.1
+    """
     
     def __init__(self, modelXbrl, type, uri, filepath, xmlDocument):
         self.modelXbrl = modelXbrl
@@ -344,6 +545,10 @@ class ModelDocument:
     @property
     def basename(self):
         return os.path.basename(self.filepath)
+    
+    @property
+    def filepathdir(self):
+        return os.path.dirname(self.filepath)
 
     @property
     def propertyView(self):
@@ -356,30 +561,34 @@ class ModelDocument:
     def __repr__(self):
         return ("{0}[{1}]{2})".format(self.__class__.__name__, self.objectId(),self.propertyView))
 
-    def close(self, visited=None):
+    def close(self, visited=None, urlDocs=None):
         if visited is None: visited = []
         visited.append(self)
         try:
-            for referencedDocument in self.referencesDocument.keys():
+            for referencedDocument, modelDocumentReference in self.referencesDocument.items():
                 if referencedDocument not in visited:
-                    referencedDocument.close(visited)
+                    referencedDocument.close(visited=visited,urlDocs=urlDocs)
+                modelDocumentReference.__dict__.clear() # dereference its contents
+            self.referencesDocument.clear()
             if self.type == Type.VERSIONINGREPORT:
                 if self.fromDTS:
                     self.fromDTS.close()
                 if self.toDTS:
                     self.toDTS.close()
+            urlDocs.pop(self.uri,None)
             xmlDocument = self.xmlDocument
             parser = self.parser
             for modelObject in self.modelObjects:
-                modelObject.__dict__.clear() # remove all references
-                if not isinstance(modelObject, ModelRelationship):
-                    modelObject.clear() # clear children
+                modelObject.clear() # clear children
             self.parserLookupName.__dict__.clear()
             self.parserLookupClass.__dict__.clear()
             self.__dict__.clear() # dereference everything before clearing xml tree
             xmlDocument._setroot(parser.makeelement("{http://dummy}dummy"))
         except AttributeError:
             pass    # maybe already cloased
+        if len(visited) == 1:  # outer call
+            while urlDocs:
+                urlDocs.popitem()[1].close(visited=visited,urlDocs=urlDocs)
         visited.remove(self)
         
     def gettype(self):
@@ -388,6 +597,23 @@ class ModelDocument:
         except AttributeError:
             return "unknown"
         
+    @property
+    def creationSoftwareComment(self):
+        # first try for comments before root element
+        initialComment = ''
+        node = self.xmlRootElement
+        while node.getprevious() is not None:
+            node = node.getprevious()
+            if isinstance(node, ModelComment):
+                initialComment = node.text + '\n' + initialComment
+        if initialComment:
+            return initialComment
+        for i, node in enumerate(self.xmlDocument.iter()):
+            if isinstance(node, ModelComment):
+                return node.text
+            if i > 10:  # give up, no heading comment
+                break
+        return None
     
     def schemaDiscover(self, rootElement, isIncluded, namespace):
         targetNamespace = rootElement.get("targetNamespace")
@@ -404,7 +630,7 @@ class ModelDocument:
                 self.modelXbrl.modelManager.disclosureSystem.disallowedHrefOfNamespace(self.uri, targetNamespace)):
                     self.modelXbrl.error(("EFM.6.22.02", "GFM.1.1.3", "SBR.NL.2.1.0.06" if self.uri.startswith("http") else "SBR.NL.2.2.0.17"),
                             _("Namespace: %(namespace)s disallowed schemaLocation %(schemaLocation)s"),
-                            modelObject=rootElement, namespace=targetNamespace, schemaLocation=self.uri)
+                            modelObject=rootElement, namespace=targetNamespace, schemaLocation=self.uri, url=self.uri)
 
         else:
             if isIncluded == True and namespace:
@@ -415,13 +641,21 @@ class ModelDocument:
             self.modelXbrl.hasXDT = True
         self.isQualifiedElementFormDefault = rootElement.get("elementFormDefault") == "qualified"
         self.isQualifiedAttributeFormDefault = rootElement.get("attributeFormDefault") == "qualified"
-        self.definesUTR = any(ns == XbrlConst.utr for ns in rootElement.nsmap.values())
+        # self.definesUTR = any(ns == XbrlConst.utr for ns in rootElement.nsmap.values())
         try:
             self.schemaDiscoverChildElements(rootElement)
         except (ValueError, LookupError) as err:
             self.modelXbrl.modelManager.addToLog("discovery: {0} error {1}".format(
                         self.basename,
                         err))
+        if self.targetNamespace: 
+            nsDocs = self.modelXbrl.namespaceDocs
+            if targetNamespace in nsDocs and nsDocs[targetNamespace].index(self) == 0: # not an included document
+                for doc in nsDocs[targetNamespace]: # includes self and included documents of this namespace
+                    XmlValidateSchema.validate(doc, doc.xmlRootElement, targetNamespace) # validate schema elements
+        else:  # no target namespace, no includes to worry about order of validation
+            XmlValidateSchema.validate(self, rootElement, targetNamespace) # validate schema elements
+
             
     def schemaDiscoverChildElements(self, parentModelObject):
         # find roleTypes, elements, and linkbases
@@ -454,7 +688,7 @@ class ModelDocument:
                 if self.modelXbrl.modelManager.validateDisclosureSystem:
                     self.modelXbrl.error(("EFM.6.03.11", "GFM.1.1.7"),
                         _("Prohibited base attribute: %(attribute)s"),
-                        modelObejct=element, attribute=baseAttr)
+                        modelObejct=element, attribute=baseAttr, element=element.qname)
                 else:
                     if baseAttr.startswith("/"):
                         base = baseAttr
@@ -483,7 +717,7 @@ class ModelDocument:
                     self.modelXbrl.modelManager.disclosureSystem.disallowedHrefOfNamespace(importSchemaLocation, importNamespace)):
                 self.modelXbrl.error(("EFM.6.22.02", "GFM.1.1.3", "SBR.NL.2.1.0.06" if importSchemaLocation.startswith("http") else "SBR.NL.2.2.0.17"),
                         _("Namespace: %(namespace)s disallowed schemaLocation blocked %(schemaLocation)s"),
-                        modelObject=element, namespace=importNamespace, schemaLocation=importSchemaLocation)
+                        modelObject=element, namespace=importNamespace, schemaLocation=importSchemaLocation, url=importSchemaLocation)
                 return
             doc = None
             importSchemaLocationBasename = os.path.basename(importNamespace)
@@ -504,8 +738,8 @@ class ModelDocument:
             else:
                 doc = load(self.modelXbrl, importSchemaLocation, isDiscovered=self.inDTS, 
                            isIncluded=isIncluded, namespace=importNamespace, referringElement=element)
-            if doc is not None and self.referencesDocument.get(doc) is None:
-                self.referencesDocument[doc] = element.localName #import or include
+            if doc is not None and doc not in self.referencesDocument:
+                self.referencesDocument[doc] = ModelDocumentReference(element.localName, element)  #import or include
                 self.referencedNamespaces.add(importNamespace)
                 
     def schemalocateElementNamespace(self, element):
@@ -556,8 +790,6 @@ class ModelDocument:
                             self.modelXbrl.error("xmlSchema:requiredAttribute",
                                     _("Linkbase reference for %(linkbaseRefElement)s href attribute missing or malformed"),
                                     modelObject=lbElement, linkbaseRefElement=lbLn)
-                        else:
-                            self.hrefObjects.append(href)
                         continue
                 if lbElement.get("{http://www.w3.org/1999/xlink}type") == "extended":
                     if isinstance(lbElement, ModelLink):
@@ -587,12 +819,12 @@ class ModelDocument:
                                     if href is None:
                                         if isStandardExtLink:
                                             self.modelXbrl.error("xmlSchema:requiredAttribute",
-                                                    _("Locator href attribute missing or malformed in standard extended link"),
-                                                    modelObejct=linkElement)
+                                                    _('Locator href attribute "%(href)s" missing or malformed in standard extended link'),
+                                                    modelObject=linkElement, href=linkElement.get("{http://www.w3.org/1999/xlink}href"))
                                         else:
                                             self.modelXbrl.warning("arelle:hrefWarning",
-                                                    _("Locator href attribute missing or malformed in non-standard extended link"),
-                                                    modelObejct=linkElement)
+                                                    _('Locator href attribute "%(href)s" missing or malformed in non-standard extended link'),
+                                                    modelObject=linkElement, href=linkElement.get("{http://www.w3.org/1999/xlink}href"))
                                     else:
                                         linkElement.modelHref = href
                                         modelResource = linkElement
@@ -642,14 +874,15 @@ class ModelDocument:
             else:
                 # href discovery only can happein within a DTS
                 doc = load(self.modelXbrl, url, isDiscovered=not nonDTS, base=self.baseForElement(element), referringElement=element)
-                if not nonDTS and doc is not None and self.referencesDocument.get(doc) is None:
-                    self.referencesDocument[doc] = "href"
+                if not nonDTS and doc is not None and doc not in self.referencesDocument:
+                    self.referencesDocument[doc] = ModelDocumentReference("href", element)
                     if not doc.inDTS and doc.type > Type.UnknownTypes:    # non-XBRL document is not in DTS
                         doc.inDTS = True    # now known to be discovered
                         if doc.type == Type.SCHEMA: # schema coming newly into DTS
                             doc.schemaDiscoverChildElements(doc.xmlRootElement)
             href = (element, doc, id if len(id) > 0 else None)
-            self.hrefObjects.append(href)
+            if doc is not None:  # if none, an error would have already been reported, don't multiply report it
+                self.hrefObjects.append(href)
             return href
         return None
     
@@ -660,6 +893,7 @@ class ModelDocument:
         XmlValidate.validate(self.modelXbrl, xbrlElement) # validate instance elements
 
     def instanceContentsDiscover(self,xbrlElement):
+        nextUndefinedFact = len(self.modelXbrl.undefinedFacts)
         for instElement in xbrlElement.iterchildren():
             if isinstance(instElement,ModelObject):
                 ln = instElement.localName
@@ -673,6 +907,12 @@ class ModelDocument:
                     pass
                 else: # concept elements
                     self.factDiscover(instElement, self.modelXbrl.facts)
+        if len(self.modelXbrl.undefinedFacts) > nextUndefinedFact:
+            undefFacts = self.modelXbrl.undefinedFacts[nextUndefinedFact:]
+            self.modelXbrl.error("xbrl:schemaImportMissing",
+                    _("Instance facts missing schema definition: %(elements)s"),
+                    modelObject=undefFacts, 
+                    elements=", ".join(sorted(set(str(f.prefixedName) for f in undefFacts))))
                     
     def contextDiscover(self, modelContext):
         id = modelContext.id
@@ -723,6 +963,7 @@ class ModelDocument:
         for tag in ("{http://www.xbrl.org/2008/inlineXBRL}nonNumeric", "{http://www.xbrl.org/2008/inlineXBRL}nonFraction", "{http://www.xbrl.org/2008/inlineXBRL}fraction"):
             for modelInlineFact in htmlElement.iterdescendants(tag=tag):
                 if isinstance(modelInlineFact,ModelObject):
+                    self.modelXbrl.factsInInstance.add( modelInlineFact )
                     self.inlineXbrlLocateFactInTuple(modelInlineFact, tuplesByTupleID)
         # order tuple facts
         for tupleFact in tupleElements:
@@ -762,30 +1003,28 @@ class ModelDocument:
                 parentModelFacts = self.modelXbrl.facts
         if isinstance(modelFact, ModelFact):
             parentModelFacts.append( modelFact )
-            self.modelXbrl.factsInInstance.append( modelFact )
+            self.modelXbrl.factsInInstance.add( modelFact )
             for tupleElement in modelFact:
                 if isinstance(tupleElement,ModelObject) and tupleElement.tag not in fractionParts:
                     self.factDiscover(tupleElement, modelFact.modelTupleFacts)
         else:
-            self.modelXbrl.error("xbrl:schemaImportMissing",
-                    _("Instance fact %(element)s missing schema definition "),
-                    modelObject=modelFact, element=modelFact.prefixedName)
+            self.modelXbrl.undefinedFacts.append(modelFact)
     
     def testcasesIndexDiscover(self, rootNode):
         for testcasesElement in rootNode.iter():
-            if isinstance(testcasesElement,ModelObject) and testcasesElement.localName == "testcases":
+            if isinstance(testcasesElement,ModelObject) and testcasesElement.localName in ("testcases", "testSuite"):
                 rootAttr = testcasesElement.get("root")
                 if rootAttr:
                     base = os.path.join(os.path.dirname(self.filepath),rootAttr) + os.sep
                 else:
                     base = self.filepath
                 for testcaseElement in testcasesElement:
-                    if isinstance(testcaseElement,ModelObject) and testcaseElement.localName == "testcase":
-                        if testcaseElement.get("uri"):
-                            uriAttr = testcaseElement.get("uri")
+                    if isinstance(testcaseElement,ModelObject) and testcaseElement.localName in ("testcase", "testSetRef"):
+                        uriAttr = testcaseElement.get("uri") or testcaseElement.get("{http://www.w3.org/1999/xlink}href")
+                        if uriAttr:
                             doc = load(self.modelXbrl, uriAttr, base=base, referringElement=testcaseElement)
-                            if doc is not None and self.referencesDocument.get(doc) is None:
-                                self.referencesDocument[doc] = "testcaseIndex"
+                            if doc is not None and doc not in self.referencesDocument:
+                                self.referencesDocument[doc] = ModelDocumentReference("testcaseIndex", testcaseElement)
 
     def testcaseDiscover(self, testcaseElement):
         isTransformTestcase = testcaseElement.namespaceURI == "http://xbrl.org/2011/conformance-rendering/transforms"
@@ -794,7 +1033,7 @@ class ModelDocument:
         self.outpath = self.xmlRootElement.get("outpath") 
         self.testcaseVariations = []
         priorTransformName = None
-        for modelVariation in XmlUtil.descendants(testcaseElement, testcaseElement.namespaceURI, "variation"):
+        for modelVariation in XmlUtil.descendants(testcaseElement, testcaseElement.namespaceURI, ("variation", "testGroup")):
             self.testcaseVariations.append(modelVariation)
             if isTransformTestcase and modelVariation.getparent().get("name") is not None:
                 transformName = modelVariation.getparent().get("name")
@@ -821,6 +1060,18 @@ class ModelDocument:
                         testbase = functionDoc.filepath
                         if testuri is not None:
                             testcaseDoc = load(self.modelXbrl, testuri, base=testbase, referringElement=testUriElt)
-                            if testcaseDoc is not None and self.referencesDocument.get(testcaseDoc) is None:
-                                self.referencesDocument[testcaseDoc] = "registryIndex"
+                            if testcaseDoc is not None and testcaseDoc not in self.referencesDocument:
+                                self.referencesDocument[testcaseDoc] = ModelDocumentReference("registryIndex", testUriElt)
             
+    def xPathTestSuiteDiscover(self, rootNode):
+        # no child documents to reference
+        pass
+            
+class LoadingException(Exception):
+    pass
+
+class ModelDocumentReference:
+    def __init__(self, referenceType, referringModelObject=None):
+        self.referenceType = referenceType
+        self.referringModelObject = referringModelObject
+

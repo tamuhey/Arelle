@@ -8,11 +8,10 @@ from lxml import etree
 from arelle.ModelDtsObject import (ModelConcept, ModelType, ModelGroupDefinition, 
                                    ModelAll, ModelChoice, ModelSequence, 
                                    ModelAny, anonymousTypeSuffix)
-from arelle.ModelInstanceObject import ModelInlineFact
 from arelle.ModelObject import ModelObject, ModelAttribute
 from arelle.XmlValidate import validate
 
-def validateElementSequence(modelXbrl, compositor, children, iNextChild=0):
+def validateElementSequence(modelXbrl, compositor, children, ixFacts, iNextChild=0):
     particles = compositor.dereference().particles        
     iStartingChild = iNextChild
     errDesc = None
@@ -30,14 +29,17 @@ def validateElementSequence(modelXbrl, compositor, children, iNextChild=0):
                 elementDeclaration = particle.dereference()
                 while iNextChild < len(children):
                     elt = children[iNextChild]
+                    vQname = elt.vQname(modelXbrl) # takes care of elements inside inline or other instances
                     if isinstance(elt, ModelObject):
                         # for any, check namespace overlap
-                        if (isinstance(particle, ModelAny) or 
-                            (elementDeclaration is not None and 
-                             (elt.qname == elementDeclaration.qname or 
-                              elt.elementDeclaration.substitutesForQname(elementDeclaration.qname)))):
+                        if ((isinstance(particle, ModelAny) and 
+                             particle.allowsNamespace(vQname.namespaceURI)) or 
+                            (isinstance(particle, ModelConcept) and
+                             elementDeclaration is not None and 
+                             (vQname == elementDeclaration.qname or 
+                              elt.elementDeclaration(modelXbrl).substitutesForQname(elementDeclaration.qname)))):
                             occurences += 1
-                            validate(modelXbrl, elt)
+                            validate(modelXbrl, elt, ixFacts=ixFacts)
                             iNextChild += 1
                             if occurences == particle.maxOccurs:
                                 break
@@ -48,8 +50,11 @@ def validateElementSequence(modelXbrl, compositor, children, iNextChild=0):
             else:  # group definition or compositor
                 while occurences < particle.maxOccurs:
                     iPrevChild = iNextChild
-                    iNextChild, occured, errDesc, errArgs = validateElementSequence(modelXbrl, particle, children, iNextChild)
+                    iNextChild, occured, errDesc, errArgs = validateElementSequence(modelXbrl, particle, children, ixFacts, iNextChild)
                     if occured:
+                        # test if occurence was because of minOccurs zero but no match occured (HF 2012-09-07)
+                        if occured and iNextChild == iPrevChild and particle.minOccurs == 0: # nothing really occured
+                            break
                         occurences += 1
                         if occurences == particle.maxOccurs or iNextChild >= len(children):
                             break
@@ -87,9 +92,10 @@ def validateElementSequence(modelXbrl, compositor, children, iNextChild=0):
     else:
         occured = True
     if isinstance(compositor, ModelType) and iNextChild < len(children):
-        elt = children[iNextChild]
-        eltChildren = elt.modelTupleFacts if isinstance(elt, ModelInlineFact) else elt
-        if any(True for child in eltChildren if isinstance(child, ModelObject)): # any unexpected content elements
+        #elt = children[iNextChild]
+        #eltChildren = elt.modelTupleFacts if ixFacts else elt
+        #if any(True for child in eltChildren if isinstance(child, ModelObject)): # any unexpected content elements
+        if any(True for child in children[iNextChild:] if isinstance(child, ModelObject)): # any unexpected content elements
             return (iNextChild, False,
                     ("xmlSchema:elementUnexpected",
                      _("%(compositor)s(%(particles)s) %(element)s unexpected, within %(parentElement)s")),
@@ -141,4 +147,6 @@ def validateUniqueParticleAttribution(modelXbrl, particles, compositor):
                     modelObject=particle, compositor=compositor.localName)
             priorAnyParticles.insert(0, i)
         else:   # recurse
-            validateUniqueParticleAttribution(modelXbrl, particle.dereference().particles, particle)
+            particleDeclaration = particle.dereference()
+            if particleDeclaration is not None:  # none if particle ref is invalid
+                validateUniqueParticleAttribution(modelXbrl, particleDeclaration.particles, particle)

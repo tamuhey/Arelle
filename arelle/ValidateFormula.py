@@ -4,15 +4,18 @@ Created on Dec 9, 2010
 @author: Mark V Systems Limited
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
-import os, sys
+import os, sys, time, logging
 from collections import defaultdict
+from threading import Timer
 
 from arelle.ModelFormulaObject import (ModelParameter, ModelInstance, ModelVariableSet,
                                        ModelFormula, ModelTuple, ModelVariable, ModelFactVariable, 
                                        ModelVariableSetAssertion, ModelConsistencyAssertion,
                                        ModelExistenceAssertion, ModelValueAssertion,
                                        ModelPrecondition, ModelConceptName, Trace,
-                                       Aspect, aspectModels, ModelAspectCover)
+                                       Aspect, aspectModels, ModelAspectCover,
+                                       ModelMessage)
+from arelle.ModelRenderingObject import (ModelRuleDefinitionNode, ModelRelationshipDefinitionNode, ModelFilterDefinitionNode)
 from arelle.ModelObject import (ModelObject)
 from arelle.ModelValue import (qname,QName)
 from arelle import (XbrlConst, XmlUtil, ModelXbrl, ModelDocument, XPathParser, XPathContext, FunctionXs,
@@ -43,6 +46,60 @@ arcroleChecks = {
     XbrlConst.functionImplementation: (XbrlConst.qnCustomFunctionSignature,
                                       XbrlConst.qnCustomFunctionImplementation,
                                       "xbrlcfie:info"),
+    XbrlConst.tableBreakdown:       (XbrlConst.qnTableTable,
+                                     XbrlConst.qnTableBreakdown, 
+                                     "xbrlte:info"),
+    XbrlConst.tableBreakdownTree:   (XbrlConst.qnTableBreakdown,
+                                     (XbrlConst.qnTableClosedDefinitionNode,
+                                      XbrlConst.qnTableAspectNode),
+                                     "xbrlte:info"),
+    XbrlConst.tableDefinitionNodeSubtree: (XbrlConst.qnTableClosedDefinitionNode, 
+                                     XbrlConst.qnTableClosedDefinitionNode, 
+                                     "xbrlte:info"),
+    XbrlConst.tableFilter:          (XbrlConst.qnTableTable, 
+                                     XbrlConst.qnVariableFilter, 
+                                     "xbrlte:info"),
+    XbrlConst.tableAspectNodeFilter:(XbrlConst.qnTableAspectNode,
+                                     XbrlConst.qnVariableFilter, 
+                                     "xbrlte:info"),
+    XbrlConst.tableBreakdown201301: (XbrlConst.qnTableTable201301,
+                                     (XbrlConst.qnTableClosedDefinitionNode201301, 
+                                      XbrlConst.qnTableFilterNode201301, 
+                                      XbrlConst.qnTableSelectionNode201301, 
+                                      XbrlConst.qnTableTupleNode201301),
+                                     "xbrlte:info"),
+    XbrlConst.tableAxis2011:        (XbrlConst.qnTableTable2011,
+                                     (XbrlConst.qnTablePredefinedAxis2011, 
+                                      XbrlConst.qnTableFilterAxis2011,
+                                      XbrlConst.qnTableSelectionAxis2011, 
+                                      XbrlConst.qnTableTupleAxis2011),
+                                     "xbrlte:info"),
+    XbrlConst.tableFilter201301:    (XbrlConst.qnTableTable201301, 
+                                     XbrlConst.qnVariableFilter, 
+                                     "xbrlte:info"),
+    XbrlConst.tableFilter2011:      (XbrlConst.qnTableTable2011, 
+                                     XbrlConst.qnVariableFilter, 
+                                     "xbrlte:info"),
+    XbrlConst.tableDefinitionNodeSubtree201301:     (XbrlConst.qnTableClosedDefinitionNode201301, 
+                                     XbrlConst.qnTableClosedDefinitionNode201301, 
+                                     "xbrlte:info"),
+    XbrlConst.tableAxisSubtree2011:     (XbrlConst.qnTablePredefinedAxis2011, 
+                                     XbrlConst.qnTablePredefinedAxis2011, 
+                                     "xbrlte:info"),
+    XbrlConst.tableFilterNodeFilter2011:(XbrlConst.qnTableFilterNode201301,
+                                     XbrlConst.qnVariableFilter, 
+                                     "xbrlte:info"),
+    XbrlConst.tableAxisFilter2011:  (XbrlConst.qnTableFilterAxis2011,
+                                     XbrlConst.qnVariableFilter, 
+                                     "xbrlte:info"),
+    XbrlConst.tableAxisFilter201205:(XbrlConst.qnTableFilterAxis2011,
+                                     XbrlConst.qnVariableFilter, 
+                                     "xbrlte:info"),
+    XbrlConst.tableTupleContent201301:    ((XbrlConst.qnTableTupleNode201301,
+                                      XbrlConst.qnTableTupleAxis2011), 
+                                     (XbrlConst.qnTableRuleNode201301,
+                                      XbrlConst.qnTableRuleAxis2011), 
+                                     "xbrlte:info"),
     }
 def checkBaseSet(val, arcrole, ELR, relsSet):
     # check hypercube-dimension relationships
@@ -106,6 +163,9 @@ def executeCallTest(val, name, callTuple, testTuple):
                     val.modelXbrl.error("cfcn:testFail",
                                         _("Test %(name)s result %(result)s"), 
                                         modelObject=testTuple[1], name=name, result=str(testResult))
+                    
+            xpathContext.close()  # dereference
+
         except XPathContext.XPathException as err:
             val.modelXbrl.error(err.code,
                 _("%(name)s evaluation error: %(error)s \n%(errorSource)s"),
@@ -113,18 +173,20 @@ def executeCallTest(val, name, callTuple, testTuple):
 
         val.modelXbrl.modelManager.showStatus(_("ready"), 2000)
                 
-def validate(val):
+def validate(val, xpathContext=None, parametersOnly=False, statusMsg='', compileOnly=False):
     for e in ("xbrl.5.1.4.3:cycles", "xbrlgene:violatedCyclesConstraint"):
         if e in val.modelXbrl.errors:
             val.modelXbrl.info("info", _("Formula validation skipped due to %(error)s error"),
                                 modelObject=val.modelXbrl, error=e)
             return
     
+    val.modelXbrl.profileStat()
     formulaOptions = val.modelXbrl.modelManager.formulaOptions
-    XPathParser.initializeParser(val.modelXbrl.modelManager)
-    val.modelXbrl.modelManager.showStatus(_("compiling formulae"))
+    if XPathParser.initializeParser(val.modelXbrl.modelManager):
+        val.modelXbrl.profileStat(_("initializeXPath2Grammar")) # only provide stat when not yet initialized
+    val.modelXbrl.modelManager.showStatus(statusMsg)
     val.modelXbrl.profileActivity()
-    initialErrorCount = val.modelXbrl.logCountErr
+    initialErrorCount = val.modelXbrl.logCount.get(logging.getLevelName('ERROR'), 0)
     
     # global parameter names
     parameterQnames = set()
@@ -197,7 +259,10 @@ def validate(val):
             
     # xpathContext is needed for filter setup for expressions such as aspect cover filter
     # determine parameter values
-    xpathContext = XPathContext.create(val.modelXbrl)
+    
+    if xpathContext is None:
+        xpathContext = XPathContext.create(val.modelXbrl) 
+    xpathContext.parameterQnames = parameterQnames  # needed for formula filters to determine variable dependencies
     for paramQname in orderedParameters:
         modelParameter = val.modelXbrl.qnameParameters[paramQname]
         if not isinstance(modelParameter, ModelInstance):
@@ -224,7 +289,49 @@ def validate(val):
                 val.modelXbrl.error("xbrlve:parameterTypeMismatch" if err.code == "err:FORG0001" else err.code,
                     _("Parameter \n%(name)s \nException: \n%(error)s"), 
                     modelObject=modelParameter, name=paramQname, error=err.message)
+        ''' Removed as per WG discussion 2012-12-20. This duplication checking unfairly presupposes URI based
+           implementation and exceeds the scope of linkbase validation
+        elif not parametersOnly: # is a modelInstance
+            if val.parameters and paramQname in val.parameters:
+                instanceModelXbrls = val.parameters[paramQname][1]
+                instanceUris = set()
+                for instanceModelXbrl in instanceModelXbrls:
+                    if instanceModelXbrl.uri in instanceUris:
+                        val.modelXbrl.error("xbrlvarinste:inputInstanceDuplication",
+                            _("Input instance resource %(instName)s has multiple XBRL instances %(uri)s"), 
+                            modelObject=modelParameter, instName=paramQname, uri=instanceModelXbrl.uri)
+                    instanceUris.add(instanceModelXbrl.uri)
+        if val.parameters and XbrlConst.qnStandardInputInstance in val.parameters: # standard input instance has
+            if len(val.parameters[XbrlConst.qnStandardInputInstance][1]) != 1:
+                val.modelXbrl.error("xbrlvarinste:standardInputInstanceNotUnique",
+                    _("Standard input instance resource parameter has multiple XBRL instances"), 
+                    modelObject=modelParameter)
+        '''
     val.modelXbrl.profileActivity("... parameter checks and select evaluation", minTimeToShow=1.0)
+    
+    val.modelXbrl.profileStat(_("parametersProcessing"))
+
+    # check typed dimension equality test
+    val.modelXbrl.modelFormulaEqualityDefinitions = {}
+    for modelRel in val.modelXbrl.relationshipSet(XbrlConst.equalityDefinition).modelRelationships:
+        typedDomainElt = modelRel.fromModelObject
+        modelEqualityDefinition = modelRel.toModelObject
+        if typedDomainElt in val.modelXbrl.modelFormulaEqualityDefinitions:
+            val.modelXbrl.error("xbrlve:multipleTypedDimensionEqualityDefinitions",
+                _("Multiple typed domain definitions from %(typedDomain)s to %(equalityDefinition1)s and %(equalityDefinition2)s"),
+                 modelObject=modelRel.arcElement, typedDomain=typedDomainElt.qname,
+                 equalityDefinition1=modelEqualityDefinition.xlinkLabel,
+                 equalityDefinition2=val.modelXbrl.modelFormulaEqualityDefinitions[typedDomainElt].xlinkLabel)
+        else:
+            modelEqualityDefinition.compile()
+            val.modelXbrl.modelFormulaEqualityDefinitions[typedDomainElt] = modelEqualityDefinition
+            
+    if parametersOnly:
+        return
+
+    for modelVariableSet in val.modelXbrl.modelVariableSets:
+        modelVariableSet.compile()
+    val.modelXbrl.profileStat(_("formulaCompilation"))
 
     produceOutputXbrlInstance = False
     instanceProducingVariableSets = defaultdict(list)
@@ -238,6 +345,7 @@ def validate(val):
                 if isinstance(instance, ModelInstance):
                     if instanceQname is None:
                         instanceQname = instance.qname
+                        modelVariableSet.fromInstanceQnames = {instanceQname} # required if referred to by variables scope chaining
                     else:
                         val.modelXbrl.info("arelle:multipleOutputInstances",
                             _("Multiple output instances for formula %(xlinkLabel)s, to names %(instanceTo)s, %(instanceTo2)s"),
@@ -246,8 +354,9 @@ def validate(val):
             if instanceQname is None: 
                 instanceQname = XbrlConst.qnStandardOutputInstance
                 instanceQnames.add(instanceQname)
+                modelVariableSet.fromInstanceQnames = None # required if referred to by variables scope chaining
             modelVariableSet.outputInstanceQname = instanceQname
-            if val.validateSBRNL:
+            if getattr(val, "validateSBRNL", False): # may not exist on some val objects
                 val.modelXbrl.error("SBR.NL.2.3.9.03",
                     _("Formula:formula %(xlinkLabel)s is not allowed"),
                     modelObject=modelVariableSet, xlinkLabel=modelVariableSet.xlinkLabel)
@@ -262,7 +371,6 @@ def validate(val):
             val.modelXbrl.error("xbrlve:unknownAspectModel",
                 _("Variable set %(xlinkLabel)s, aspect model %(aspectModel)s not recognized"),
                 modelObject=modelVariableSet, xlinkLabel=modelVariableSet.xlinkLabel, aspectModel=modelVariableSet.aspectModel)
-        modelVariableSet.compile()
         modelVariableSet.hasConsistencyAssertion = False
             
         #determine dependencies within variable sets
@@ -392,10 +500,13 @@ def validate(val):
         for varqname in orderedNameList:
             if varqname in qnameRels:
                 modelVariableSet.orderedVariableRelationships.append(qnameRels[varqname])
+        
+        orderedNameSet.clear()       
+        del orderedNameList[:]  # dereference            
                 
-        # check existence assertion variable dependencies
+        # check existence assertion @test variable dependencies (not including precondition references)
         if isinstance(modelVariableSet, ModelExistenceAssertion):
-            for depVar in modelVariableSet.variableRefs():
+            for depVar in XPathParser.variableReferencesSet(modelVariableSet.testProg, modelVariableSet):
                 if depVar in qnameRels and isinstance(qnameRels[depVar].toModelObject,ModelVariable):
                     val.modelXbrl.error("xbrleae:variableReferenceNotAllowed",
                         _("Existence Assertion %(xlinkLabel)s, cannot refer to variable %(name)s"),
@@ -418,21 +529,6 @@ def validate(val):
             if isinstance(precondition, ModelPrecondition):
                 modelVariableSet.preconditions.append(precondition)
                 
-        # check typed dimension equality test
-        val.modelXbrl.modelFormulaEqualityDefinitions = {}
-        for modelRel in val.modelXbrl.relationshipSet(XbrlConst.equalityDefinition).modelRelationships:
-            typedDomainElt = modelRel.fromModelObject
-            modelEqualityDefinition = modelRel.toModelObject
-            if typedDomainElt in val.modelXbrl.modelFormulaEqualityDefinitions:
-                val.modelXbrl.error("xbrlve:multipleTypedDimensionEqualityDefinitions",
-                    _("Multiple typed domain definitions from %(typedDomain)s to %(equalityDefinition1)s and %(equalityDefinition2)s"),
-                     modelObject=modelRel.arcElement, typedDomain=typedDomainElt.qname,
-                     equalityDefinition1=modelEqualityDefinition.xlinkLabel,
-                     equalityDefinition2=val.modelXbrl.modelFormulaEqualityDefinitions[typedDomainElt].xlinkLabel)
-            else:
-                modelEqualityDefinition.compile()
-                val.modelXbrl.modelFormulaEqualityDefinitions[typedDomainElt] = modelEqualityDefinition
-                
         # check for variable sets referencing fact or general variables
         for modelRel in val.modelXbrl.relationshipSet(XbrlConst.variableSetFilter).fromModelObject(modelVariableSet):
             varSetFilter = modelRel.toModelObject
@@ -440,7 +536,8 @@ def validate(val):
                 val.modelXbrl.warning("arelle:variableSetFilterCovered",
                     _("Variable set %(xlinkLabel)s, filter %(filterLabel)s, cannot be covered"),
                      modelObject=varSetFilter, xlinkLabel=modelVariableSet.xlinkLabel, filterLabel=varSetFilter.xlinkLabel)
-                modelRel._isCovered = False # block group filter from being able to covere
+                modelRel._isCovered = False # block group filter from being able to covered
+                
             for depVar in varSetFilter.variableRefs():
                 if depVar in qnameRels and isinstance(qnameRels[depVar].toModelObject,ModelVariable):
                     val.modelXbrl.error("xbrlve:factVariableReferenceNotAllowed",
@@ -450,7 +547,25 @@ def validate(val):
         # check aspects of formula
         if isinstance(modelVariableSet, ModelFormula):
             checkFormulaRules(val, modelVariableSet, nameVariables)
+
+        nameVariables.clear() # dereference
+        qnameRels.clear()
+        definedNamesSet.clear()
+        variableDependencies.clear()
+        varSetInstanceDependencies.clear()
+
     val.modelXbrl.profileActivity("... assertion and formula checks and compilation", minTimeToShow=1.0)
+            
+    for modelTable in val.modelXbrl.modelRenderingTables:
+        modelTable.fromInstanceQnames = None # required if referred to by variables scope chaining
+        if modelTable.aspectModel not in ("non-dimensional", "dimensional"):
+            val.modelXbrl.error("xbrlte:unknownAspectModel",
+                _("Table %(xlinkLabel)s, aspect model %(aspectModel)s not recognized"),
+                modelObject=modelTable, xlinkLabel=modelTable.xlinkLabel, aspectModel=modelTable.aspectModel)
+        modelTable.compile()
+        checkTableRules(val, xpathContext, modelTable)
+
+    val.modelXbrl.profileActivity("... rendering tables and axes checks and compilation", minTimeToShow=1.0)
             
     # determine instance dependency order
     orderedInstancesSet = set()
@@ -492,6 +607,10 @@ def validate(val):
                     _("Unresolved dependencies of an assertion's variables on instances %(dependencies)s"),
                     dependencies=str(_DICT_SET(depInsts) - stdInpInst) )
             '''
+        elif instqname in depInsts: # check for direct cycle
+            val.modelXbrl.error("xbrlvarinste:instanceVariableRecursionCycle",
+                _("Cyclic dependencies of instance %(name)s produced by its own variables"),
+                modelObject=val.modelXbrl, name=instqname )
 
     if formulaOptions.traceVariablesOrder and len(orderedInstancesList) > 1:
         val.modelXbrl.info("formula:trace",
@@ -527,9 +646,9 @@ def validate(val):
     for instanceQname in instanceQnames:
         if (instanceQname not in (XbrlConst.qnStandardInputInstance,XbrlConst.qnStandardOutputInstance) and
             val.parameters and instanceQname in val.parameters):
-            namedInstance = val.parameters[instanceQname][1][0]
-            ValidateXbrlDimensions.loadDimensionDefaults(namedInstance)
-            xpathContext.defaultDimensionAspects |= _DICT_SET(namedInstance.qnameDimensionDefaults.keys())
+            for namedInstance in val.parameters[instanceQname][1]:
+                ValidateXbrlDimensions.loadDimensionDefaults(namedInstance)
+                xpathContext.defaultDimensionAspects |= _DICT_SET(namedInstance.qnameDimensionDefaults.keys())
 
     # check for variable set dependencies across output instances produced
     for instanceQname, modelVariableSets in instanceProducingVariableSets.items():
@@ -551,12 +670,16 @@ def validate(val):
                             xlinkLabel2=modelVariableSet.xlinkLabel, aspectModel2=modelVariableSet.aspectModel)
     val.modelXbrl.profileActivity("... instances scopes and setup", minTimeToShow=1.0)
 
-    if initialErrorCount < val.modelXbrl.logCountErr:
+    val.modelXbrl.profileStat(_("formulaValidation"))
+    if (initialErrorCount < val.modelXbrl.logCount.get(logging.getLevelName('ERROR'), 0) or
+        compileOnly or 
+        getattr(val, "validateFormulaCompileOnly", False)):
         return  # don't try to execute
         
 
     # formula output instances    
     if instanceQnames:      
+        val.modelXbrl.modelManager.showStatus(_("initializing formula output instances"))
         schemaRefs = [val.modelXbrl.modelDocument.relativeUri(referencedDoc.uri)
                         for referencedDoc in val.modelXbrl.modelDocument.referencesDocument.keys()
                             if referencedDoc.type == ModelDocument.Type.SCHEMA]
@@ -566,7 +689,7 @@ def validate(val):
         if instanceQname == XbrlConst.qnStandardInputInstance:
             continue    # always present the standard way
         if val.parameters and instanceQname in val.parameters:
-            namedInstance = val.parameters[instanceQname][1]
+            namedInstance = val.parameters[instanceQname][1] # this is a sequence
         else:   # empty intermediate instance 
             uri = val.modelXbrl.modelDocument.filepath[:-4] + "-output-XBRL-instance"
             if instanceQname != XbrlConst.qnStandardOutputInstance:
@@ -582,23 +705,56 @@ def validate(val):
         if instanceQname == XbrlConst.qnStandardOutputInstance:
             outputXbrlInstance = namedInstance
     val.modelXbrl.profileActivity("... output instances setup", minTimeToShow=1.0)
+    val.modelXbrl.profileStat(_("formulaInstancesSetup"))
+    timeFormulasStarted = time.time()
         
     val.modelXbrl.modelManager.showStatus(_("running formulae"))
-    # evaluate consistency assertions
     
-    # evaluate variable sets not in consistency assertions
-    for instanceQname in orderedInstancesList:
-        for modelVariableSet in instanceProducingVariableSets[instanceQname]:
-            # produce variable evaluations if no dependent variables-scope relationships
-            if not val.modelXbrl.relationshipSet(XbrlConst.variablesScope).toModelObject(modelVariableSet):
-                from arelle.FormulaEvaluator import evaluate
-                try:
-                    evaluate(xpathContext, modelVariableSet)
-                except XPathContext.XPathException as err:
-                    val.modelXbrl.error(err.code,
-                        _("Variable set \n%(variableSet)s \nException: \n%(error)s"), 
-                        modelObject=modelVariableSet, variableSet=str(modelVariableSet), error=err.message)
+    runIDs = (formulaOptions.runIDs or '').split()
+    if runIDs:
+        val.modelXbrl.info("formula:trace",
+                           _("Formua/assertion IDs restriction: %(ids)s"), 
+                           modelXbrl=val.modelXbrl, ids=', '.join(runIDs))
+        
+    # evaluate consistency assertions
+    try:
+        if hasattr(val, "maxFormulaRunTime") and val.maxFormulaRunTime > 0:
+            maxFormulaRunTimeTimer = Timer(val.maxFormulaRunTime * 60.0, xpathContext.runTimeExceededCallback)
+            maxFormulaRunTimeTimer.start()
+        else:
+            maxFormulaRunTimeTimer = None
             
+        # evaluate variable sets not in consistency assertions
+        val.modelXbrl.profileActivity("... evaluations", minTimeToShow=1.0)
+        for instanceQname in orderedInstancesList:
+            for modelVariableSet in instanceProducingVariableSets[instanceQname]:
+                # produce variable evaluations if no dependent variables-scope relationships
+                if not val.modelXbrl.relationshipSet(XbrlConst.variablesScope).toModelObject(modelVariableSet):
+                    if (not runIDs or 
+                        modelVariableSet.id in runIDs or
+                        (modelVariableSet.hasConsistencyAssertion and 
+                         any(modelRel.fromModelObject.id in runIDs
+                             for modelRel in val.modelXbrl.relationshipSet(XbrlConst.consistencyAssertionFormula).toModelObject(modelVariableSet)
+                             if isinstance(modelRel.fromModelObject, ModelConsistencyAssertion)))):
+                        from arelle.FormulaEvaluator import evaluate
+                        try:
+                            varSetId = (modelVariableSet.id or modelVariableSet.xlinkLabel)
+                            val.modelXbrl.profileActivity("... evaluating " + varSetId, minTimeToShow=10.0)
+                            val.modelXbrl.modelManager.showStatus(_("evaluating {0}").format(varSetId))
+                            val.modelXbrl.profileActivity("... evaluating " + varSetId, minTimeToShow=1.0)
+                            evaluate(xpathContext, modelVariableSet)
+                            val.modelXbrl.profileStat(modelVariableSet.localName + "_" + varSetId)
+                        except XPathContext.XPathException as err:
+                            val.modelXbrl.error(err.code,
+                                _("Variable set \n%(variableSet)s \nException: \n%(error)s"), 
+                                modelObject=modelVariableSet, variableSet=str(modelVariableSet), error=err.message)
+        if maxFormulaRunTimeTimer:
+            maxFormulaRunTimeTimer.cancel()
+    except XPathContext.RunTimeExceededException:
+        val.modelXbrl.info("formula:maxRunTime",
+            _("Formula execution ended after %(mins)s minutes"), 
+            modelObject=val.modelXbrl, mins=val.maxFormulaRunTime)
+        
     # log assertion result counts
     asserTests = {}
     for exisValAsser in val.modelXbrl.modelVariableSets:
@@ -623,7 +779,7 @@ def validate(val):
                     satisfiedCount=consisAsser.countSatisfied, notSatisfiedCount=consisAsser.countNotSatisfied)
             
     if asserTests: # pass assertion results to validation if appropriate
-        val.modelXbrl.info("asrtNoLog", None, assertionResults=asserTests);
+        val.modelXbrl.log(None, "asrtNoLog", None, assertionResults=asserTests);
 
     # display output instance
     if outputXbrlInstance:
@@ -634,6 +790,16 @@ def validate(val):
         
     val.modelXbrl.modelManager.showStatus(_("formulae finished"), 2000)
         
+    instanceProducingVariableSets.clear() # dereference
+    parameterQnames.clear()
+    instanceQnames.clear()
+    parameterDependencies.clear()
+    instanceDependencies.clear()
+    dependencyResolvedParameters.clear()
+    orderedInstancesSet.clear()
+    del orderedParameters, orderedInstances, orderedInstancesList
+    xpathContext.close()  # dereference everything
+    val.modelXbrl.profileStat(_("formulaExecutionTotal"), time.time() - timeFormulasStarted)
 
 def checkVariablesScopeVisibleQnames(val, nameVariables, definedNamesSet, modelVariableSet):
     for visibleVarSetRel in val.modelXbrl.relationshipSet(XbrlConst.variablesScope).toModelObject(modelVariableSet):
@@ -654,13 +820,14 @@ def checkVariablesScopeVisibleQnames(val, nameVariables, definedNamesSet, modelV
         checkVariablesScopeVisibleQnames(val, nameVariables, definedNamesSet, visibleVarSet)
 
 def checkFilterAspectModel(val, variableSet, filterRelationships, xpathContext, uncoverableAspects=None):
+    result = set() # all of the aspects found to be covered
     if uncoverableAspects is None:
         # protect 2.7 conversion
         oppositeAspectModel = (_DICT_SET({'dimensional','non-dimensional'}) - _DICT_SET({variableSet.aspectModel})).pop()
         try:
             uncoverableAspects = aspectModels[oppositeAspectModel] - aspectModels[variableSet.aspectModel]
         except KeyError:    # bad aspect model, not an issue for this test
-            return
+            return result
     acfAspectsCovering = {}
     for varFilterRel in filterRelationships:
         _filter = varFilterRel.toModelObject # use _filter instead of filter to prevent 2to3 confusion
@@ -688,10 +855,12 @@ def checkFilterAspectModel(val, variableSet, filterRelationships, xpathContext, 
                         _("Variable set %(xlinkLabel)s, aspect model %(aspectModel)s filter %(filterName)s %(filterLabel)s can cover aspect not in aspect model"),
                         modelObject=variableSet, xlinkLabel=variableSet.xlinkLabel, aspectModel=variableSet.aspectModel, 
                         filterName=_filter.localName, filterLabel=_filter.xlinkLabel)
+                result |= aspectsCovered                    
             except Exception:
                 pass
             if hasattr(_filter, "filterRelationships"): # check and & or filters
-                checkFilterAspectModel(val, variableSet, _filter.filterRelationships, xpathContext, uncoverableAspects)
+                result |= checkFilterAspectModel(val, variableSet, _filter.filterRelationships, xpathContext, uncoverableAspects)
+    return result
         
 def checkFormulaRules(val, formula, nameVariables):
     if not (formula.hasRule(Aspect.CONCEPT) or formula.source(Aspect.CONCEPT)):
@@ -813,56 +982,123 @@ def checkFormulaRules(val, formula, nameVariables):
                         _("Formula %(xlinkLabel)s: formula source %(name)s is a fact variable that binds as a sequence"),
                         modelObject=formula, xlinkLabel=formula.xlinkLabel, name=qnSource)
                 
+def checkTableRules(val, xpathContext, table):
+    # check for covering aspect not in variable set aspect model
+    checkFilterAspectModel(val, table, table.filterRelationships, xpathContext)
+
+    checkDefinitionNodeRules(val, table, table, (XbrlConst.tableBreakdown,XbrlConst.tableAxis2011), xpathContext)
+    
+def checkDefinitionNodeRules(val, table, parent, arcrole, xpathContext):
+    for rel in val.modelXbrl.relationshipSet(arcrole).fromModelObject(parent):
+        axis = rel.toModelObject
+        if axis is not None:
+            if isinstance(axis, ModelFilterDefinitionNode):
+                if not checkFilterAspectModel(val, table, axis.filterRelationships, xpathContext):
+                    val.modelXbrl.error("xbrlte:axisFilterCoversNoAspects",
+                        _("FilterAxis %(xlinkLabel)s does not cover any aspects."),
+                        modelObject=axis, xlinkLabel=axis.xlinkLabel)
+            else:
+                if isinstance(axis, ModelRuleDefinitionNode):
+                    # check dimension elements
+                    for eltName, dim, badUsageErr in (("explicitDimension", "explicit", "xbrlfe:badUsageOfExplicitDimensionRule"),
+                                                      ("typedDimension", "typed", "xbrlfe:badUsageOfTypedDimensionRule")):
+                        for dimElt in XmlUtil.descendants(axis, XbrlConst.formula, eltName):
+                            dimQname = qname(dimElt, dimElt.get("dimension"))
+                            dimConcept = val.modelXbrl.qnameConcepts.get(dimQname)
+                            if dimQname and (dimConcept is None or (not dimConcept.isExplicitDimension if dim == "explicit" else not dimConcept.isTypedDimension)):
+                                val.modelXbrl.error(badUsageErr,
+                                    _("RuleAxis %(xlinkLabel)s dimension attribute %(dimension)s on the %(dimensionType)s dimension rule contains a QName that does not identify an (dimensionType)s dimension."),
+                                    modelObject=axis, xlinkLabel=axis.xlinkLabel, dimensionType=dim, dimension=dimQname)
+                            memQname = axis.evaluateRule(None, dimQname)
+                            if dimConcept.isExplicitDimension and memQname is not None and memQname not in val.modelXbrl.qnameConcepts:  
+                                val.modelXbrl.info("table:info",
+                                                   _("RuleAxis rule %(xlinkLabel)s contains a member QName %(memQname)s which is not in the DTS."),
+                                                   modelObject=axis, xlinkLabel=axis.xlinkLabel, memQname=memQname)
+                    
+                    # check aspect model expectations
+                    if table.aspectModel == "non-dimensional":
+                        unexpectedElts = XmlUtil.descendants(axis, XbrlConst.formula, ("explicitDimension", "typedDimension"))
+                        if unexpectedElts:
+                            val.modelXbrl.error("xbrlte:axisAspectModelMismatch",
+                                _("RuleAxis %(xlinkLabel)s aspect model, %(aspectModel)s, includes an rule for aspect not defined in this aspect model: %(undefinedAspects)s"),
+                                modelObject=axis, xlinkLabel=axis.xlinkLabel, aspectModel=table.aspectModel, undefinedAspects=", ".join([elt.localName for elt in unexpectedElts]))
+            
+                    # check source qnames
+                    for sourceElt in ([axis] + 
+                                     XmlUtil.descendants(axis, XbrlConst.formula, "*", "source","*")):
+                        if sourceElt.get("source") is not None:
+                            qnSource = qname(sourceElt, sourceElt.get("source"), noPrefixIsNoNamespace=True)
+                            val.modelXbrl.info("table:info",
+                                               _("RuleAxis rule %(xlinkLabel)s contains a @source attribute %(qnSource)s which is not applicable to table rule axes."),
+                                               modelObject=axis, xlinkLabel=axis.xlinkLabel, qnSource=qnSource)
+                    conceptQname = axis.evaluateRule(None, Aspect.CONCEPT)
+                    if conceptQname and conceptQname not in val.modelXbrl.qnameConcepts:  
+                        val.modelXbrl.info("table:info",
+                                           _("RuleAxis rule %(xlinkLabel)s contains a concept QName %(conceptQname)s which is not in the DTS."),
+                                           modelObject=axis, xlinkLabel=axis.xlinkLabel, conceptQname=conceptQname)
+                        
+                elif isinstance(axis, ModelRelationshipDefinitionNode):
+                    for qnameAttr in ("relationshipSourceQname", "arcQname", "linkQname", "dimensionQname"):
+                        eltQname = axis.get(qnameAttr)
+                        if eltQname and eltQname not in val.modelXbrl.qnameConcepts:  
+                            val.modelXbrl.info("table:info",
+                                               _("%(axis)s rule %(xlinkLabel)s contains a %(qnameAttr)s QName %(qname)s which is not in the DTS."),
+                                               modelObject=axis, axis=axis.localName.title(), xlinkLabel=axis.xlinkLabel, 
+                                               qnameAttr=qnameAttr, qname=eltQname)
+                checkDefinitionNodeRules(val, table, axis, (XbrlConst.tableBreakdownTree, XbrlConst.tableDefinitionNodeSubtree201301, XbrlConst.tableAxisSubtree2011), xpathContext)                    
+
 def checkValidationMessages(val, modelVariableSet):
     for msgRelationship in (XbrlConst.assertionSatisfiedMessage, XbrlConst.assertionUnsatisfiedMessage):
         for modelRel in val.modelXbrl.relationshipSet(msgRelationship).fromModelObject(modelVariableSet):
-            message = modelRel.toModelObject
-            if not hasattr(message,"expressions"):
-                formatString = []
-                expressions = []
-                bracketNesting = 0
-                skipTo = None
-                expressionIndex = 0
-                expression = None
+            checkMessageExpressions(val, modelRel.toModelObject)
+            
+def checkMessageExpressions(val, message):
+    if isinstance(message, ModelMessage) and not hasattr(message,"expressions"):
+        formatString = []
+        expressions = []
+        bracketNesting = 0
+        skipTo = None
+        expressionIndex = 0
+        expression = None
+        lastC = None
+        for c in message.text:
+            if skipTo:
+                if c == skipTo:
+                    skipTo = None
+            if expression is not None and c in ('\'', '"'):
+                skipTo = c
+            elif lastC == c and c in ('{','}'):
                 lastC = None
-                for c in message.text:
-                    if skipTo:
-                        if c == skipTo:
-                            skipTo = None
-                    if expression is not None and c in ('\'', '"'):
-                        skipTo = c
-                    elif lastC == c and c in ('{','}'):
-                        lastC = None
-                    elif lastC == '{': 
-                        bracketNesting += 1
-                        expression = []
-                        lastC = None
-                    elif c == '}' and expression is not None: 
-                        expressions.append( ''.join(expression).strip() )
-                        expression = None
-                        formatString.append( "0[{0}]".format(expressionIndex) )
-                        expressionIndex += 1
-                        lastC = c
-                    elif lastC == '}':
-                        bracketNesting -= 1
-                        lastC = None
-                    else:
-                        lastC = c
-                        
-                    if expression is not None: expression.append(c)
-                    else: formatString.append(c)
-                    
-                if lastC == '}':
-                    bracketNesting -= 1
-                if bracketNesting:
-                    val.modelXbrl.error("xbrlmsge:missingLeftCurlyBracketInMessage" if bracketNesting < 0 else "xbrlmsge:missingRightCurlyBracketInMessage",
-                        _("Message %(xlinkLabel)s: unbalanced %(character)s character(s) in: %(text)s"),
-                        modelObject=message, xlinkLabel=message.xlinkLabel, 
-                        character='{' if bracketNesting < 0 else '}', 
-                        text=message.text)
-                else:
-                    message.expressions = expressions
-                    message.formatString = ''.join( formatString )
+            elif lastC == '{': 
+                bracketNesting += 1
+                expression = []
+                lastC = None
+            elif c == '}' and expression is not None: 
+                expressions.append( ''.join(expression).strip() )
+                expression = None
+                formatString.append( "0[{0}]".format(expressionIndex) )
+                expressionIndex += 1
+                lastC = c
+            elif lastC == '}':
+                bracketNesting -= 1
+                lastC = None
+            else:
+                lastC = c
+                
+            if expression is not None: expression.append(c)
+            else: formatString.append(c)
+            
+        if lastC == '}':
+            bracketNesting -= 1
+        if bracketNesting:
+            val.modelXbrl.error("xbrlmsge:missingLeftCurlyBracketInMessage" if bracketNesting < 0 else "xbrlmsge:missingRightCurlyBracketInMessage",
+                _("Message %(xlinkLabel)s: unbalanced %(character)s character(s) in: %(text)s"),
+                modelObject=message, xlinkLabel=message.xlinkLabel, 
+                character='{' if bracketNesting < 0 else '}', 
+                text=message.text)
+        else:
+            message.expressions = expressions
+            message.formatString = ''.join( formatString )
 
 def checkValidationMessageVariables(val, modelVariableSet, varNames):
     if isinstance(modelVariableSet, ModelConsistencyAssertion):
