@@ -168,9 +168,25 @@ def evaluateVar(xpCtx, varSet, varIndex, cachedFilteredFacts, uncoveredAspectFac
                 else: varSet.countNotSatisfied += 1
                 msg = varSet.message(result)
                 if msg is not None:
-                    xpCtx.modelXbrl.info("message:" + (varSet.id or varSet.xlinkLabel or _("unlabeled variableSet")),
-                        msg.evaluate(xpCtx),
-                        modelObject=varSet)
+                    # The following code needs to be retained through merges from
+                    # arelle/master. Take care if this region is conflicting in a merge!
+                    ### BEGIN PATCH: business-rules-logging changes
+                    ## CHANGED:
+                    xpCtx.modelXbrl.info("assertion:value:" + (varSet.id or varSet.xlinkLabel or _("unlabeled variableSet")),
+                                         msg.evaluate(xpCtx),
+                                         modelObject=[(var, xpCtx.inScopeVars[var]) for var in xpCtx.inScopeVars], 
+                                         results=result)
+                else:
+                    xpCtx.modelXbrl.info("assertion:value:" +  (varSet.id or varSet.xlinkLabel or _("unlabeled variableSet")),
+                                         "Assertion Result: %s" % result,
+                                         modelObject=[(var, xpCtx.inScopeVars[var]) for var in xpCtx.inScopeVars], 
+                                         results=result)
+                    ## REMOVED:
+                    #- xpCtx.modelXbrl.info("message:" + (varSet.id or varSet.xlinkLabel or _("unlabeled variableSet")),
+                    #-     msg.evaluate(xpCtx),
+                    #-     modelObject=varSet)
+                    ### END PATCH: business-rules-logging changes
+                    
                 traceOf = "Value Assertion"
             if xpCtx.formulaOptions.traceVariableSetExpressionResult:
                 xpCtx.modelXbrl.info("formula:trace",

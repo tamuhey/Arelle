@@ -22,7 +22,7 @@ AUTO_LOCATE_ELEMENT = '771407c0-1d0c-11e1-be5e-028037ec0200' # singleton meaning
 DEFAULT = sys.intern(_STR_8BIT("default"))
 NONDEFAULT = sys.intern(_STR_8BIT("non-default"))
 DEFAULTorNONDEFAULT = sys.intern(_STR_8BIT("default-or-non-default"))
-    
+
 
 def load(modelManager, url, nextaction=None, base=None, useFileSource=None, errorCaptureLevel=None):
     """Each loaded instance, DTS, testcase, testsuite, versioning report, or RSS feed, is represented by an 
@@ -66,7 +66,7 @@ def load(modelManager, url, nextaction=None, base=None, useFileSource=None, erro
             modelDocument = modelDocuments.pop()
             modelDocumentsSchemaLocated.add(modelDocument)
             modelDocument.loadSchemalocatedSchemas()
-        
+
     #from arelle import XmlValidate
     #uncomment for trial use of lxml xml schema validation of entry document
     #XmlValidate.xmlValidate(modelXbrl.modelDocument)
@@ -86,7 +86,7 @@ def create(modelManager, newDocumentType=None, url=None, schemaRefs=None, create
             if isEntry:
                 del modelXbrl.entryLoadingUrl
     return modelXbrl
-    
+
 class ModelXbrl:
     """
     .. class:: ModelXbrl(modelManager)
@@ -223,11 +223,11 @@ class ModelXbrl:
         Logger for modelXbrl
 
     """
-    
+
     def __init__(self, modelManager, errorCaptureLevel=None):
         self.modelManager = modelManager
         self.init(errorCaptureLevel=errorCaptureLevel)
-        
+
     def init(self, keepViews=False, errorCaptureLevel=None):
         self.uuid = uuid.uuid1().urn
         self.namespaceDocs = defaultdict(list)
@@ -287,14 +287,14 @@ class ModelXbrl:
             self.__dict__.clear() # dereference everything before closing document
             if modelDocument:
                 modelDocument.close(urlDocs=urlDocs)
-            
+
     @property
     def isClosed(self):
         """
         :returns:  bool -- True if closed (python object has deferenced and deleted all attributes after closing)
         """
         return not bool(self.__dict__)  # closed when dict is empty
-            
+
     def reload(self,nextaction,reloadCache=False):
         """Reloads all model objects from their original entry point URL, preserving any open views (which are reloaded).
         
@@ -308,7 +308,7 @@ class ModelXbrl:
         self.modelDocument = ModelDocument.load(self, self.fileSource.url, isEntry=True, reloadCache=reloadCache)
         self.modelManager.showStatus(_("xbrl loading finished, {0}...").format(nextaction),5000)
         self.modelManager.reloadViews(self)
-            
+
     def closeViews(self):
         """Close views associated with this modelXbrl
         """
@@ -316,7 +316,7 @@ class ModelXbrl:
             for view in range(len(self.views)):
                 if len(self.views) > 0:
                     self.views[0].close()
-        
+
     def relationshipSet(self, arcrole, linkrole=None, linkqname=None, arcqname=None, includeProhibits=False):
         """Returns a relationship set matching specified parameters (only arcrole is required).
         
@@ -339,19 +339,19 @@ class ModelXbrl:
         if key not in self.relationshipSets:
             ModelRelationshipSet.create(self, arcrole, linkrole, linkqname, arcqname, includeProhibits)
         return self.relationshipSets[key]
-    
+
     def baseSetModelLink(self, linkElement):
         for modelLink in self.baseSets[("XBRL-footnotes",None,None,None)]:
             if modelLink == linkElement:
                 return modelLink
         return None
-    
+
     def roleTypeDefinition(self, roleURI):
         modelRoles = self.roleTypes.get(roleURI, ())
         if modelRoles:
             return modelRoles[0].definition or roleURI
         return roleURI
-    
+
     def matchSubstitutionGroup(self, elementQname, subsGrpMatchTable):
         """Resolve a subsitutionGroup for the elementQname from the match table
         
@@ -374,7 +374,7 @@ class ModelXbrl:
                     return subsGrpMatchTable[subsGrpQname]
                 subsGrpMdlObj = subsGrpMdlObj.substitutionGroup
         return subsGrpMatchTable.get(None)
-    
+
     def isInSubstitutionGroup(self, elementQname, subsGrpQnames):
         """Determine if element is in substitution group(s)
         
@@ -387,8 +387,8 @@ class ModelXbrl:
         :returns: bool -- True if element is in any substitution group
         """
         return self.matchSubstitutionGroup(elementQname, {
-                  qn:(qn is not None) for qn in (subsGrpQnames if hasattr(subsGrpQnames, '__iter__') else (subsGrpQnames,)) + (None,)})
-    
+        qn:(qn is not None) for qn in (subsGrpQnames if hasattr(subsGrpQnames, '__iter__') else (subsGrpQnames,)) + (None,)})
+
     def createInstance(self, url=None):
         """Creates an instance document for a DTS which didn't have an instance document, such as
         to create a new instance for a DTS which was loaded from a taxonomy or linkbase entry point.
@@ -415,7 +415,7 @@ class ModelXbrl:
         for view in self.views:
             if isinstance(view, ViewWinDTS.ViewDTS):
                 self.modelManager.cntlr.uiThreadQueue.put((view.view, []))
-                
+
     def saveInstance(self, overrideFilepath=None):
         """Saves current instance document file.
         
@@ -424,7 +424,7 @@ class ModelXbrl:
         self.modelDocument.save(overrideFilepath)
         with open( (overrideFilepath or self.modelDocument.filepath), "w", encoding='utf-8') as fh:
             XmlUtil.writexml(fh, self.modelDocument.xmlDocument, encoding="utf-8")
-    
+
     def matchContext(self, entityIdentScheme, entityIdentValue, periodType, periodStart, periodEndInstant, dims, segOCCs, scenOCCs):
         """Finds matching context, by aspects, as in formula usage, if any
         
@@ -456,20 +456,20 @@ class ModelXbrl:
                 ((c.isInstantPeriod and periodType == "instant" and dateUnionEqual(c.instantDatetime, periodEndInstant, instantEndDate=True)) or
                  (c.isStartEndPeriod and periodType == "duration" and dateUnionEqual(c.startDatetime, periodStart) and dateUnionEqual(c.endDatetime, periodEndInstant, instantEndDate=True)) or
                  (c.isForeverPeriod and periodType == "forever")) and
-                 # dimensions match if dimensional model
-                 (dims is None or (
+                # dimensions match if dimensional model
+                (dims is None or (
                     (c.qnameDims.keys() == dims.keys()) and
-                        all([cDim.isEqualTo(dims[cDimQn]) for cDimQn, cDim in c.qnameDims.items()]))) and
-                 # OCCs match for either dimensional or non-dimensional modle
-                 all(
-                   all([sEqual(self, cOCCs[i], mOCCs[i]) for i in range(len(mOCCs))])
-                     if len(cOCCs) == len(mOCCs) else False
+                    all([cDim.isEqualTo(dims[cDimQn]) for cDimQn, cDim in c.qnameDims.items()]))) and
+                # OCCs match for either dimensional or non-dimensional modle
+                all(
+                    all([sEqual(self, cOCCs[i], mOCCs[i]) for i in range(len(mOCCs))])
+                    if len(cOCCs) == len(mOCCs) else False
                         for cOCCs,mOCCs in ((c.nonDimValues(segAspect),segOCCs),
                                             (c.nonDimValues(scenAspect),scenOCCs)))
                 ):
-                    return c
+                return c
         return None
-                 
+
     def createContext(self, entityIdentScheme, entityIdentValue, periodType, periodStart, periodEndInstant, priItem, dims, segOCCs, scenOCCs,
                       afterSibling=None, beforeSibling=None, id=None):
         """Creates a new ModelContext and validates (integrates into modelDocument object model).
@@ -503,22 +503,22 @@ class ModelXbrl:
             afterSibling = XmlUtil.lastChild(xbrlElt, XbrlConst.xbrli, ("schemaLocation", "roleType", "arcroleType", "context"))
         cntxId = id if id else 'c-{0:02n}'.format( len(self.contexts) + 1)
         newCntxElt = XmlUtil.addChild(xbrlElt, XbrlConst.xbrli, "context", attributes=("id", cntxId),
-                                      afterSibling=afterSibling, beforeSibling=beforeSibling)
+            afterSibling=afterSibling, beforeSibling=beforeSibling)
         entityElt = XmlUtil.addChild(newCntxElt, XbrlConst.xbrli, "entity")
         XmlUtil.addChild(entityElt, XbrlConst.xbrli, "identifier",
-                            attributes=("scheme", entityIdentScheme),
-                            text=entityIdentValue)
+            attributes=("scheme", entityIdentScheme),
+            text=entityIdentValue)
         periodElt = XmlUtil.addChild(newCntxElt, XbrlConst.xbrli, "period")
         if periodType == "forever":
             XmlUtil.addChild(periodElt, XbrlConst.xbrli, "forever")
         elif periodType == "instant":
-            XmlUtil.addChild(periodElt, XbrlConst.xbrli, "instant", 
-                             text=XmlUtil.dateunionValue(periodEndInstant, subtractOneDay=True))
+            XmlUtil.addChild(periodElt, XbrlConst.xbrli, "instant",
+                text=XmlUtil.dateunionValue(periodEndInstant, subtractOneDay=True))
         elif periodType == "duration":
-            XmlUtil.addChild(periodElt, XbrlConst.xbrli, "startDate", 
-                             text=XmlUtil.dateunionValue(periodStart))
-            XmlUtil.addChild(periodElt, XbrlConst.xbrli, "endDate", 
-                             text=XmlUtil.dateunionValue(periodEndInstant, subtractOneDay=True))
+            XmlUtil.addChild(periodElt, XbrlConst.xbrli, "startDate",
+                text=XmlUtil.dateunionValue(periodStart))
+            XmlUtil.addChild(periodElt, XbrlConst.xbrli, "endDate",
+                text=XmlUtil.dateunionValue(periodEndInstant, subtractOneDay=True))
         segmentElt = None
         scenarioElt = None
         from arelle.ModelInstanceObject import ModelDimensionValue
@@ -548,43 +548,43 @@ class ModelXbrl:
                     dimMemberQname = None
                     contextEltName = None
                 if contextEltName == "segment":
-                    if segmentElt is None: 
+                    if segmentElt is None:
                         segmentElt = XmlUtil.addChild(entityElt, XbrlConst.xbrli, "segment")
                     contextElt = segmentElt
                 elif contextEltName == "scenario":
-                    if scenarioElt is None: 
+                    if scenarioElt is None:
                         scenarioElt = XmlUtil.addChild(newCntxElt, XbrlConst.xbrli, "scenario")
                     contextElt = scenarioElt
                 else:
                     self.info("arelleLinfo",
-                        _("Create context, %(dimension)s, cannot determine context element, either no all relationship or validation issue"), 
+                        _("Create context, %(dimension)s, cannot determine context element, either no all relationship or validation issue"),
                         modelObject=self, dimension=dimQname),
                     continue
                 dimConcept = self.qnameConcepts[dimQname]
                 dimAttr = ("dimension", XmlUtil.addQnameValue(xbrlElt, dimConcept.qname))
                 if dimConcept.isTypedDimension:
-                    dimElt = XmlUtil.addChild(contextElt, XbrlConst.xbrldi, "xbrldi:typedMember", 
-                                              attributes=dimAttr)
+                    dimElt = XmlUtil.addChild(contextElt, XbrlConst.xbrldi, "xbrldi:typedMember",
+                        attributes=dimAttr)
                     if isinstance(dimValue, (ModelDimensionValue, DimValuePrototype)) and dimValue.isTyped:
-                        XmlUtil.copyNodes(dimElt, dimValue.typedMember) 
+                        XmlUtil.copyNodes(dimElt, dimValue.typedMember)
                 elif dimMemberQname:
                     dimElt = XmlUtil.addChild(contextElt, XbrlConst.xbrldi, "xbrldi:explicitMember",
-                                              attributes=dimAttr,
-                                              text=XmlUtil.addQnameValue(xbrlElt, dimMemberQname))
+                        attributes=dimAttr,
+                        text=XmlUtil.addQnameValue(xbrlElt, dimMemberQname))
         if segOCCs:
-            if segmentElt is None: 
+            if segmentElt is None:
                 segmentElt = XmlUtil.addChild(entityElt, XbrlConst.xbrli, "segment")
             XmlUtil.copyNodes(segmentElt, segOCCs)
         if scenOCCs:
-            if scenarioElt is None: 
+            if scenarioElt is None:
                 scenarioElt = XmlUtil.addChild(newCntxElt, XbrlConst.xbrli, "scenario")
             XmlUtil.copyNodes(scenarioElt, scenOCCs)
-                
+
         self.modelDocument.contextDiscover(newCntxElt)
         XmlValidate.validate(self, newCntxElt)
         return newCntxElt
-        
-        
+
+
     def matchUnit(self, multiplyBy, divideBy):
         """Finds matching unit, by measures, as in formula usage, if any
         
@@ -621,7 +621,7 @@ class ModelXbrl:
             afterSibling = XmlUtil.lastChild(xbrlElt, XbrlConst.xbrli, ("schemaLocation", "roleType", "arcroleType", "context", "unit"))
         unitId = id if id else 'u-{0:02n}'.format( len(self.units) + 1)
         newUnitElt = XmlUtil.addChild(xbrlElt, XbrlConst.xbrli, "unit", attributes=("id", unitId),
-                                      afterSibling=afterSibling, beforeSibling=beforeSibling)
+            afterSibling=afterSibling, beforeSibling=beforeSibling)
         if len(divideBy) == 0:
             for multiply in multiplyBy:
                 XmlUtil.addChild(newUnitElt, XbrlConst.xbrli, "measure", text=XmlUtil.addQnameValue(xbrlElt, multiply))
@@ -636,7 +636,7 @@ class ModelXbrl:
         self.modelDocument.unitDiscover(newUnitElt)
         XmlValidate.validate(self, newUnitElt)
         return newUnitElt
-    
+
     @property
     def nonNilFactsInInstance(self): # indexed by fact (concept) qname
         """Facts in the instance which are not nil, cached
@@ -648,7 +648,7 @@ class ModelXbrl:
         except AttributeError:
             self._nonNilFactsInInstance = set(f for f in self.factsInInstance if not f.isNil)
             return self._nonNilFactsInInstance
-        
+
     @property
     def factsByQname(self): # indexed by fact (concept) qname
         """Facts in the instance indexed by their QName, cached
@@ -661,7 +661,7 @@ class ModelXbrl:
             self._factsByQname = fbqn = defaultdict(set)
             for f in self.factsInInstance: fbqn[f.qname].add(f)
             return fbqn
-        
+
     def factsByDatatype(self, notStrict, typeQname): # indexed by fact (concept) qname
         """Facts in the instance indexed by data type QName, cached as types are requested
 
@@ -681,7 +681,7 @@ class ModelXbrl:
                 if c.typeQname == typeQname or (notStrict and c.type.isDerivedFrom(typeQname)):
                     fbdt.add(f)
             return fbdt
-        
+
     def factsByPeriodType(self, periodType): # indexed by fact (concept) qname
         """Facts in the instance indexed by periodType, cached
 
@@ -700,7 +700,7 @@ class ModelXbrl:
             return self.factsByPeriodType(periodType)
         except KeyError:
             return set()  # no facts for this period type
-        
+
     def factsByDimMemQname(self, dimQname, memQname=None): # indexed by fact (concept) qname
         """Facts in the instance indexed by their Dimension  and Member QName, cached
         
@@ -716,7 +716,7 @@ class ModelXbrl:
             return self.factsByDimMemQname(dimQname, memQname)
         except KeyError:
             self._factsByDimQname[dimQname] = fbdq = defaultdict(set)
-            for fact in self.factsInInstance: 
+            for fact in self.factsInInstance:
                 if fact.isItem:
                     dimValue = fact.context.dimValue(dimQname)
                     if isinstance(dimValue, ModelValue.QName):  # explicit dimension default value
@@ -730,7 +730,7 @@ class ModelXbrl:
                         if dimValue.isExplicit:
                             fbdq[dimValue.memberQname].add(fact) # set of facts that have this dim and mem
             return fbdq[memQname]
-        
+
     def matchFact(self, otherFact, unmatchedFactsStack=None):
         """Finds matching fact, by XBRL 2.1 duplicate definition (if tuple), or by
         QName and VEquality (if an item), lang and accuracy equality, as in formula and test case usage
@@ -752,7 +752,7 @@ class ModelXbrl:
                         fact.precision == otherFact.precision):
                         return fact
         return None
-            
+
     def createFact(self, conceptQname, attributes=None, text=None, parent=None, afterSibling=None, beforeSibling=None):
         """Creates new fact, as in formula output instance creation, and validates into object model
         
@@ -771,11 +771,11 @@ class ModelXbrl:
         """
         if parent is None: parent = self.modelDocument.xmlRootElement
         newFact = XmlUtil.addChild(parent, conceptQname, attributes=attributes, text=text,
-                                   afterSibling=afterSibling, beforeSibling=beforeSibling)
+            afterSibling=afterSibling, beforeSibling=beforeSibling)
         self.modelDocument.factDiscover(newFact, parentElement=parent)
         XmlValidate.validate(self, newFact)
-        return newFact    
-        
+        return newFact
+
     def modelObject(self, objectId):
         """Finds a model object by an ordinal ID which may be buried in a tkinter view id string (e.g., 'somedesignation_ordinalnumber').
         
@@ -785,12 +785,12 @@ class ModelXbrl:
         """
         if isinstance(objectId, _INT_TYPES):  # may be long or short in 2.7
             return self.modelObjects[objectId]
-        # assume it is a string with ID in a tokenized representation, like xyz_33
+            # assume it is a string with ID in a tokenized representation, like xyz_33
         try:
             return self.modelObjects[_INT(objectId.rpartition("_")[2])]
         except (IndexError, ValueError):
             return None
-    
+
     # UI thread viewModelObject
     def viewModelObject(self, objectId):
         """Finds model object, if any, and synchronizes any views displaying it to bring the model object into scrollable view region and highlight it
@@ -808,8 +808,8 @@ class ModelXbrl:
                     view.viewModelObject(modelObject)
         except (IndexError, ValueError, AttributeError)as err:
             self.modelManager.addToLog(_("Exception viewing properties {0} {1} at {2}").format(
-                            modelObject,
-                            err, traceback.format_tb(sys.exc_info()[2])))
+                modelObject,
+                err, traceback.format_tb(sys.exc_info()[2])))
 
     def logArguments(self, codes, msg, codedArgs):
         """ Prepares arguments for logger function as per info() below.
@@ -821,7 +821,7 @@ class ModelXbrl:
             # deref objects in properties
             return [(p[0],str(p[1])) if len(p) == 2 else (p[0],str(p[1]),propValues(p[2]))
                     for p in properties if 2 <= len(p) <= 3]
-        # determine logCode
+            # determine logCode
         messageCode = None
         for argCode in codes if isinstance(codes,tuple) else (codes,):
             if (isinstance(argCode, ModelValue.QName) or
@@ -832,7 +832,7 @@ class ModelXbrl:
                 argCode[0:3] not in ("EFM", "GFM", "HMR", "SBR")):
                 messageCode = argCode
                 break
-        
+
         # determine message and extra arguments
         fmtArgs = {}
         extras = {"messageCode":messageCode}
@@ -868,14 +868,38 @@ class ModelXbrl:
                                     ref["properties"] = propValues(arg.propertyView)
                                 except AttributeError:
                                     pass # is a default properties entry appropriate or needed?
+                                    # PATCHED CODE! Take care if this region conflicts during a merge!
+                                    ### BEGIN PATCH: business-rules logging changes
+                        elif isinstance(arg, (tuple,list)):
+                            name = arg[0]
+                            arg = arg[1]
+                            if isinstance(arg, ModelObject):
+                                ref["variable"] = name
+                                ref["href"] = file + "#" + XmlUtil.elementFragmentIdentifier(arg)
+                                ref["sourceLine"] = arg.sourceline
+                                ref["objectId"] = arg.objectId()
+                                if logHrefObjectProperties:
+                                    try:
+                                        ref["properties"] = propValues(arg.propertyView)
+                                    except AttributeError:
+                                        pass # is a default properties entry appropriate or needed?
+                            else:
+                                ref = None
                         else:
                             ref["href"] = file
                             try:
                                 ref["sourceLine"] = arg.sourceline
                             except AttributeError:
                                 pass # arg may not have sourceline, ignore if so
-                        refs.append(ref)
+
+                        if ref is not None:
+                            refs.append(ref)
                 extras["refs"] = refs
+            elif argName == "results":
+                extras["results"] = argValue
+            elif argName == "assertionId":
+                extras["assertionId"] = argValue
+            ### END PATCH: business-rule logging changes
             elif argName == "sourceFileLine":
                 # sourceFileLines is pairs of file and line numbers, e.g., ((file,line),(file2,line2),...)
                 ref = {}
@@ -926,20 +950,20 @@ class ModelXbrl:
                 except:
                     file = ""
             extras["refs"] = [{"href": file}]
-        return (messageCode, 
-                (msg, fmtArgs) if fmtArgs else (msg,), 
+        return (messageCode,
+                (msg, fmtArgs) if fmtArgs else (msg,),
                 extras)
-        
+
     def info(self, codes, msg, **args):
         """Same as error(), but as info
         """
         self.log('INFO', codes, msg, **args)
-                    
+
     def warning(self, codes, msg, **args):
         """Same as error(), but as warning, and no error code saved for Validate
         """
         self.log('WARNING', codes, msg, **args)
-                    
+
     def log(self, level, codes, msg, **args):
         """Same as error(), but level passed in as argument
         """
@@ -955,7 +979,7 @@ class ModelXbrl:
             if numericLevel >= self.errorCaptureLevel:
                 self.errors.append(messageCode)
             logger.log(numericLevel, *logArgs, exc_info=args.get("exc_info"), extra=extras)
-                    
+
     def error(self, codes, msg, **args):
         """Logs a message as info, by code, logging-system message text (using %(name)s named arguments 
         to compose string by locale language), resolving model object references (such as qname), 
@@ -981,20 +1005,20 @@ class ModelXbrl:
         """Same as error(), but as exception
         """
         self.log('CRITICAL', codes, msg, **args)
-        
+
     def logProfileStats(self):
         """Logs profile stats that were collected
         """
         timeTotal = format_string(self.modelManager.locale, _("%.3f secs"), self.profileStats.get("total", (0,0,0))[1])
         timeEFM = format_string(self.modelManager.locale, _("%.3f secs"), self.profileStats.get("validateEFM", (0,0,0))[1])
         self.info("info:profileStats",
-                _("Profile statistics \n") +
-                ' \n'.join(format_string(self.modelManager.locale, _("%s %.3f secs, %.0fK"), (statName, statValue[1], statValue[2]), grouping=True)
-                           for statName, statValue in sorted(self.profileStats.items(), key=lambda item: item[1])) +
-                " \n", # put instance reference on fresh line in traces
-                modelObject=self.modelXbrl.modelDocument, profileStats=self.profileStats,
-                timeTotal=timeTotal, timeEFM=timeEFM)
-    
+            _("Profile statistics \n") +
+            ' \n'.join(format_string(self.modelManager.locale, _("%s %.3f secs, %.0fK"), (statName, statValue[1], statValue[2]), grouping=True)
+                for statName, statValue in sorted(self.profileStats.items(), key=lambda item: item[1])) +
+            " \n", # put instance reference on fresh line in traces
+            modelObject=self.modelXbrl.modelDocument, profileStats=self.profileStats,
+            timeTotal=timeTotal, timeEFM=timeEFM)
+
     def profileStat(self, name=None, stat=None):
         '''
         order 1xx - load, import, setup, etc
@@ -1017,7 +1041,7 @@ class ModelXbrl:
                 pass
             if stat is None:
                 self._startedTimeStat = time.time()
-        
+
     def profileActivity(self, activityCompleted=None, minTimeToShow=0):
         """Used to provide interactive GUI messages of long-running processes.
         
@@ -1042,21 +1066,21 @@ class ModelXbrl:
 
     def saveDTSpackage(self):
         """Contributed program to save DTS package as a zip file.  Refactored into a plug-in (and may be removed from main code).
-        """ 
+        """
         if self.fileSource.isArchive:
             return
-        from zipfile import ZipFile 
-        import os 
-        entryFilename = self.fileSource.url 
-        pkgFilename = entryFilename + ".zip" 
+        from zipfile import ZipFile
+        import os
+        entryFilename = self.fileSource.url
+        pkgFilename = entryFilename + ".zip"
         with ZipFile(pkgFilename, 'w') as zip:
             numFiles = 0
             for fileUri in sorted(self.urlDocs.keys()): 
                 if not isHttpUrl(fileUri): 
                     numFiles += 1
                     # this has to be a relative path because the hrefs will break
-                    zip.write(fileUri, os.path.basename(fileUri)) 
+                    zip.write(fileUri, os.path.basename(fileUri))
         self.info("info",
-                  _("DTS of %(entryFile)s has %(numberOfFiles)s files packaged into %(packageOutputFile)s"), 
-                modelObject=self,
-                entryFile=os.path.basename(entryFilename), packageOutputFile=pkgFilename, numberOfFiles=numFiles)
+            _("DTS of %(entryFile)s has %(numberOfFiles)s files packaged into %(packageOutputFile)s"),
+            modelObject=self,
+            entryFile=os.path.basename(entryFilename), packageOutputFile=pkgFilename, numberOfFiles=numFiles)

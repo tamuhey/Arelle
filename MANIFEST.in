@@ -5,4 +5,5 @@ recursive-include arelle *.xbm
 recursive-include arelle *.xsd
 recursive-include arelle *.xml
 recursive-include arelle *.pot
+include arelle/config/*
 

@@ -139,7 +139,7 @@ class ValidateXbrlCalcs:
                                                     linkroleDefinition=self.modelXbrl.roleTypeDefinition(ELR),
                                                     reportedSum=Locale.format_decimal(self.modelXbrl.locale, roundedSum, 1, max(d,0)),
                                                     computedSum=Locale.format_decimal(self.modelXbrl.locale, roundedItemsSum, 1, max(d,0)), 
-                                                    contextID=fact.context.id, unitID=fact.unit.id)
+                                                    contextID=(fact.context and fact.context.id), unitID=(fact.unit and fact.unit.id))
                             boundSummationItems.clear() # dereference facts in list
                     elif arcrole == XbrlConst.essenceAlias:
                         for modelRel in relsSet.modelRelationships:
