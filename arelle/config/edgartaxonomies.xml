@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Erxl xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"  xsi:noNamespaceSchemaLocation="erxl.xsd">
+<Erxl xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="erxl.xsd">
 <Loc>
 <Family>BASE</Family>
 <Version>2010</Version>
@@ -97,6 +97,7 @@
 <FileTypeName>Schema</FileTypeName>
 <Elements>0</Elements>
 <Namespace>http://www.xbrl.org/2006/ref</Namespace>
+<Prefix>ref</Prefix>
 </Loc>
 <Loc>
 <Family>BASE</Family>
@@ -106,6 +107,7 @@
 <FileTypeName>Schema</FileTypeName>
 <Elements>0</Elements>
 <Namespace>http://www.xbrl.org/2004/ref</Namespace>
+<Prefix>ref</Prefix>
 </Loc>
 <Loc>
 <Family>BASE</Family>
@@ -124,15 +126,6 @@
 <FileTypeName>Roles/Arcroles</FileTypeName>
 <Elements>0</Elements>
 <Namespace>http://www.xbrl.org/2009/arcrole/fact-explanatoryFact</Namespace>
-</Loc>
-<Loc>
-<Family>BASE</Family>
-<Version>2010</Version>
-<Href>http://www.xbrl.org/lrr/role/negated-2008-03-31.xsd</Href>
-<AttType>SCH</AttType>
-<FileTypeName>Roles/Arcroles</FileTypeName>
-<Elements>0</Elements>
-<Namespace>http://xbrl.us/us-gaap/negated/2008-03-31</Namespace>
 </Loc>
 <Loc>
 <Family>BASE</Family>
@@ -170,6 +163,7 @@
 <FileTypeName>Schema</FileTypeName>
 <Elements>1</Elements>
 <Namespace>http://xbrl.sec.gov/dei/2013-01-31</Namespace>
+<Prefix>dei</Prefix>
 </Loc>
 <Loc>
 <Family>US GAAP</Family>
@@ -179,6 +173,7 @@
 <FileTypeName>Schema</FileTypeName>
 <Elements>0</Elements>
 <Namespace>http://fasb.org/us-types/2013-01-31</Namespace>
+<Prefix>us-types</Prefix>
 </Loc>
 <Loc>
 <Family>US GAAP</Family>
@@ -217,6 +212,7 @@
 <FileTypeName>Schema</FileTypeName>
 <Elements>1</Elements>
 <Namespace>http://xbrl.sec.gov/invest/2013-01-31</Namespace>
+<Prefix>invest</Prefix>
 </Loc>
 <Loc>
 <Family>US GAAP</Family>
@@ -246,6 +242,7 @@
 <FileTypeName>Schema</FileTypeName>
 <Elements>1</Elements>
 <Namespace>http://xbrl.sec.gov/exch/2013-01-31</Namespace>
+<Prefix>exch</Prefix>
 </Loc>
 <Loc>
 <Family>US GAAP</Family>
@@ -332,6 +329,7 @@
 <FileTypeName>Schema</FileTypeName>
 <Elements>0</Elements>
 <Namespace>http://fasb.org/us-types/2012-01-31</Namespace>
+<Prefix>us-types</Prefix>
 </Loc>
 <Loc>
 <Family>US GAAP</Family>
@@ -580,6 +578,7 @@
 <FileTypeName>Schema</FileTypeName>
 <Elements>0</Elements>
 <Namespace>http://xbrl.us/us-types/2009-01-31</Namespace>
+<Prefix>us-types</Prefix>
 </Loc>
 <Loc>
 <Family>RR</Family>
@@ -695,6 +694,7 @@
 <FileTypeName>Schema</FileTypeName>
 <Elements>1</Elements>
 <Namespace>http://xbrl.sec.gov/invest/2013-01-31</Namespace>
+<Prefix>invest</Prefix>
 </Loc>
 <Loc>
 <Family>US GAAP</Family>
@@ -714,6 +714,7 @@
 <FileTypeName>Schema</FileTypeName>
 <Elements>1</Elements>
 <Namespace>http://xbrl.sec.gov/dei/2013-01-31</Namespace>
+<Prefix>dei</Prefix>
 </Loc>
 <Loc>
 <Family>US GAAP</Family>
@@ -728,12 +729,31 @@
 <Loc>
 <Family>US GAAP</Family>
 <Version>2013 IM</Version>
+<Href>http://xbrl.fasb.org/us-gaap/2013/elts/us-types-2013-01-31.xsd</Href>
+<AttType>SCH</AttType>
+<FileTypeName>Schema</FileTypeName>
+<Elements>0</Elements>
+<Namespace>http://fasb.org/us-types/2013-01-31</Namespace>
+<Prefix>us-types</Prefix>
+</Loc>
+<Loc>
+<Family>US GAAP</Family>
+<Version>2013 IM</Version>
 <Href>http://www.xbrl.org/dtr/type/numeric-2009-12-16.xsd</Href>
 <AttType>SCH</AttType>
 <FileTypeName>Schema</FileTypeName>
 <Elements>0</Elements>
 <Namespace>http://www.xbrl.org/dtr/type/numeric</Namespace>
 <Prefix>num</Prefix>
+</Loc>
+<Loc>
+<Family>US GAAP</Family>
+<Version>2013 IM</Version>
+<Href>http://xbrl.fasb.org/us-gaap/2013/elts/us-roles-2013-01-31.xsd</Href>
+<AttType>SCH</AttType>
+<FileTypeName>Roles/Arcroles</FileTypeName>
+<Elements>0</Elements>
+<Namespace>http://fasb.org/us-roles/2013-01-31</Namespace>
 </Loc>
 <Loc>
 <Family>US GAAP</Family>
@@ -763,6 +783,7 @@
 <FileTypeName>Schema</FileTypeName>
 <Elements>1</Elements>
 <Namespace>http://xbrl.sec.gov/exch/2013-01-31</Namespace>
+<Prefix>exch</Prefix>
 </Loc>
 <Loc>
 <Family>US GAAP</Family>
@@ -958,7 +979,6 @@
 <Elements>0</Elements>
 <Namespace>http://www.xbrl.org/2009/arcrole/fact-explanatoryFact</Namespace>
 </Loc>
-<!-- 2011 rule set to act as a hold over until SEC stops supporting 2011 -->
 <Loc>
 <Family>US GAAP</Family>
 <Version>2011</Version>

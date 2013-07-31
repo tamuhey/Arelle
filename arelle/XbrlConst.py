@@ -116,6 +116,8 @@ standardReference = "http://www.xbrl.org/2003/role/reference"
 genStandardReference = "http://www.xbrl.org/2010/role/reference"
 periodStartLabel = "http://www.xbrl.org/2003/role/periodStartLabel"
 periodEndLabel = "http://www.xbrl.org/2003/role/periodEndLabel"
+verboseLabel = "http://www.xbrl.org/2003/role/verboseLabel"
+terseLabel = "http://www.xbrl.org/2003/role/terseLabel"
 conceptNameLabelRole = "XBRL-concept-name" # fake label role to show concept QName instead of label
 xlinkLinkbase = "http://www.w3.org/1999/xlink/properties/linkbase"
 
