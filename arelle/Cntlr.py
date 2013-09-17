@@ -9,7 +9,7 @@
    :synopsis: Common controller class to initialize for platform and setup common logger functions
 """
 from arelle import PythonUtil # define 2.x or 3.x string types
-import tempfile, os, io, sys, logging, gettext, json, re, subprocess
+import tempfile, os, io, sys, logging, gettext, json, re, subprocess, math
 from arelle import ModelManager
 from arelle.Locale import getLanguageCodes
 from arelle import PluginManager
@@ -78,6 +78,7 @@ class Cntlr:
         self.hasWin32gui = False
         self.hasGui = hasGui
         self.hasFileSystem = True # no file system on Google App Engine servers
+        self.systemWordSize = int(round(math.log(sys.maxsize, 2)) + 1) # e.g., 32 or 64
 
         self.moduleDir = os.path.dirname(__file__)
         # for python 3.2 remove __pycache__
@@ -330,8 +331,10 @@ class Cntlr:
             try:
                 print(message)
             except UnicodeEncodeError:
-                print(message.encode(sys.stdout.encoding, 'backslashreplace')
-                      .decode(sys.stdout.encoding, 'strict'))
+                # extra parentheses in print to allow for 3-to-2 conversion
+                print((message
+                       .encode(sys.stdout.encoding, 'backslashreplace')
+                       .decode(sys.stdout.encoding, 'strict')))
             
     def showStatus(self, message, clearAfter=None):
         """Dummy method for specialized controller classes to specialize, 
@@ -406,6 +409,21 @@ class Cntlr:
         :returns: tuple -- ('myusername','mypassword')
         """
         return ('myusername','mypassword')
+    
+    # default web authentication password
+    def internet_logon(self, url, quotedUrl, dialogCaption, dialogText):
+        """Web file retieval results in html that appears to require user logon,
+        if interactive allow the user to log on. 
+           
+        :url: The URL as requested (by an import, include, href, schemaLocation, ...)
+        :quotedUrl: The processed and retrievable URL
+        :dialogCaption: The dialog caption for the situation
+        :dialogText:  The dialog text for the situation at hand
+        :returns: string -- 'retry' if user logged on and file can be retried, 
+                            'cancel' to abandon retrieval
+                            'no' if the file is expected and valid contents (not a logon request)
+        """
+        return 'cancel'
     
     # if no text, then return what is on the clipboard, otherwise place text onto clipboard
     def clipboardData(self, text=None):
@@ -522,8 +540,10 @@ class LogToPrintHandler(logging.Handler):
         try:
             print(logEntry, file=file)
         except UnicodeEncodeError:
-            print(logEntry.encode(sys.stdout.encoding, 'backslashreplace')
-                  .decode(sys.stdout.encoding, 'strict'), 
+            # extra parentheses in print to allow for 3-to-2 conversion
+            print((logEntry
+                   .encode(sys.stdout.encoding, 'backslashreplace')
+                   .decode(sys.stdout.encoding, 'strict')), 
                   file=file)
 
 class LogHandlerWithXml(logging.Handler):        
@@ -582,8 +602,10 @@ class LogToXmlHandler(LogHandlerWithXml):
                 try:
                     print(logRecXml)
                 except UnicodeEncodeError:
-                    print(logRecXml.encode(sys.stdout.encoding, 'backslashreplace')
-                          .decode(sys.stdout.encoding, 'strict'))
+                    # extra parentheses in print to allow for 3-to-2 conversion
+                    print((logRecXml
+                           .encode(sys.stdout.encoding, 'backslashreplace')
+                           .decode(sys.stdout.encoding, 'strict')))
             print('</log>')
         else:
             print ("filename=" + self.filename)

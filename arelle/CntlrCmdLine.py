@@ -14,6 +14,7 @@ from optparse import OptionParser, SUPPRESS_HELP
 from arelle import (Cntlr, FileSource, ModelDocument, XmlUtil, Version, 
                     ViewFileDTS, ViewFileFactList, ViewFileFactTable, ViewFileConcepts, 
                     ViewFileFormulae, ViewFileRelationshipSet, ViewFileTests, ViewFileRssFeed,
+                    ViewFileRoleTypes,
                     ModelManager)
 from arelle.ModelValue import qname
 from arelle.Locale import format_string
@@ -49,7 +50,8 @@ def parseAndRun(args):
     cntlr = CntlrCmdLine()  # need controller for plug ins to be loaded
     usage = "usage: %prog [options]"
     
-    parser = OptionParser(usage, version="Arelle(r) {0}".format(Version.version))
+    parser = OptionParser(usage, version="Arelle(r) {0}bit {1}"
+                          .format(cntlr.systemWordSize, Version.version))
     parser.add_option("-f", "--file", dest="entrypointFile",
                       help=_("FILENAME is an entry point, which may be "
                              "an XBRL instance, schema, linkbase file, "
@@ -136,6 +138,12 @@ def parseAndRun(args):
     parser.add_option("--viewFile", action="store", dest="viewFile",
                       help=_("Write linkbase relationships for viewArcrole into viewFile"))
     parser.add_option("--viewfile", action="store", dest="viewFile", help=SUPPRESS_HELP)
+    parser.add_option("--roleTypes", action="store", dest="roleTypesFile",
+                      help=_("Write defined role types into FILE"))
+    parser.add_option("--roletypes", action="store", dest="roleTypesFile", help=SUPPRESS_HELP)
+    parser.add_option("--arcroleTypes", action="store", dest="arcroleTypesFile",
+                      help=_("Write defined arcrole types into FILE"))
+    parser.add_option("--arcroletypes", action="store", dest="arcroleTypesFile", help=SUPPRESS_HELP)
     parser.add_option("--testReport", "--csvTestReport", action="store", dest="testReport",
                       help=_("Write test report of validation (of test cases) into FILE"))
     parser.add_option("--testreport", "--csvtestreport", action="store", dest="testReport", help=SUPPRESS_HELP)
@@ -262,7 +270,7 @@ def parseAndRun(args):
         
     (options, leftoverArgs) = parser.parse_args(args)
     if options.about:
-        print(_("\narelle(r) {0}\n\n"
+        print(_("\narelle(r) {0}bit {1}\n\n"
                 "An open source XBRL platform\n"
                 "(c) 2010-2013 Mark V Systems Limited\n"
                 "All rights reserved\nhttp://www.arelle.org\nsupport@arelle.org\n\n"
@@ -281,8 +289,8 @@ def parseAndRun(args):
                 "\n   lxml (c) 2004 Infrae, ElementTree (c) 1999-2004 by Fredrik Lundh"
                 "\n   xlrd (c) 2005-2013 Stephen J. Machin, Lingfo Pty Ltd, (c) 2001 D. Giffin, (c) 2000 A. Khan"
                 "\n   xlwt (c) 2007 Stephen J. Machin, Lingfo Pty Ltd, (c) 2005 R. V. Kiseliov"
-                "{1}"
-                ).format(Version.version,
+                "{2}"
+                ).format(cntlr.systemWordSize, Version.version,
                          _("\n   Bottle (c) 2011-2013 Marcel Hellkamp") if hasWebServer else ""))
     elif options.disclosureSystemName in ("help", "help-verbose"):
         text = _("Disclosure system choices: \n{0}").format(' \n'.join(cntlr.modelManager.disclosureSystem.dirlist(options.disclosureSystemName)))
@@ -300,6 +308,7 @@ def parseAndRun(args):
         if any((options.entrypointFile, options.importFiles, options.diffFile, options.versReportFile,
                 options.factsFile, options.factListCols, options.factTableFile,
                 options.conceptsFile, options.preFile, options.calFile, options.dimFile, options.formulaeFile, options.viewArcrole, options.viewFile,
+                options.roleTypesFile, options.arcroleTypesFile
                 )):
             parser.error(_("incorrect arguments with --webserver, please try\n  python CntlrCmdLine.py --help"))
         else:
@@ -654,6 +663,10 @@ class CntlrCmdLine(Cntlr.Cntlr):
                     ViewFileFormulae.viewFormulae(modelXbrl, options.formulaeFile, "Formulae", lang=options.labelLang)
                 if options.viewArcrole and options.viewFile:
                     ViewFileRelationshipSet.viewRelationshipSet(modelXbrl, options.viewFile, os.path.basename(options.viewArcrole), options.viewArcrole, labelrole=options.labelRole, lang=options.labelLang)
+                if options.roleTypesFile:
+                    ViewFileRoleTypes.viewRoleTypes(modelXbrl, options.roleTypesFile, "Role Types", isArcrole=False, lang=options.labelLang)
+                if options.arcroleTypesFile:
+                    ViewFileRoleTypes.viewRoleTypes(modelXbrl, options.arcroleTypesFile, "Arcrole Types", isArcrole=True, lang=options.labelLang)
                 for pluginXbrlMethod in pluginClassMethods("CntlrCmdLine.Xbrl.Run"):
                     pluginXbrlMethod(self, options, modelXbrl)
                                         

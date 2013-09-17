@@ -11,9 +11,11 @@ from arelle import (ModelXbrl, XbrlConst, XmlUtil)
 from arelle.ModelObject import ModelObject, ModelAttribute
 from arelle.ModelInstanceObject import ModelFact, ModelInlineFact
 from arelle.ModelValue import (qname,QName,dateTime, DateTime, DATEUNION, DATE, DATETIME, anyURI, AnyURI)
-from arelle.XmlValidate import UNKNOWN, VALID, validate
+from arelle.XmlValidate import UNKNOWN, VALID, VALID_NO_CONTENT, validate
 from arelle.PluginManager import pluginClassMethods
+from decimal import Decimal
 from lxml import etree
+from types import LambdaType
 
 class XPathException(Exception):
     def __init__(self, progStep, code, message):
@@ -27,7 +29,7 @@ class XPathException(Exception):
             self.line = progStep.sourceStr
         else:
             self.line = "(not available)"
-        self.code = code
+        self.code = str(code)  # called with qname or string, qname -> prefixed name string
         self.message = message
         self.args = ( self.__repr__(), )
     def __repr__(self):
@@ -61,7 +63,7 @@ class FunctionNotAvailable(Exception):
         self.name = name
         self.args = ( self.__repr__(), )
     def __repr__(self):
-        return _("Exception, function not available: {0}").format(self.name)
+        return _("Exception, function implementation not available: {0}").format(self.name)
     
 class RunTimeExceededException(Exception):
     def __init__(self):
@@ -141,6 +143,9 @@ class XPathContext:
             elif isinstance(p,VariableRef):
                 if p.name in self.inScopeVars:
                     result = self.inScopeVars[p.name]
+                    # uncomment to allow lambdas as variable values (for deferred processing if needed)
+                    #if isinstance(result, LambdaType):
+                    #    result = result()  # dereference lambda-valued variables
             elif isinstance(p,OperationDef):
                 op = p.name
                 if isinstance(op, QNameDef): # function call
@@ -175,7 +180,7 @@ class XPathContext:
                         raise XPathException(p, err.errCode, _('Argument {0} does not match expected type {1} for {2} {3}.')
                                              .format(err.argNum, err.expectedType, op, err.foundObject))
                     except FunctionNotAvailable:
-                        raise XPathException(p, 'arelle:functDeferred', _('Function {0} is not available in this build.').format(op))
+                        raise XPathException(p, 'err:XPST0017', _('Function named {0} does not have a custom or built-in implementation.').format(op))
                 elif op in VALUE_OPS:
                     # binary arithmetic operations and value comparisons
                     s1 = self.atomize( p, resultStack.pop() ) if len(resultStack) > 0 else []
@@ -190,6 +195,12 @@ class XPathContext:
                         op2 = s2[0]
                         from arelle.FunctionUtil import (testTypeCompatiblity)
                         testTypeCompatiblity( self, p, op, op1, op2 )
+                        if type(op1) != type(op2) and op in ('+', '-', '*', 'div', 'idiv', 'mod'):
+                            # check if type promotion needed (Decimal-float, not needed for integer-Decimal)
+                            if isinstance(op1,Decimal) and isinstance(op2,float):
+                                op1 = float(op1) # per http://http://www.w3.org/TR/xpath20/#dt-type-promotion 1b
+                            elif isinstance(op2,Decimal) and isinstance(op1,float):
+                                op2 = float(op2)
                         if op == '+':
                             result = op1 + op2 
                         elif op == '-':
@@ -323,10 +334,10 @@ class XPathContext:
                         for x in s1:
                             if isinstance(t, QNameDef):
                                 if t.namespaceURI == XbrlConst.xsd:
-                                    type = {
+                                    tType = {
                                            "integer": _INT_TYPES,
-                                           "string": str,
-                                           "decimal": float,
+                                           "string": _STR_BASE,
+                                           "decimal": Decimal,
                                            "double": float,
                                            "float": float,
                                            "boolean": bool,
@@ -335,9 +346,9 @@ class XPathContext:
                                            "date": DateTime,
                                            "dateTime": DateTime,
                                             }.get(t.localName)
-                                    if type:
-                                        result = isinstance(x, type)
-                                        if result and type == DateTime:
+                                    if tType:
+                                        result = isinstance(x, tType)
+                                        if result and tType == DateTime:
                                             result = x.dateOnly == (t.localName == "date")
                             elif isinstance(t, OperationDef):
                                 if t.name == "element":
@@ -495,7 +506,7 @@ class XPathContext:
                             targetNodes = XmlUtil.children(node, ns, localname)
                     elif axis == "parent":
                         if isinstance(node,ModelAttribute):
-                            paretNode = [ node.modelElement ]
+                            parentNode = [ node.modelElement ]
                         else:
                             parentNode = [ XmlUtil.parent(node) ]
                         if (isinstance(node,ModelObject) and
@@ -560,8 +571,8 @@ class XPathContext:
                         targetNodes = [ XmlUtil.parent(node) ]
             elif isinstance(p, OperationDef) and isinstance(p.name,QNameDef):
                 if isinstance(node,ModelObject):
-                    if p.name.localName == "text":
-                        targetNodes = [XmlUtil.text(node)]
+                    if p.name.localName == "text": # note this is not string value, just child text
+                        targetNodes = [node.textValue]
                     # todo: add element, attribute, node, etc...
             elif p == '*':  # wildcard
                 if op == '/' or op is None:
@@ -619,6 +630,8 @@ class XPathContext:
             if isinstance(x, ModelObject):
                 e = x
             if e is not None:
+                if e.xValid == VALID_NO_CONTENT:
+                    raise XPathException(p, 'err:FOTY0012', _('Atomizing element {0} that does not have a typed value').format(x))
                 if e.get("{http://www.w3.org/2001/XMLSchema-instance}nil") == "true":
                     return []
                 try:
@@ -630,12 +643,17 @@ class XPathContext:
                 modelConcept = modelXbrl.qnameConcepts.get(qname(x))
                 if modelConcept is not None:
                     baseXsdType = modelConcept.baseXsdType
-                v = XmlUtil.text(x)
-        if baseXsdType in ("decimal", "float", "double"):
+                v = x.stringValue
+        if baseXsdType in ("float", "double"):
             try:
                 x = float(v)
             except ValueError:
                 raise XPathException(p, 'err:FORG0001', _('Atomizing {0} to a {1} does not have a proper value').format(x,baseXsdType))
+        elif baseXsdType == "decimal":
+            try:
+                x = Decimal(v)
+            except ValueError:
+                raise XPathException(p, 'err:FORG0001', _('Atomizing {0} to decimal does not have a proper value'))
         elif baseXsdType in ("integer",
                              "nonPositiveInteger","negativeInteger","nonNegativeInteger","positiveInteger",
                              "long","unsignedLong",
@@ -660,6 +678,8 @@ class XPathContext:
             x = dateTime(v, type=DATE)
         elif baseXsdType == "dateTime":
             x = dateTime(v, type=DATETIME)
+        elif baseXsdType == "noContent":
+            x = None # can't be atomized
         elif baseXsdType:
             x = str(v)
         return x

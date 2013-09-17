@@ -62,6 +62,22 @@ arcroleChecks = {
     XbrlConst.tableAspectNodeFilter:(XbrlConst.qnTableAspectNode,
                                      XbrlConst.qnVariableFilter, 
                                      "xbrlte:info"),
+    XbrlConst.tableBreakdownMMDD:   (XbrlConst.qnTableTableMMDD,
+                                     XbrlConst.qnTableBreakdownMMDD, 
+                                     "xbrlte:info"),
+    XbrlConst.tableBreakdownTreeMMDD:(XbrlConst.qnTableBreakdownMMDD,
+                                     (XbrlConst.qnTableClosedDefinitionNodeMMDD,
+                                      XbrlConst.qnTableAspectNodeMMDD),
+                                     "xbrlte:info"),
+    XbrlConst.tableDefinitionNodeSubtreeMMDD: (XbrlConst.qnTableClosedDefinitionNodeMMDD, 
+                                     XbrlConst.qnTableClosedDefinitionNodeMMDD, 
+                                     "xbrlte:info"),
+    XbrlConst.tableFilterMMDD:      (XbrlConst.qnTableTableMMDD, 
+                                     XbrlConst.qnVariableFilter, 
+                                     "xbrlte:info"),
+    XbrlConst.tableAspectNodeFilterMMDD:(XbrlConst.qnTableAspectNodeMMDD,
+                                     XbrlConst.qnVariableFilter, 
+                                     "xbrlte:info"),
     XbrlConst.tableBreakdown201301: (XbrlConst.qnTableTable201301,
                                      (XbrlConst.qnTableClosedDefinitionNode201301, 
                                       XbrlConst.qnTableFilterNode201301, 
@@ -235,7 +251,7 @@ def validate(val, xpathContext=None, parametersOnly=False, statusMsg='', compile
             
     for custFnSig in val.modelXbrl.modelCustomFunctionSignatures.values():
         custFnQname = custFnSig.qname
-        if custFnQname.namespaceURI == "XbrlConst.xfi":
+        if custFnQname.namespaceURI == XbrlConst.xfi:
             val.modelXbrl.error("xbrlve:noProhibitedNamespaceForCustomFunction",
                 _("Custom function %(name)s has namespace reserved for functions in the function registry %(namespace)s"),
                 modelObject=custFnSig, name=custFnQname, namespace=custFnQname.namespaceURI )
@@ -513,14 +529,14 @@ def validate(val, xpathContext=None, parametersOnly=False, statusMsg='', compile
                         modelObject=modelVariableSet, xlinkLabel=modelVariableSet.xlinkLabel, name=depVar)
                     
         # check messages variable dependencies
-        checkValidationMessageVariables(val, modelVariableSet, qnameRels)
+        checkValidationMessageVariables(val, modelVariableSet, qnameRels, xpathContext.parameterQnames)
 
         if isinstance(modelVariableSet, ModelFormula): # check consistency assertion message variables and its messages variables
             for consisAsserRel in val.modelXbrl.relationshipSet(XbrlConst.consistencyAssertionFormula).toModelObject(modelVariableSet):
                 consisAsser = consisAsserRel.fromModelObject
                 if isinstance(consisAsser, ModelConsistencyAssertion):
                     checkValidationMessages(val, consisAsser)
-                    checkValidationMessageVariables(val, consisAsser, qnameRels)
+                    checkValidationMessageVariables(val, consisAsser, qnameRels, xpathContext.parameterQnames)
                         
         # check preconditions
         modelVariableSet.preconditions = []
@@ -986,7 +1002,7 @@ def checkTableRules(val, xpathContext, table):
     # check for covering aspect not in variable set aspect model
     checkFilterAspectModel(val, table, table.filterRelationships, xpathContext)
 
-    checkDefinitionNodeRules(val, table, table, (XbrlConst.tableBreakdown,XbrlConst.tableAxis2011), xpathContext)
+    checkDefinitionNodeRules(val, table, table, (XbrlConst.tableBreakdown, XbrlConst.tableBreakdownMMDD, XbrlConst.tableAxis2011), xpathContext)
     
 def checkDefinitionNodeRules(val, table, parent, arcrole, xpathContext):
     for rel in val.modelXbrl.relationshipSet(arcrole).fromModelObject(parent):
@@ -1045,7 +1061,7 @@ def checkDefinitionNodeRules(val, table, parent, arcrole, xpathContext):
                                                _("%(axis)s rule %(xlinkLabel)s contains a %(qnameAttr)s QName %(qname)s which is not in the DTS."),
                                                modelObject=axis, axis=axis.localName.title(), xlinkLabel=axis.xlinkLabel, 
                                                qnameAttr=qnameAttr, qname=eltQname)
-                checkDefinitionNodeRules(val, table, axis, (XbrlConst.tableBreakdownTree, XbrlConst.tableDefinitionNodeSubtree201301, XbrlConst.tableAxisSubtree2011), xpathContext)                    
+                checkDefinitionNodeRules(val, table, axis, (XbrlConst.tableBreakdownTree, XbrlConst.tableBreakdownTreeMMDD, XbrlConst.tableDefinitionNodeSubtree201301, XbrlConst.tableAxisSubtree2011), xpathContext)                    
 
 def checkValidationMessages(val, modelVariableSet):
     for msgRelationship in (XbrlConst.assertionSatisfiedMessage, XbrlConst.assertionUnsatisfiedMessage):
@@ -1100,22 +1116,28 @@ def checkMessageExpressions(val, message):
             message.expressions = expressions
             message.formatString = ''.join( formatString )
 
-def checkValidationMessageVariables(val, modelVariableSet, varNames):
+def checkValidationMessageVariables(val, modelVariableSet, varNames, paramNames):
     if isinstance(modelVariableSet, ModelConsistencyAssertion):
         varSetVars = (qname(XbrlConst.ca,'aspect-matched-facts'),
                       qname(XbrlConst.ca,'acceptance-radius'),
                       qname(XbrlConst.ca,'absolute-acceptance-radius-expression'),
                       qname(XbrlConst.ca,'proportional-acceptance-radius-expression'))
     elif isinstance(modelVariableSet, ModelExistenceAssertion):
-        varSetVars = (qname(XbrlConst.ea,'text-expression'),)
+        varSetVars = (XbrlConst.qnEaTestExpression,)
     elif isinstance(modelVariableSet, ModelValueAssertion):
-        varSetVars = (qname(XbrlConst.va,'text-expression'),)
+        varSetVars = (XbrlConst.qnVaTestExpression,)
     for msgRelationship in (XbrlConst.assertionSatisfiedMessage, XbrlConst.assertionUnsatisfiedMessage):
         for modelRel in val.modelXbrl.relationshipSet(msgRelationship).fromModelObject(modelVariableSet):
             message = modelRel.toModelObject
             message.compile()
             for msgVarQname in message.variableRefs():
-                if msgVarQname not in varNames and msgVarQname not in varSetVars:
+                if msgVarQname not in varNames and msgVarQname not in varSetVars and msgVarQname not in paramNames:
                     val.modelXbrl.error("err:XPST0008",
                         _("Undefined variable dependency in message %(xlinkLabel)s, %(name)s"),
+                        modelObject=message, xlinkLabel=message.xlinkLabel, name=msgVarQname)
+                elif (msgVarQname in varNames and 
+                      isinstance(modelVariableSet, ModelExistenceAssertion) and
+                      isinstance(varNames[msgVarQname].toModelObject,ModelVariable)):
+                    val.modelXbrl.error("err:XPST0008",
+                        _("Existence Assertion depends on evaluation variable in message %(xlinkLabel)s, %(name)s"),
                         modelObject=message, xlinkLabel=message.xlinkLabel, name=msgVarQname)

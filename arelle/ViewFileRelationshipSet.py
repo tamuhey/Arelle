@@ -104,6 +104,8 @@ class ViewRelationshipSet(ViewFile.View):
                     text += " (typedDomain={0})".format(concept.typedDomainElement.qname)  
                 xmlRowElementName = "concept"
                 attr = {"name": str(concept.qname)}
+                if preferredLabel != XbrlConst.conceptNameLabelRole:
+                    attr["label"] = text
             elif self.arcrole == "Table-rendering":
                 text = concept.localName
                 xmlRowElementName = "element"
@@ -114,7 +116,7 @@ class ViewRelationshipSet(ViewFile.View):
                     attr = {"text": text,
                             "innerXml": XmlUtil.xmlstring(concept, stripXmlns=True, prettyPrint=False, contentsOnly=True)}
                 else:
-                    text = (concept.elementText.strip() or concept.localName)
+                    text = (concept.textValue.strip() or concept.localName)
                     attr = {"text": text}
                 xmlRowElementName = "resource"
             else:   # just a resource
@@ -137,7 +139,7 @@ class ViewRelationshipSet(ViewFile.View):
             if self.arcrole == XbrlConst.parentChild: # extra columns
                 if isRelation:
                     preferredLabel = modelObject.preferredLabel
-                    if preferredLabel.startswith("http://www.xbrl.org/2003/role/"):
+                    if preferredLabel and preferredLabel.startswith("http://www.xbrl.org/2003/role/"):
                         preferredLabel = os.path.basename(preferredLabel)
                 else:
                     preferredLabel = None

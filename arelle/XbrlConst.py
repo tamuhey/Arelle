@@ -15,6 +15,8 @@ xml = "http://www.w3.org/XML/1998/namespace"
 xbrli = "http://www.xbrl.org/2003/instance"
 qnXbrliXbrl = qname("{http://www.xbrl.org/2003/instance}xbrli:xbrl")
 qnXbrliItem = qname("{http://www.xbrl.org/2003/instance}xbrli:item")
+qnXbrliNumerator = qname("{http://www.xbrl.org/2003/instance}xbrli:numerator")
+qnXbrliDenominator = qname("{http://www.xbrl.org/2003/instance}xbrli:denominator")
 qnXbrliTuple = qname("{http://www.xbrl.org/2003/instance}xbrli:tuple")
 qnXbrliContext = qname("{http://www.xbrl.org/2003/instance}xbrli:context")
 qnXbrliPeriod = qname("{http://www.xbrl.org/2003/instance}xbrli:period")
@@ -76,11 +78,24 @@ qnXlResourceType = qname("{http://www.xbrl.org/2003/XLink}xl:resourceType")
 qnXlArcType = qname("{http://www.xbrl.org/2003/XLink}xl:arcType")
 xhtml = "http://www.w3.org/1999/xhtml"
 ixbrl = "http://www.xbrl.org/2008/inlineXBRL"
+ixbrl11 = "http://www.xbrl.org/CR-2013-08-21/inlineXBRL"
+ixbrlAll = {ixbrl, ixbrl11}
 qnIXbrlResources = qname("{http://www.xbrl.org/2008/inlineXBRL}resources")
 qnIXbrlTuple = qname("{http://www.xbrl.org/2008/inlineXBRL}tuple")
 qnIXbrlNonNumeric = qname("{http://www.xbrl.org/2008/inlineXBRL}nonNumeric")
 qnIXbrlNonFraction = qname("{http://www.xbrl.org/2008/inlineXBRL}nonFraction")
 qnIXbrlFraction = qname("{http://www.xbrl.org/2008/inlineXBRL}fraction")
+qnIXbrlNumerator = qname("{http://www.xbrl.org/2008/inlineXBRL}numerator")
+qnIXbrlDenominator = qname("{http://www.xbrl.org/2008/inlineXBRL}denominator")
+qnIXbrlFootnote = qname("{http://www.xbrl.org/2008/inlineXBRL}footnote")
+qnIXbrl11Resources = qname("{http://www.xbrl.org/CR-2013-08-21/inlineXBRL}resources")
+qnIXbrl11Tuple = qname("{http://www.xbrl.org/CR-2013-08-21/inlineXBRL}tuple")
+qnIXbrl11NonNumeric = qname("{http://www.xbrl.org/CR-2013-08-21/inlineXBRL}nonNumeric")
+qnIXbrl11NonFraction = qname("{http://www.xbrl.org/CR-2013-08-21/inlineXBRL}nonFraction")
+qnIXbrl11Fraction = qname("{http://www.xbrl.org/CR-2013-08-21/inlineXBRL}fraction")
+qnIXbrl11Numerator = qname("{http://www.xbrl.org/CR-2013-08-21/inlineXBRL}numerator")
+qnIXbrl11Denominator = qname("{http://www.xbrl.org/CR-2013-08-21/inlineXBRL}denominator")
+qnIXbrl11Footnote = qname("{http://www.xbrl.org/CR-2013-08-21/inlineXBRL}footnote")
 ixAttributes = set(qname(n, noPrefixIsNoNamespace=True)
                    for n in ("escape", "footnoteRefs", "format", "name", "order", "scale", "sign", 
                              "target", "tupleRef", "tupleID"))
@@ -163,10 +178,16 @@ qnFormulaDimensionSAV = qname("{http://xbrl.org/2008/formula}DimensionSAV") #sig
 qnFormulaOccEmpty = qname("{http://xbrl.org/2008/formula}occEmpty") #signal that OCC aspect should omit the SAV values
 ca = "http://xbrl.org/2008/assertion/consistency"
 qnConsistencyAssertion = qname("{http://xbrl.org/2008/assertion/consistency}ca:consistencyAssertion")
+qnCaAspectMatchedFacts = qname("{http://xbrl.org/2008/assertion/consistency}ca:aspect-matched-facts")
+qnCaAcceptanceRadius = qname("{http://xbrl.org/2008/assertion/consistency}ca:ca:acceptance-radius")
+qnCaAbsoluteAcceptanceRadiusExpression = qname("{http://xbrl.org/2008/assertion/consistency}ca:absolute-acceptance-radius-expression")
+qnCaProportionalAcceptanceRadiusExpression = qname("{http://xbrl.org/2008/assertion/consistency}ca:proportional-acceptance-radius-expression")
 ea = "http://xbrl.org/2008/assertion/existence"
 qnExistenceAssertion = qname("{http://xbrl.org/2008/assertion/existence}ea:existenceAssertion")
+qnEaTestExpression = qname(ea,'test-expression')
 va = "http://xbrl.org/2008/assertion/value"
 qnValueAssertion = qname("{http://xbrl.org/2008/assertion/value}va:valueAssertion")
+qnVaTestExpression = qname(va,'test-expression')
 variable = "http://xbrl.org/2008/variable"
 formulaStartsWith = "http://xbrl.org/arcrole/20"
 equalityDefinition = "http://xbrl.org/arcrole/2008/equality-definition"
@@ -286,6 +307,22 @@ qnTableClosedDefinitionNode = qname("{http://xbrl.org/PWD/2013-05-17/table}table
 qnTableConceptRelationshipNode = qname("{http://xbrl.org/PWD/2013-05-17/table}table:conceptRelationshipNode")
 qnTableDimensionRelationshipNode = qname("{http://xbrl.org/PWD/2013-05-17/table}table:dimensionRelationshipNode")
 qnTableAspectNode = qname("{http://xbrl.org/PWD/2013-05-17/table}table:aspectNode")
+
+# 2013-MM-DD current IWD
+tableMMDD = "http://xbrl.org/PWD/2013-MM-DD/table"
+tableModelMMDD = "http://xbrl.org/PWD/2013-MM-DD/table/model"
+tableBreakdownMMDD = "http://xbrl.org/arcrole/PWD/2013-MM-DD/table-breakdown"
+tableBreakdownTreeMMDD = "http://xbrl.org/arcrole/PWD/2013-MM-DD/breakdown-tree"
+tableDefinitionNodeSubtreeMMDD = "http://xbrl.org/arcrole/PWD/2013-MM-DD/definition-node-subtree"
+tableFilterMMDD = "http://xbrl.org/arcrole/PWD/2013-MM-DD/table-filter"
+tableAspectNodeFilterMMDD = "http://xbrl.org/arcrole/PWD/2013-MM-DD/aspect-node-filter"
+qnTableTableMMDD = qname("{http://xbrl.org/PWD/2013-MM-DD/table}table:table")
+qnTableBreakdownMMDD = qname("{http://xbrl.org/PWD/2013-MM-DD/table}table:breakdown")
+qnTableRuleNodeMMDD = qname("{http://xbrl.org/PWD/2013-MM-DD/table}table:ruleNode")
+qnTableClosedDefinitionNodeMMDD = qname("{http://xbrl.org/PWD/2013-MM-DD/table}table:closedDefinitionNode")
+qnTableConceptRelationshipNodeMMDD = qname("{http://xbrl.org/PWD/2013-MM-DD/table}table:conceptRelationshipNode")
+qnTableDimensionRelationshipNodeMMDD = qname("{http://xbrl.org/PWD/2013-MM-DD/table}table:dimensionRelationshipNode")
+qnTableAspectNodeMMDD = qname("{http://xbrl.org/PWD/2013-MM-DD/table}table:aspectNode")
 
 # prior 2013-01-16 PWD
 table201301 = "http://xbrl.org/PWD/2013-01-16/table"
@@ -559,6 +596,9 @@ def isTableRenderingArcrole(arcrole):
     return arcrole in {# current PWD 2013-05-17
                        tableBreakdown, tableBreakdownTree, tableFilter,
                        tableDefinitionNodeSubtree, tableAspectNodeFilter,
+                       # current IWD
+                       tableBreakdownMMDD, tableBreakdownTreeMMDD, tableFilterMMDD,
+                       tableDefinitionNodeSubtreeMMDD, tableAspectNodeFilterMMDD,
                        # Prior PWD, Montreal and 2013-01-16 
                        tableBreakdown201301, tableAxis2011, tableFilter2011, 
                        tableDefinitionNodeSubtree201301, tableAxisSubtree2011, 
