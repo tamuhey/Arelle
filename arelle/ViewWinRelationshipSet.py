@@ -6,7 +6,7 @@ Created on Oct 6, 2010
 '''
 from collections import defaultdict
 import os
-from arelle import ViewWinTree, ModelDtsObject, XbrlConst, XmlUtil, Locale
+from arelle import ViewWinTree, ModelDtsObject, ModelInstanceObject, XbrlConst, XmlUtil, Locale
 from arelle.ModelRelationshipSet import ModelRelationshipSet
 from arelle.ModelFormulaObject import ModelFilter
 from arelle.ViewUtil import viewReferences, groupRelationshipSet, groupRelationshipLabel
@@ -152,13 +152,20 @@ class ViewRelationshipSet(ViewWinTree.ViewTree):
                     concept.isTypedDimension and 
                     concept.typedDomainElement is not None):
                     text += " (typedDomain={0})".format(concept.typedDomainElement.qname)  
+            elif isinstance(concept, ModelInstanceObject.ModelFact):
+                if concept.concept is not None:
+                    text = labelPrefix + concept.concept.label(preferredLabel,lang=self.lang,linkroleHint=relationshipSet.linkrole)
+                else:
+                    text = str(concept.qname)
+                if concept.contextID:
+                    text += " [" + concept.contextID + "] = " + concept.effectiveValue
             elif self.arcrole == "Table-rendering":
                 text = concept.localName
             elif isinstance(concept, ModelDtsObject.ModelResource):
                 if self.showReferences:
                     text = (concept.viewText() or concept.localName)
                 else:
-                    text = (Locale.rtlString(concept.elementText.strip(), lang=concept.xmlLang) or concept.localName)
+                    text = (Locale.rtlString(concept.textValue.strip(), lang=concept.xmlLang) or concept.localName)
             else:   # just a resource
                 text = concept.localName
             childnode = self.treeView.insert(parentnode, "end", modelObject.objectId(self.id), text=text, tags=("odd" if n & 1 else "even",))
@@ -166,7 +173,7 @@ class ViewRelationshipSet(ViewWinTree.ViewTree):
             if self.arcrole == XbrlConst.parentChild: # extra columns
                 if isRelation:
                     preferredLabel = modelObject.preferredLabel
-                    if preferredLabel.startswith("http://www.xbrl.org/2003/role/"):
+                    if preferredLabel and preferredLabel.startswith("http://www.xbrl.org/2003/role/"):
                         preferredLabel = os.path.basename(preferredLabel)
                     self.treeView.set(childnode, "preferredLabel", preferredLabel)
                 self.treeView.set(childnode, "type", concept.niceType)

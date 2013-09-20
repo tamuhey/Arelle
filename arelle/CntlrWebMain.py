@@ -113,7 +113,7 @@ class Options():
         for option, defaultValue in optionsPrototype.items():
             setattr(self, option, defaultValue)
             
-supportedViews = {'DTS', 'concepts', 'pre', 'cal', 'dim', 'facts', 'factTable', 'formulae'}
+supportedViews = {'DTS', 'concepts', 'pre', 'cal', 'dim', 'facts', 'factTable', 'formulae', 'roleTypes', 'arcroleTypes'}
 GETorPOST = ('GET', 'POST')
 
 @route('/rest/xbrl/<file:path>/open', method=GETorPOST)
@@ -126,6 +126,8 @@ GETorPOST = ('GET', 'POST')
 @route('/rest/xbrl/<file:path>/dim', method=GETorPOST)
 @route('/rest/xbrl/<file:path>/facts', method=GETorPOST)
 @route('/rest/xbrl/<file:path>/factTable', method=GETorPOST)
+@route('/rest/xbrl/<file:path>/roleTypes', method=GETorPOST)
+@route('/rest/xbrl/<file:path>/arcroleTypes', method=GETorPOST)
 @route('/rest/xbrl/<file:path>/formulae', method=GETorPOST)
 @route('/rest/xbrl/validation', method=GETorPOST)
 @route('/rest/xbrl/view', method=GETorPOST)
@@ -514,7 +516,7 @@ as follows:</td></tr>
 <tr><th colspan="2">Views</th></tr>
 <tr><td>/rest/xbrl/{file}/{view}</td><td>View document at {file}.</td></tr>
 <tr><td>\u00A0</td><td>{file} may be local or web url, and may have "/" characters replaced by ";" characters (but that is not necessary).</td></tr>
-<tr><td>\u00A0</td><td>{view} may be <code>DTS</code>, <code>concepts</code>, <code>pre</code>, <code>cal</code>, <code>dim</code>, <code>facts</code>, <code>factTable</code>, or <code>formulae</code>.</td></tr>
+<tr><td>\u00A0</td><td>{view} may be <code>DTS</code>, <code>concepts</code>, <code>pre</code>, <code>cal</code>, <code>dim</code>, <code>facts</code>, <code>factTable</code>, <code>formulae</code>, <code>roleTypes</code>, or <code>arcroleTypes</code>.</td></tr>
 <tr><td style="text-align=right;">Example:</td><td><code>/rest/xbrl/c:/a/b/c.xbrl/dim?media=html</code>: View dimensions of 
 document at c:/a/b/c.xbrl (on local drive) and return html result.</td></tr>
 <tr><td>/rest/xbrl/view</td><td>(Alternative syntax) View document, file and view are provided as parameters (see below).</td></tr>
@@ -617,7 +619,7 @@ def about():
     """
     return htmlBody(_('''<table width="700p">
 <tr><th colspan="2">About arelle</th></tr>
-<tr><td rowspan="12" style="vertical-align:top;"><img src="/images/arelle32.gif"/></td><td>arelle&reg; version: %s %s. An open source XBRL platform</td></tr>
+<tr><td rowspan="12" style="vertical-align:top;"><img src="/images/arelle32.gif"/></td><td>arelle&reg; version: %s %sbit %s. An open source XBRL platform</td></tr>
 <tr><td>&copy; 2010-2013 Mark V Systems Limited.  All rights reserved.</td></tr>
 <tr><td>Web site: <a href="http://www.arelle.org">http://www.arelle.org</a>.  
 E-mail support: <a href="mailto:support@arelle.org">support@arelle.org</a>.</td></tr>
@@ -634,7 +636,7 @@ See the License for the specific language governing permissions and limitations 
 <tr><td style="text-indent: 2.0em;">xlrd &copy; 2005-2013 Stephen J. Machin, Lingfo Pty Ltd, &copy; 2001 D. Giffin, &copy; 2000 A. Khan</td></tr>
 <tr><td style="text-indent: 2.0em;">xlwt &copy; 2007 Stephen J. Machin, Lingfo Pty Ltd, &copy; 2005 R. V. Kiseliov</td></tr>
 <tr><td style="text-indent: 2.0em;">Bottle &copy; 2011 Marcel Hellkamp</td></tr>
-</table>''') % (cntlr.__version__, Version.version) )
+</table>''') % (cntlr.__version__, cntlr.systemWordSize, Version.version) )
 
 @route('/')
 def indexPage():

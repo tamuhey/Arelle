@@ -22,6 +22,7 @@ else:
                  ParserElement, quotedString, delimitedList, Suppress, Regex)
 from arelle.Locale import format_string
 import time, xml.dom
+from decimal import Decimal
 from arelle import (XmlUtil, ModelValue, XbrlConst)
 
 
@@ -53,6 +54,11 @@ def pushFloat( sourceStr, loc, toks ):
 
 def pushInt( sourceStr, loc, toks ):
     num = _INT(toks[0])
+    exprStack.append( num )
+    return num
+
+def pushDecimal( sourceStr, loc, toks ):
+    num = Decimal(toks[0])
     exprStack.append( num )
     return num
 
@@ -369,12 +375,12 @@ infLiteral = Combine( Optional(plusorminusLiteral) + Literal("INF") )
 nanLiteral = Literal("NaN")
 floatLiteral = ( Combine( integerLiteral +
                      ( ( decimalPoint + Optional(digits) + exponentLiteral + integerLiteral ) |
-                       ( exponentLiteral + integerLiteral ) |
-                       ( decimalPoint + Optional(digits) ) )
+                       ( exponentLiteral + integerLiteral ) )
                      ) | 
                  Combine( decimalFractionLiteral + exponentLiteral + integerLiteral ) |
-                 decimalFractionLiteral |
                  infLiteral | nanLiteral ) 
+decimalLiteral =  ( Combine( integerLiteral + decimalPoint + Optional(digits) ) |
+                    decimalFractionLiteral )
 
 
 #emptySequence = Literal( "(" ) + Literal( ")" )
@@ -508,6 +514,7 @@ atom = (
            (thenOp + expr).setParseAction(pushOperation) - 
            (elseOp + expr).setParseAction(pushOperation) ).setParseAction(pushOperation) |
          ( qName + Suppress(lParen) + Optional(delimitedList(expr)) + Suppress(rParen) ).setParseAction(pushFunction) |
+         ( decimalLiteral ).setParseAction(pushDecimal) |
          ( floatLiteral ).setParseAction(pushFloat) |
          ( integerLiteral ).setParseAction(pushInt) |
          ( quotedString ).setParseAction(pushQuotedString) |

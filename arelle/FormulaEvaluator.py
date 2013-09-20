@@ -60,9 +60,11 @@ def evaluate(xpCtx, varSet, variablesInScope=False, uncoveredAspectFacts=None):
                      modelObject=varSet, xlinkLabel=varSet.xlinkLabel, result=result)
             msg = varSet.message(result)
             if msg is not None:
+                xpCtx.inScopeVars[XbrlConst.qnEaTestExpression] = varSet.test
                 xpCtx.modelXbrl.info("message:" + (varSet.id or varSet.xlinkLabel or _("unlabeled variableSet")),
                     msg.evaluate(xpCtx),
                     modelObject=varSet)
+                xpCtx.inScopeVars.pop(XbrlConst.qnEaTestExpression)
         if xpCtx.formulaOptions.traceVariableSetExpressionResult and initialTraceCount == xpCtx.modelXbrl.logCount.get(logging.getLevelName('INFO'), 0):
             xpCtx.modelXbrl.info("formula:trace",
                  _("Variable set %(xlinkLabel)s had no xpCtx.evaluations"),
@@ -656,6 +658,11 @@ def produceOutputFact(xpCtx, formula, result):
                                 lookForCommonUnits = True
                                 break
                     if len(multiplyBy) == 0: # if no units add pure
+                        if (Aspect.MULTIPLY_BY not in formula.aspectValues and Aspect.MULTIPLY_BY not in formula.aspectProgs and
+                            Aspect.DIVIDE_BY not in formula.aspectValues and Aspect.DIVIDE_BY not in formula.aspectProgs):
+                            xpCtx.modelXbrl.error("xbrlfe:missingUnitRule",
+                               _("Formula %(xlinkLabel)s"), 
+                               modelObject=formula, xlinkLabel=formula.xlinkLabel)
                         multiplyBy.append(XbrlConst.qnXbrliPure)
                             
         
