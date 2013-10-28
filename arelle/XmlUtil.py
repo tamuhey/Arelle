@@ -154,9 +154,9 @@ def innerText(element, ixExclude=False, ixEscape=False, ixContinuation=False, st
     except TypeError:
         return ""
 
-def innerTextList(element, ixExclude=False, ixEscape=False):   
+def innerTextList(element, ixExclude=False, ixEscape=False, ixContinuation=False):   
     try:
-        return ", ".join(text.strip() for text in innerTextNodes(element, ixExclude, ixEscape) if len(text.strip()) > 0)
+        return ", ".join(text.strip() for text in innerTextNodes(element, ixExclude, ixEscape, ixContinuation) if len(text.strip()) > 0)
     except TypeError:
         return ""
 
@@ -828,7 +828,7 @@ def writexml(writer, node, encoding=None, indent='', xmlcharrefreplace=False, pa
             hasChildNodes = True
             if firstChild:
                 writer.write(">\n")
-                if text:
+                if text and not text.isspace():
                     writer.write(text)
                 firstChild = False
             writexml(writer, child, indent=indent+'    ', xmlcharrefreplace=xmlcharrefreplace)

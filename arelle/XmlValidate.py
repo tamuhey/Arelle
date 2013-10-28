@@ -5,7 +5,7 @@ Created on Feb 20, 2011
 (c) Copyright 2011 Mark V Systems Limited, All rights reserved.
 '''
 import os, re
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from arelle import XbrlConst, XmlUtil
 from arelle.ModelValue import qname, dateTime, DATE, DATETIME, DATEUNION, anyURI, INVALIDixVALUE, gYearMonth, gMonthDay, gYear, gMonth, gDay
 from arelle.ModelObject import ModelObject, ModelAttribute
@@ -306,7 +306,7 @@ def validateValue(modelXbrl, elt, attrTag, baseXsdType, value, isNillable=False,
                     xValue = anyURI(UrlUtil.anyUriQuoteForPSVI(value))
                     sValue = value
                 elif baseXsdType in ("decimal", "float", "double"):
-                    sValue = float(value)
+                    sValue = float(value) # s-value uses Number (float) representation, tested before decimal is tested
                     if baseXsdType == "decimal":
                         xValue = Decimal(value)
                     else:
@@ -427,7 +427,7 @@ def validateValue(modelXbrl, elt, attrTag, baseXsdType, value, isNillable=False,
                     else: # no lexical pattern, forget compiling value
                         xValue = value
                     sValue = value
-        except ValueError as err:
+        except (ValueError, InvalidOperation) as err:
             if ModelInlineValueObject is not None and isinstance(elt, ModelInlineValueObject):
                 errElt = "{0} fact {1}".format(elt.elementQname, elt.qname)
             else:

@@ -689,7 +689,49 @@ class ModelConcept(ModelNamableTerm, ModelParticle):
         except AttributeError:
             self._typedDomainElement = self.resolveUri(uri=self.typedDomainRef)
             return self._typedDomainElement
+    
+    @property
+    def isEnumeration(self):
+        """(bool) -- True if derived from enum:enumerationItemType"""
+        try:
+            return self._isEnum
+        except AttributeError:
+            self._isEnum = self.instanceOfType(XbrlConst.qnEnumerationItemType)
+            return self._isEnum
         
+    @property
+    def enumDomainQname(self):
+        """(QName) -- enumeration domain qname """
+        return self.schemaNameQname(self.get("{http://xbrl.org/2013/extensible-enumerations}domain"))
+
+    @property
+    def enumDomain(self):
+        """(ModelConcept) -- enumeration domain """
+        try:
+            return self._enumDomain
+        except AttributeError:
+            self._enumDomain = self.modelXbrl.qnameConcepts.get(self.enumDomainQname)
+            return self._enumDomain
+        
+    @property
+    def enumLinkrole(self):
+        """(anyURI) -- enumeration linkrole """
+        return self.get("{http://xbrl.org/2013/extensible-enumerations}linkrole")
+    
+    @property
+    def enumDomainUsable(self):
+        """(string) -- enumeration usable attribute """
+        return self.get("{http://xbrl.org/2013/extensible-enumerations}usable") or "false"
+
+    @property
+    def isEnumDomainUsable(self):
+        """(bool) -- enumeration domain usability """
+        try:
+            return self._isEnumDomainUsable
+        except AttributeError:
+            self._isEnumDomainUsable = self.enumDomainUsable == "true"
+            return self._isEnumDomainUsable
+
     def substitutesForQname(self, subsQname):
         """(bool) -- True if element substitutes for specified qname"""
         subs = self
@@ -1639,7 +1681,10 @@ class ModelRelationship(ModelObject):
     @property
     def orderDecimal(self):
         """(decimal) -- Value of xlink:order attribute, NaN if not convertable to float, or None if not specified"""
-        return decimal.Decimal(self.order)
+        try:
+            return decimal.Decimal(self.order)
+        except decimal.InvalidOperation:
+            return decimal.Decimal("NaN")
 
     @property
     def priority(self):
@@ -1689,7 +1734,7 @@ class ModelRelationship(ModelObject):
             else:
                 try:
                     weight = decimal.Decimal(w)
-                except (TypeError,ValueError) :
+                except (TypeError,ValueError,decimal.InvalidOperation) :
                     # XBRL validation error needed
                     weight = decimal.Decimal("nan")
             self.arcElement._weightDecimal = weight

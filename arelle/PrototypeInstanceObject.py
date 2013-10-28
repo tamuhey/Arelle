@@ -1,14 +1,18 @@
 
 from arelle import XmlUtil
 from arelle.ModelValue import QName
+from arelle.ModelObject import ModelObject
 Aspect = None
 
 class FactPrototype():      # behaves like a fact for dimensional validity testing
-    def __init__(self, v, aspectValues):
+    def __init__(self, v, aspectValues=None):
         global Aspect
         if Aspect is None:
             from arelle.ModelFormulaObject import Aspect
         self.modelXbrl = v.modelXbrl
+        if aspectValues is None:
+            aspectValues = {}
+        self.aspectEntryObjectId = aspectValues.get("aspectEntryObjectId", None)
         if Aspect.CONCEPT in aspectValues:
             qname = aspectValues[Aspect.CONCEPT]
             self.qname = qname
@@ -28,6 +32,10 @@ class FactPrototype():      # behaves like a fact for dimensional validity testi
         else:
             self.parent = v.modelXbrl.modelDocument.xmlRootElement
         self.context = ContextPrototype(v, aspectValues)
+        if Aspect.UNIT in aspectValues:
+            self.unit = UnitPrototype(v, aspectValues)
+        else:
+            self.unit = None
         self.factObjectId = None
 
     def clear(self):
@@ -47,7 +55,8 @@ class FactPrototype():      # behaves like a fact for dimensional validity testi
         return (("concept", str(self.qname) if self.concept is not None else "not specified"),
                 ("dimensions", "({0})".format(len(dims)),
                   tuple(dimVal.propertyView if dimVal is not None else (str(dim.qname),"None")
-                        for dim,dimVal in sorted(dims.items(), key=lambda i:i[0])))
+                        for dim,dimVal in sorted(dims.items(), key=lambda i:i[0])
+                        if hasattr(dimVal,'propertyView')))
                   if dims else (),
                 )
 
@@ -61,27 +70,24 @@ class ContextPrototype():  # behaves like a context
         self.segDimVals = {}
         self.scenDimVals = {}
         self.qnameDims = {}
+        self.entityIdentifierHash = self.entityIdentifier = None
+        self.isStartEndPeriod = self.isInstantPeriod = self.isForeverPeriod = False
+        
         for aspect, aspectValue in aspectValues.items():
             if aspect == Aspect.PERIOD_TYPE:
                 if aspectValue == "forever":
-                    self.isStartEndPeriod = self.isInstantPeriod = False
-                    self._isForeverPeriod = True
+                    self.isForeverPeriod = True
                 elif aspectValue == "instant":
-                    self.isStartEndPeriod = self.isForeverPeriod = False
                     self.isInstantPeriod = True
                 elif aspectValue == "duration":
-                    self.isStartEndPeriod = self.isInstantPeriod = False
                     self.isStartEndPeriod = True
             elif aspect == Aspect.START:
-                self.isStartEndPeriod = self.isInstantPeriod = False
                 self.isStartEndPeriod = True
                 self.startDatetime = aspectValue
             elif aspect == Aspect.END:
-                self.isStartEndPeriod = self.isInstantPeriod = False
                 self.isStartEndPeriod = True
                 self.endDatetime = aspectValue
             elif aspect == Aspect.INSTANT:
-                self.isStartEndPeriod = self.isForeverPeriod = False
                 self.isInstantPeriod = True
                 self.endDatetime = self.instantDatetime = aspectValue
             elif isinstance(aspect, QName):
@@ -101,11 +107,25 @@ class ContextPrototype():  # behaves like a context
                             self.scenDimVals[dimConcept] = dimValPrototype
                     except KeyError:
                         pass
+            elif isinstance(aspectValue, ModelObject):
+                # these do not expect a string aspectValue, but the object model aspect value
+                if aspect == Aspect.PERIOD: # period xml object
+                    context = aspectValue.getparent()
+                    for contextPeriodAttribute in ("isForeverPeriod", "isStartEndPeriod", "isInstantPeriod",
+                                                   "startDatetime", "endDatetime", "instantDatetime",
+                                                   "periodHash"):
+                        setattr(self, contextPeriodAttribute, getattr(context, contextPeriodAttribute, None))
+                elif aspect == Aspect.ENTITY_IDENTIFIER: # entitytIdentifier xml object
+                    context = aspectValue.getparent().getparent()
+                    for entityIdentAttribute in ("entityIdentifier", "entityIdentifierHash"):
+                        setattr(self, entityIdentAttribute, getattr(context, entityIdentAttribute, None))
 
     def clear(self):
         try:
             for dim in self.qnameDims.values():
-                dim.clear()
+                # only clear if its a prototype, but not a 'reused' model object from other instance
+                if isinstance(dim, DimValuePrototype):
+                    dim.clear()
         except AttributeError:
             pass
         self.__dict__.clear()  # delete local attributes
@@ -128,6 +148,23 @@ class ContextPrototype():  # behaves like a context
     
     def nonDimValues(self, contextElement):
         return []
+
+    def isEntityIdentifierEqualTo(self, cntx2):
+        return self.entityIdentifierHash is None or self.entityIdentifierHash == cntx2.entityIdentifierHash
+    
+    def isPeriodEqualTo(self, cntx2):
+        if self.isForeverPeriod:
+            return cntx2.isForeverPeriod
+        elif self.isStartEndPeriod:
+            if not cntx2.isStartEndPeriod:
+                return False
+            return self.startDatetime == cntx2.startDatetime and self.endDatetime == cntx2.endDatetime
+        elif self.isInstantPeriod:
+            if not cntx2.isInstantPeriod:
+                return False
+            return self.instantDatetime == cntx2.instantDatetime
+        else:
+            return False
     
 class DimValuePrototype():
     def __init__(self, v, dimConcept, dimQname, mem, contextElement):
@@ -158,4 +195,31 @@ class DimValuePrototype():
         else:
             return (str(self.dimensionQname), 
                     XmlUtil.xmlstring( self.typedMember, stripXmlns=True, prettyPrint=True )
-                    if self.typedMember is not None else "None" )
+                    if isinstance(self.typedMember, ModelObject) else "None" )
+
+class UnitPrototype():  # behaves like a context
+    def __init__(self, v, aspectValues):
+        self.modelXbrl = v.modelXbrl
+        self.hash = self.measures = self.isSingleMeasure = None
+        for aspect, aspectValue in aspectValues.items():
+            if aspect == Aspect.UNIT: # entitytIdentifier xml object
+                for unitAttribute in ("measures", "hash", "isSingleMeasure", "isDivide"):
+                    setattr(self, unitAttribute, getattr(aspectValue, unitAttribute, None))
+
+    def clear(self):
+        self.__dict__.clear()  # delete local attributes
+
+    def isEqualTo(self, unit2):
+        if unit2 is None or unit2.hash != self.hash: 
+            return False
+        return unit2 is self or self.measures == unit2.measures
+
+    @property
+    def propertyView(self):
+        measures = self.measures
+        if measures[1]:
+            return tuple(('mul',m) for m in measures[0]) + \
+                   tuple(('div',d) for d in measures[1]) 
+        else:
+            return tuple(('measure',m) for m in measures[0])
+
