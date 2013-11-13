@@ -433,9 +433,12 @@ class ModelFact(ModelObject):
             concept = self.concept
             lbl = (("label", concept.label(lang=self.modelXbrl.modelManager.defaultLang)),)
         except (KeyError, AttributeError):
-            lbl = (("name", self.qname),)
+            lbl = ()
         return lbl + (
-               (("contextRef", self.contextID, self.context.propertyView if self.context is not None else ()),
+               (("namespace", self.qname.namespaceURI),
+                ("name", self.qname.localName),
+                ("QName", self.qname),
+                ("contextRef", self.contextID, self.context.propertyView if self.context is not None else ()),
                 ("unitRef", self.unitID, self.unit.propertyView if self.isNumeric and self.unit is not None else ()),
                 ("decimals", self.decimals),
                 ("precision", self.precision),
@@ -472,30 +475,6 @@ class ModelInlineValueObject:
         """(str) -- scale attribute of inline element"""
         return self.get("scale")
     
-    def transformedValue(self, value):
-        """helper function for value"""
-        num = 0
-        negate = -1 if self.sign else 1
-        try:
-            if self.concept is not None:
-                baseXsdType = self.concept.baseXsdType
-                if baseXsdType in {"integer",
-                                   "nonPositiveInteger","negativeInteger","nonNegativeInteger","positiveInteger",
-                                   "long","unsignedLong",
-                                   "int","unsignedInt",
-                                   "short","unsignedShort",
-                                   "byte","unsignedByte"}:
-                    num = _INT(value)
-                else:
-                    num = float(value)
-            else:
-                num = float(value)
-            scale = self.scale
-            if scale is not None:
-                num *= 10 ** _INT(self.scale)
-        except ValueError:
-            pass
-        return "{0}".format(num * negate)
     
     @property
     def value(self):
@@ -520,18 +499,37 @@ class ModelInlineValueObject:
                         raise err
             if self.localName == "nonNumeric" or self.localName == "tuple":
                 self._ixValue = v
-            else:
-                self._ixValue = self.transformedValue(v)
+            else:  # determine string value of transformed value
+                negate = -1 if self.sign else 1
+                try:
+                    # concept may be unknown or invalid but transformation would still occur
+                    # use decimal so all number forms work properly
+                    num = Decimal(v)
+                except (ValueError, InvalidOperation):
+                    self._ixValue = ModelValue.INVALIDixVALUE
+                    raise ValueError("Invalid value for {} number: {}".format(self.localName, v))
+                try:
+                    scale = self.scale
+                    if scale is not None:
+                        num *= 10 ** Decimal(scale)
+                    self._ixValue = "{}".format(num * negate)
+                except (ValueError, InvalidOperation):
+                    self._ixValue = ModelValue.INVALIDixVALUE
+                    raise ValueError("Invalid value for {} scale {} for number {}".format(self.localName, scale, v))
             return self._ixValue
 
     @property
     def textValue(self):
-        """(str) -- override xml-level textValue for transformed value text()"""
+        """(str) -- override xml-level textValue for transformed value text()
+            will raise any value errors if transforming string or numeric has an error
+        """
         return self.value
     
     @property
     def stringValue(self):
-        """(str) -- override xml-level stringValue for transformed value descendants text"""
+        """(str) -- override xml-level stringValue for transformed value descendants text
+            will raise any value errors if transforming string or numeric has an error
+        """
         return self.value
     
     

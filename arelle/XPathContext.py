@@ -146,6 +146,8 @@ class XPathContext:
                     # uncomment to allow lambdas as variable values (for deferred processing if needed)
                     #if isinstance(result, LambdaType):
                     #    result = result()  # dereference lambda-valued variables
+                    if result is None: # None atomic result is XPath empty sequence
+                        result = []  # subsequent processing discards None results
             elif isinstance(p,OperationDef):
                 op = p.name
                 if isinstance(op, QNameDef): # function call
@@ -692,6 +694,8 @@ class XPathContext:
     def flattenSequence(self, x, sequence=None):
         if sequence is None: 
             if not isinstance(x, SEQUENCE_TYPES):
+                if x is None:
+                    return [] # none as atomic value is an empty sequence in xPath semantics
                 return [x]
             sequence = []
         for el in x:
@@ -731,7 +735,7 @@ class XPathContext:
             else:
                 h = 0
             l.add((h,e))
-        return [e for h,e in sorted(l, key=lambda h: h[0])]
+        return [e for h,e in sorted(l, key=lambda h: h[0] or 0)]  # or 0 in case sourceline is None
     
     def modelItem(self, x):
         if isinstance(x, (ModelFact, ModelInlineFact)) and x.isItem:
