@@ -15,6 +15,8 @@ from arelle.ModelFormulaObject import (aspectModels, Aspect, aspectModelAspect,
 from arelle.PrototypeInstanceObject import DimValuePrototype
 from arelle.ModelValue import (QName)
 import datetime, time, logging
+from decimal import Decimal
+from math import log10, isnan, isinf, fabs
 from arelle.Locale import format_string
 from collections import defaultdict
 ModelDimensionValue = None
@@ -63,7 +65,8 @@ def evaluate(xpCtx, varSet, variablesInScope=False, uncoveredAspectFacts=None):
                 xpCtx.inScopeVars[XbrlConst.qnEaTestExpression] = varSet.test
                 xpCtx.modelXbrl.info("message:" + (varSet.id or varSet.xlinkLabel or _("unlabeled variableSet")),
                     msg.evaluate(xpCtx),
-                    modelObject=varSet)
+                    modelObject=varSet,
+                    messageCodes=("message:{variableSetID|xlinkLabel}"))
                 xpCtx.inScopeVars.pop(XbrlConst.qnEaTestExpression)
         if xpCtx.formulaOptions.traceVariableSetExpressionResult and initialTraceCount == xpCtx.modelXbrl.logCount.get(logging.getLevelName('INFO'), 0):
             xpCtx.modelXbrl.info("formula:trace",
@@ -188,7 +191,6 @@ def evaluateVar(xpCtx, varSet, varIndex, cachedFilteredFacts, uncoveredAspectFac
                     #-     msg.evaluate(xpCtx),
                     #-     modelObject=varSet)
                     ### END PATCH: business-rules-logging changes
-                    
                 traceOf = "Value Assertion"
             if xpCtx.formulaOptions.traceVariableSetExpressionResult:
                 xpCtx.modelXbrl.info("formula:trace",
@@ -781,7 +783,6 @@ def produceOutputFact(xpCtx, formula, result):
                         
                 x = value[0]
                 if isinstance(x,float):
-                    from math import (log10, isnan, isinf, fabs)
                     if (isnan(x) or
                         (precision and (isinf(precision) or precision == 0)) or 
                         (decimals and isinf(decimals))):
@@ -791,6 +792,19 @@ def produceOutputFact(xpCtx, formula, result):
                     elif precision is not None and precision != 0:
                         a = fabs(x)
                         log = log10(a) if a != 0 else 0
+                        v = "%.*f" % ( int(precision) - int(log) - (1 if a >= 1 else 0), x)
+                    else: # no implicit precision yet
+                        v = xsString(xpCtx, None, x)
+                elif isinstance(x,Decimal):
+                    if (x.is_nan() or
+                        (precision and (isinf(precision) or precision == 0)) or 
+                        (decimals and isinf(decimals))):
+                        v = xsString(xpCtx, None, x)
+                    elif decimals is not None:
+                        v = "%.*f" % ( int(decimals), x)
+                    elif precision is not None and precision != 0:
+                        a = x.copy_abs()
+                        log = a.log10() if a != 0 else 0
                         v = "%.*f" % ( int(precision) - int(log) - (1 if a >= 1 else 0), x)
                     else: # no implicit precision yet
                         v = xsString(xpCtx, None, x)

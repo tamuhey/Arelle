@@ -294,20 +294,22 @@ def validate(val, xpathContext=None, parametersOnly=False, statusMsg='', compile
     val.modelXbrl.profileActivity("... formula parameter checks", minTimeToShow=1.0)
             
     for custFnSig in val.modelXbrl.modelCustomFunctionSignatures.values():
-        custFnQname = custFnSig.qname
-        if custFnQname.namespaceURI == XbrlConst.xfi:
-            val.modelXbrl.error("xbrlve:noProhibitedNamespaceForCustomFunction",
-                _("Custom function %(name)s has namespace reserved for functions in the function registry %(namespace)s"),
-                modelObject=custFnSig, name=custFnQname, namespace=custFnQname.namespaceURI )
-        # any custom function implementations?
-        for modelRel in val.modelXbrl.relationshipSet(XbrlConst.functionImplementation).fromModelObject(custFnSig):
-            custFnImpl = modelRel.toModelObject
-            custFnSig.customFunctionImplementation = custFnImpl
-            if len(custFnImpl.inputNames) != len(custFnSig.inputTypes):
-                val.modelXbrl.error("xbrlcfie:inputMismatch",
-                    _("Custom function %(name)s signature has %(parameterCountSignature)s parameters but implementation has %(parameterCountImplementation)s, must be matching"),
-                    modelObject=custFnSig, name=custFnQname, 
-                    parameterCountSignature=len(custFnSig.inputTypes), parameterCountImplementation=len(custFnImpl.inputNames) )
+        # entries indexed by qname, arity are signature, by qname are just for parser (value=None)
+        if custFnSig is not None:
+            custFnQname = custFnSig.qname
+            if custFnQname.namespaceURI == XbrlConst.xfi:
+                val.modelXbrl.error("xbrlve:noProhibitedNamespaceForCustomFunction",
+                    _("Custom function %(name)s has namespace reserved for functions in the function registry %(namespace)s"),
+                    modelObject=custFnSig, name=custFnQname, namespace=custFnQname.namespaceURI )
+            # any custom function implementations?
+            for modelRel in val.modelXbrl.relationshipSet(XbrlConst.functionImplementation).fromModelObject(custFnSig):
+                custFnImpl = modelRel.toModelObject
+                custFnSig.customFunctionImplementation = custFnImpl
+                if len(custFnImpl.inputNames) != len(custFnSig.inputTypes):
+                    val.modelXbrl.error("xbrlcfie:inputMismatch",
+                        _("Custom function %(name)s signature has %(parameterCountSignature)s parameters but implementation has %(parameterCountImplementation)s, must be matching"),
+                        modelObject=custFnSig, name=custFnQname, 
+                        parameterCountSignature=len(custFnSig.inputTypes), parameterCountImplementation=len(custFnImpl.inputNames) )
         
     for custFnImpl in val.modelXbrl.modelCustomFunctionImplementations:
         if not val.modelXbrl.relationshipSet(XbrlConst.functionImplementation).toModelObject(custFnImpl):
@@ -348,7 +350,8 @@ def validate(val, xpathContext=None, parametersOnly=False, statusMsg='', compile
             except XPathContext.XPathException as err:
                 val.modelXbrl.error("xbrlve:parameterTypeMismatch" if err.code == "err:FORG0001" else err.code,
                     _("Parameter \n%(name)s \nException: \n%(error)s"), 
-                    modelObject=modelParameter, name=paramQname, error=err.message)
+                    modelObject=modelParameter, name=paramQname, error=err.message,
+                    messageCodes=("xbrlve:parameterTypeMismatch", "err:FORG0001"))
         ''' Removed as per WG discussion 2012-12-20. This duplication checking unfairly presupposes URI based
            implementation and exceeds the scope of linkbase validation
         elif not parametersOnly: # is a modelInstance
@@ -997,11 +1000,13 @@ def checkFormulaRules(val, formula, nameVariables):
                 if dimQname and (dimConcept is None or (not dimConcept.isExplicitDimension if dim == "explicit" else not dimConcept.isTypedDimension)):
                     val.modelXbrl.error(badUsageErr,
                         _("Formula %(xlinkLabel)s dimension attribute %(dimension)s on the %(dimensionType)s dimension rule contains a QName that does not identify an (dimensionType)s dimension."),
-                        modelObject=formula, xlinkLabel=formula.xlinkLabel, dimensionType=dim, dimension=dimQname)
+                        modelObject=formula, xlinkLabel=formula.xlinkLabel, dimensionType=dim, dimension=dimQname,
+                        messageCodes=("xbrlfe:badUsageOfExplicitDimensionRule", "xbrlfe:badUsageOfTypedDimensionRule"))
                 elif not XmlUtil.hasChild(dimElt, XbrlConst.formula, "*") and not formula.source(Aspect.DIMENSIONS, dimElt):
                     val.modelXbrl.error(missingSavErr,
                         _("Formula %(xlinkLabel)s %(dimension)s dimension rule does not have any child elements and does not have a SAV for the %(dimensionType)s dimension that is identified by its dimension attribute."),
-                        modelObject=formula, xlinkLabel=formula.xlinkLabel, dimensionType=dim, dimension=dimQname)
+                        modelObject=formula, xlinkLabel=formula.xlinkLabel, dimensionType=dim, dimension=dimQname,
+                        messageCodes=("xbrlfe:missingSAVForExplicitDimensionRule", "xbrlfe:missingSAVForTypedDimensionRule"))
         
         # check aspect model expectations
         if formula.aspectModel == "non-dimensional":
@@ -1068,7 +1073,8 @@ def checkDefinitionNodeRules(val, table, parent, arcrole, xpathContext):
                             if dimQname and (dimConcept is None or (not dimConcept.isExplicitDimension if dim == "explicit" else not dimConcept.isTypedDimension)):
                                 val.modelXbrl.error(badUsageErr,
                                     _("RuleAxis %(xlinkLabel)s dimension attribute %(dimension)s on the %(dimensionType)s dimension rule contains a QName that does not identify an (dimensionType)s dimension."),
-                                    modelObject=axis, xlinkLabel=axis.xlinkLabel, dimensionType=dim, dimension=dimQname)
+                                    modelObject=axis, xlinkLabel=axis.xlinkLabel, dimensionType=dim, dimension=dimQname,
+                                    messageCodes=("xbrlfe:badUsageOfExplicitDimensionRule", "xbrlfe:badUsageOfTypedDimensionRule"))
                             memQname = axis.evaluateRule(None, dimQname)
                             if dimConcept.isExplicitDimension and memQname is not None and memQname not in val.modelXbrl.qnameConcepts:  
                                 val.modelXbrl.info("table:info",
@@ -1155,7 +1161,8 @@ def checkMessageExpressions(val, message):
                 _("Message %(xlinkLabel)s: unbalanced %(character)s character(s) in: %(text)s"),
                 modelObject=message, xlinkLabel=message.xlinkLabel, 
                 character='{' if bracketNesting < 0 else '}', 
-                text=message.text)
+                text=message.text,
+                messageCodes=("xbrlmsge:missingLeftCurlyBracketInMessage", "xbrlmsge:missingRightCurlyBracketInMessage"))
         else:
             message.expressions = expressions
             message.formatString = ''.join( formatString )
