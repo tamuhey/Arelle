@@ -284,14 +284,14 @@ class Cntlr:
                 self.logHandler = LogToBufferHandler()
                 self.logger.logHrefObjectProperties = True
             elif logFileName.endswith(".xml"):
-                self.logHandler = LogToXmlHandler(filename=logFileName, mode=logFileMode)
+                self.logHandler = LogToXmlHandler(filename=logFileName, mode=logFileMode or "a")  # should this be "w" mode??
                 self.logger.logHrefObjectProperties = True
                 if not logFormat:
                     logFormat = "%(message)s"
             else:
                 self.logHandler = logging.FileHandler(filename=logFileName, 
-                                                      mode=logFileMode if logFileMode else "w", 
-                                                      encoding=logFileEncoding if logFileEncoding else "utf-8")
+                                                      mode=logFileMode or "a",  # should this be "w" mode??
+                                                      encoding=logFileEncoding or "utf-8")
             self.logHandler.setFormatter(LogFormatter(logFormat or "%(asctime)s [%(messageCode)s] %(message)s - %(file)s\n"))
             self.logger.addHandler(self.logHandler)
         else:
@@ -316,18 +316,27 @@ class Cntlr:
         if self.logger:
             self.logger.messageCodeFilter = re.compile(logCodeFilter) if logCodeFilter else None
                         
-    def addToLog(self, message, messageCode="", file="", level=logging.INFO):
+    def addToLog(self, message, messageCode="", messageArgs=None, file="", level=logging.INFO):
         """Add a simple info message to the default logger
            
         :param message: Text of message to add to log.
         :type message: str
+        : param messageArgs: optional dict of message format-string key-value pairs
+        :type messageArgs: dict
         :param messageCode: Message code (e.g., a prefix:id of a standard error)
         :param messageCode: str
         :param file: File name (and optional line numbers) pertaining to message
         :type file: str
         """
         if self.logger is not None:
-            self.logger.log(level, message, extra={"messageCode":messageCode,"refs":[{"href": file}]})
+            if messageArgs:
+                args = (message, messageArgs)
+            else:
+                args = (message,)  # pass no args if none provided
+            refs = []
+            if file:
+                refs.append( {"href": file} )
+            self.logger.log(level, *args, extra={"messageCode":messageCode,"refs":refs})
         else:
             try:
                 print(message)
@@ -503,20 +512,24 @@ class LogFormatter(logging.Formatter):
         # provide a file parameter made up from refs entries
         fileLines = defaultdict(set)
         for ref in record.refs:
-            fileLines[ref["href"].partition("#")[0]].add(ref.get("sourceLine", 0))
+            href = ref.get("href")
+            if href:
+                fileLines[href.partition("#")[0]].add(ref.get("sourceLine", 0))
         record.file = ", ".join(file + " " + ', '.join(str(line) 
                                                        for line in sorted(lines, key=lambda l: l)
                                                        if line)
                                 for file, lines in sorted(fileLines.items()))
         try:
             formattedMessage = super(LogFormatter, self).format(record)
-        except (KeyError, ValueError) as ex:
+        except (KeyError, TypeError, ValueError) as ex:
             formattedMessage = "Message: "
             if getattr(record, "messageCode", ""):
                 formattedMessage += "[{0}] ".format(record.messageCode)
             if getattr(record, "msg", ""):
                 formattedMessage += record.msg + " "
-            formattedMessage += record.args.get('error','') + " \nMessage log error: " + str(ex)
+            if isinstance(record.args, dict) and 'error' in record.args: # args may be list or empty
+                formattedMessage += record.args['error']
+            formattedMessage += " \nMessage log error: " + str(ex)
         del record.file
         return formattedMessage
 

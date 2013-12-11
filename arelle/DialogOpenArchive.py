@@ -96,9 +96,11 @@ class DialogOpenArchive(Toplevel):
         if openType == ENTRY_POINTS:
             try:
                 metadataFiles = filesource.taxonomyPackageMetadataFiles
+                ''' take first for now
                 if len(metadataFiles) != 1:
                     raise IOError(_("Taxonomy package contained more than one metadata file: {0}.")
                                   .format(', '.join(metadataFiles)))
+                '''
                 metadataFile = metadataFiles[0]
                 metadata = filesource.file(filesource.url + os.sep + metadataFile)[0]
                 self.metadataFilePrefix = os.sep.join(os.path.split(metadataFile)[:-1])
@@ -106,6 +108,11 @@ class DialogOpenArchive(Toplevel):
                     self.metadataFilePrefix += os.sep
         
                 self.taxonomyPackage = parsePackage(mainWin, metadata)
+                
+                # may be a catalog file with no entry oint names
+                if not self.taxonomyPackage["nameToUrls"]:
+                    openType = ARCHIVE  # no entry points to show, just archive
+                    self.showAltViewButton = False
             except Exception as e:
                 self.close()
                 err = _("Failed to parse metadata; the underlying error was: {0}").format(e)
@@ -125,17 +132,19 @@ class DialogOpenArchive(Toplevel):
         okButton.grid(row=y, column=2, sticky=(S,E,W), pady=3)
         cancelButton.grid(row=y, column=3, sticky=(S,E,W), pady=3, padx=3)
         
-        if showAltViewButton:
+        if self.showAltViewButton:
             self.altViewButton = Button(frame, command=self.showAltView)
             self.altViewButton.grid(row=y, column=0, sticky=(S,W), pady=3, padx=3)
         
         self.loadTreeView(openType, colHeader, title)
 
+        self.geometry("+{0}+{1}".format(dialogX+50,dialogY+100))
         frame.grid(row=0, column=0, sticky=(N,S,E,W))
         frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=1)
         window = self.winfo_toplevel()
         window.columnconfigure(0, weight=1)
-        self.geometry("+{0}+{1}".format(dialogX+50,dialogY+100))
+        window.rowconfigure(0, weight=1)
         
         self.bind("<Return>", self.ok)
         self.bind("<Escape>", self.close)
