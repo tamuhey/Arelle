@@ -5,9 +5,10 @@ Created on Oct 17, 2010
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
 from collections import defaultdict
-from math import (log10, isnan, isinf, fabs, trunc, fmod, floor)
+from math import (log10, isnan, isinf, fabs, trunc, fmod, floor, pow)
 import decimal
 import re
+import hashlib
 from arelle import Locale, XbrlConst, XbrlUtil
 from arelle.ModelObject import ObjectPropertyViewWrapper
 
@@ -369,11 +370,16 @@ def inferredDecimals(fact):
         pass
     return floatNaN
     
-def roundValue(value, precision=None, decimals=None):
+def roundValue(value, precision=None, decimals=None, scale=None):
     try:
         vDecimal = decimal.Decimal(value)
+        if scale:
+            iScale = int(scale)
+            vDecimal = vDecimal.scaleb(iScale)
         if precision:
             vFloat = float(value)
+            if scale:
+                vFloat = pow(vFloat, iScale)
     except (decimal.InvalidOperation, ValueError): # would have been a schema error reported earlier
         return NaN
     if precision:
@@ -421,11 +427,26 @@ def wrappedFactWithWeight(fact, weight, roundedValue):
 
 def wrappedSummationAndItems(fact, roundedSum, boundSummationItems):
     # need hash of facts and their values from boundSummationItems
+    ''' ARELLE-281, replace: faster python-based hash (replace with hashlib for fewer collisions)
     itemValuesHash = hash( tuple(( hash(b.modelObject.qname), hash(b.extraProperties[1][1]) )
                                  # sort by qname so we don't care about reordering of summation terms
                                  for b in sorted(boundSummationItems,
                                                        key=lambda b: b.modelObject.qname)) )
     sumValueHash = hash( (hash(fact.qname), hash(roundedSum)) )
+    '''
+    sha256 = hashlib.sha256()
+    # items hash: sort by qname so we don't care about reordering of summation terms in linkbase updates
+    for b in sorted(boundSummationItems, key=lambda b: b.modelObject.qname):
+        sha256.update(b.modelObject.qname.namespaceURI.encode('utf-8','replace')) #qname of erroneous submission may not be utf-8 perfectly encodable
+        sha256.update(b.modelObject.qname.localName.encode('utf-8','replace'))
+        sha256.update(str(b.extraProperties[1][1]).encode('utf-8','replace'))
+    itemValuesHash = sha256.hexdigest()
+    # summation value hash
+    sha256 = hashlib.sha256()
+    sha256.update(fact.qname.namespaceURI.encode('utf-8','replace'))
+    sha256.update(fact.qname.localName.encode('utf-8','replace'))
+    sha256.update(str(roundedSum).encode('utf-8','replace'))
+    sumValueHash = sha256.hexdigest()
     # return list of bound summation followed by bound contributing items
     return [ObjectPropertyViewWrapper(fact,
                                       ( ("sumValueHash", sumValueHash),

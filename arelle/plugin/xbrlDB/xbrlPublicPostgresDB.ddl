@@ -1,10 +1,16 @@
 --
+-- XBRL-US Public Postgres DB 
+--
 -- PostgreSQL database dump
 --
 
+-- clear everything prior
+DROP SCHEMA public CASCADE; create SCHEMA public;
+
 SET statement_timeout = 0;
 SET client_encoding = 'UTF8';
-SET standard_conforming_strings = off;
+-- HF - must have conforming strings on for Postgres interface to work, as it will include Windows paths sometimes
+SET standard_conforming_strings = on;
 SET check_function_bodies = false;
 SET client_min_messages = warning;
 SET escape_string_warning = off;
@@ -388,6 +394,7 @@ COMMENT ON COLUMN relationship.calculation_weight IS 'Obviously only for calcula
 -- Name: ancestry_get_relationships(integer, integer); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
+DROP FUNCTION IF EXISTS () CASCADE;
 CREATE FUNCTION ancestry_get_relationships(network_id_arg integer, child_id integer) RETURNS SETOF relationship
     LANGUAGE plpgsql
     AS $$
@@ -426,6 +433,7 @@ ALTER FUNCTION public.ancestry_get_relationships(network_id_arg integer, child_i
 -- Name: ancestry_in_accession(integer, character varying); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
+DROP FUNCTION IF EXISTS () CASCADE;
 CREATE FUNCTION ancestry_in_accession(accession_id_arg integer, child_name character varying) RETURNS SETOF ancestry
     LANGUAGE plpgsql
     AS $$
@@ -453,6 +461,7 @@ ALTER FUNCTION public.ancestry_in_accession(accession_id_arg integer, child_name
 -- Name: ancestry_in_accession(integer, integer); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
+DROP FUNCTION IF EXISTS () CASCADE;
 CREATE FUNCTION ancestry_in_accession(accession_id_arg integer, child_id integer) RETURNS SETOF ancestry
     LANGUAGE plpgsql
     AS $$
@@ -485,6 +494,7 @@ ALTER FUNCTION public.ancestry_in_accession(accession_id_arg integer, child_id i
 -- Name: ancestry_in_network(integer, integer); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
+DROP FUNCTION IF EXISTS () CASCADE;
 CREATE FUNCTION ancestry_in_network(network_id_arg integer, child_id integer) RETURNS SETOF ancestry
     LANGUAGE plpgsql
     AS $$
@@ -532,6 +542,7 @@ ALTER FUNCTION public.ancestry_in_network(network_id_arg integer, child_id integ
 -- Name: ancestry_in_network(integer, character varying); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
+DROP FUNCTION IF EXISTS () CASCADE;
 CREATE FUNCTION ancestry_in_network(network_id_arg integer, child_name character varying) RETURNS SETOF ancestry
     LANGUAGE plpgsql
     AS $$
@@ -558,6 +569,7 @@ ALTER FUNCTION public.ancestry_in_network(network_id_arg integer, child_name cha
 -- Name: armor(bytea); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
+DROP FUNCTION IF EXISTS () CASCADE;
 CREATE FUNCTION armor(bytea) RETURNS text
     LANGUAGE c IMMUTABLE STRICT
     AS '$libdir/pgcrypto', 'pg_armor';
@@ -569,6 +581,7 @@ ALTER FUNCTION public.armor(bytea) OWNER TO postgres;
 -- Name: array_remove_value(anyarray, anyarray); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
+DROP FUNCTION IF EXISTS () CASCADE;
 CREATE FUNCTION array_remove_value(orig_array_arg anyarray, item anyarray) RETURNS anyarray
     LANGUAGE plpgsql
     AS $$
@@ -594,6 +607,7 @@ ALTER FUNCTION public.array_remove_value(orig_array_arg anyarray, item anyarray)
 -- Name: base_element_hash_string(character varying, character varying); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
+DROP FUNCTION IF EXISTS () CASCADE;
 CREATE FUNCTION base_element_hash_string(element_namespace character varying, element_local_name character varying) RETURNS character varying
     LANGUAGE plpgsql
     AS $$             
@@ -5359,11 +5373,14 @@ ALTER TABLE public.seq_fact OWNER TO postgres;
 --
 -- Name: fact; Type: TABLE; Schema: public; Owner: postgres; Tablespace: 
 --
+-- HF: modified to accept tuples by adding tuple_fact_id and
+--      context_id, is_precision_infinity, isdecimals_infinity now NULLable
 
 CREATE TABLE fact (
     fact_id integer DEFAULT nextval('seq_fact'::regclass) NOT NULL,
     accession_id integer NOT NULL,
-    context_id integer NOT NULL,
+    tuple_fact_id integer,
+    context_id integer,
     unit_id integer,
     element_id integer NOT NULL,
     effective_value numeric,
@@ -5371,8 +5388,8 @@ CREATE TABLE fact (
     xml_id character varying(2048),
     precision_value integer,
     decimals_value integer,
-    is_precision_infinity boolean DEFAULT false NOT NULL,
-    is_decimals_infinity boolean DEFAULT false NOT NULL,
+    is_precision_infinity boolean DEFAULT false,
+    is_decimals_infinity boolean DEFAULT false,
     ultimus_index integer,
     calendar_ultimus_index integer,
     uom character varying,
@@ -20377,7 +20394,7 @@ CREATE UNIQUE INDEX qname_namespace_localname ON qname USING btree (namespace, l
 -- Name: qname_ts_index06; Type: INDEX; Schema: public; Owner: postgres; Tablespace: 
 --
 
-CREATE INDEX qname_ts_index06 ON qname USING gin (to_tsvector('english'::regconfig, regexp_replace((local_name)::text, '([A-Z])'::text, ' \\1'::text, 'g'::text)));
+CREATE INDEX qname_ts_index06 ON qname USING gin (to_tsvector('english'::regconfig, regexp_replace((local_name)::text, '([A-Z])'::text, ' \1'::text, 'g'::text)));
 
 
 --
