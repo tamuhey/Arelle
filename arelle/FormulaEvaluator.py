@@ -14,12 +14,14 @@ from arelle.ModelFormulaObject import (aspectModels, Aspect, aspectModelAspect,
                                  ModelParameter, ModelFilter, ModelAspectCover, ModelBooleanFilter)
 from arelle.PrototypeInstanceObject import DimValuePrototype
 from arelle.ModelValue import (QName)
-import datetime, time, logging
+import datetime, time, logging, re
 from decimal import Decimal
 from math import log10, isnan, isinf, fabs
 from arelle.Locale import format_string
 from collections import defaultdict
 ModelDimensionValue = None
+
+expressionVariablesPattern = re.compile(r"([^$]*)([$]\w[\w:.-]*)([^$]*)")
 
 def evaluate(xpCtx, varSet, variablesInScope=False, uncoveredAspectFacts=None):
     # for each dependent variable, find bindings
@@ -48,7 +50,7 @@ def evaluate(xpCtx, varSet, variablesInScope=False, uncoveredAspectFacts=None):
                     var = varRel.toModelObject
                     if isinstance(var, ModelParameter) and varQname not in xpCtx.inScopeVars:
                         assertionParamQnames.append(varQname)
-                        xpCtx.inScopeVars[varQname] = xpCtx.inScopeVars.get(var.qname)
+                        xpCtx.inScopeVars[varQname] = xpCtx.inScopeVars.get(var.parameterQname)
                 result = xpCtx.evaluateBooleanValue(prog, contextItem=varSet.evaluationsCount)
                 for varQname in assertionParamQnames:
                     xpCtx.inScopeVars.pop(varQname)
@@ -193,9 +195,16 @@ def evaluateVar(xpCtx, varSet, varIndex, cachedFilteredFacts, uncoveredAspectFac
                     ### END PATCH: business-rules-logging changes
                 traceOf = "Value Assertion"
             if xpCtx.formulaOptions.traceVariableSetExpressionResult:
+                label = varSet.logLabel()
+                expression = varSet.expression
                 xpCtx.modelXbrl.info("formula:trace",
-                     _("%(variableSetType)s %(xlinkLabel)s \nResult: \n%(result)s"),
-                     modelObject=varSet, variableSetType=traceOf, xlinkLabel=varSet.xlinkLabel, result=result)
+                     _("%(variableSetType)s %(xlinkLabel)s{0} \nExpression: %(expression)s \nEvaluated: %(evaluatedExpression)s \nResult: %(result)s")
+                     .format(" \n%(label)s" if label else ""),
+                     modelObject=varSet, variableSetType=traceOf, xlinkLabel=varSet.xlinkLabel, 
+                     label=label, result=result, expression=expression,
+                     evaluatedExpression=''.join(xpCtx.traceEffectiveVariableValue(varSet,expr)
+                                                 for grp in expressionVariablesPattern.findall(expression)
+                                                 for expr in grp))
             if isinstance(varSet, ModelFormula) and varSet.outputInstanceQname in xpCtx.inScopeVars:
                 newFact = produceOutputFact(xpCtx, varSet, result)
             else:
@@ -326,7 +335,7 @@ def evaluateVar(xpCtx, varSet, varIndex, cachedFilteredFacts, uncoveredAspectFac
                      _("General Variable %(variable)s: select result %(result)s"),
                      modelObject=var, variable=varQname, result=str(vb.values))
         elif vb.isParameter:
-            vb.parameterValue = xpCtx.inScopeVars.get(var.qname)
+            vb.parameterValue = xpCtx.inScopeVars.get(var.parameterQname)
         # recurse partitions, preserve overlaid var bindings and inScopeVars
         overriddenVarBinding = xpCtx.varBindings.get(varQname)            
         xpCtx.varBindings[varQname] = vb

@@ -16,15 +16,31 @@ and does not apply to the XBRL US Database schema and description.
 import time, os, io, sys, logging
 from arelle.Locale import format_string
 from .XbrlPublicPostgresDB import insertIntoDB as insertIntoPostgresDB, isDBPort as isPostgresPort
+from .XbrlSemanticSqlDB import insertIntoDB as insertIntoSemanticSqlDB, isDBPort as isSemanticSqlPort
 from .XbrlSemanticGraphDB import insertIntoDB as insertIntoRexsterDB, isDBPort as isRexsterPort
 from .XbrlSemanticRdfDB import insertIntoDB as insertIntoRdfDB, isDBPort as isRdfPort
 from .XbrlSemanticJsonDB import insertIntoDB as insertIntoJsonDB, isDBPort as isJsonPort
 
 dbTypes = {
     "postgres": insertIntoPostgresDB,
+    "mssqlSemantic": insertIntoSemanticSqlDB,
+    "mysqlSemantic": insertIntoSemanticSqlDB,
+    "orclSemantic": insertIntoSemanticSqlDB,
+    "pgSemantic": insertIntoSemanticSqlDB,
     "rexster": insertIntoRexsterDB,
     "rdfDB": insertIntoRdfDB,
     "json": insertIntoJsonDB
+    }
+
+dbProduct = {
+    "postgres": "postgres",
+    "mssqlSemantic": "mssql",
+    "mysqlSemantic": "mysql",
+    "orclSemantic": "orcl",
+    "pgSemantic": "postgres",
+    "rexster": None,
+    "rdfDB": None,
+    "json": None
     }
 
 def xbrlDBmenuEntender(cntlr, menu):
@@ -44,16 +60,21 @@ def xbrlDBmenuEntender(cntlr, menu):
         def backgroundStoreIntoDB():
             try: 
                 host, port, user, password, db, timeout, dbType = dbConnection
+                product = None
                 if timeout and timeout.isdigit():
                     timeout = int(timeout)
                 # identify server
                 if dbType in dbTypes:
                     insertIntoDB = dbTypes[dbType]
+                    product = dbProduct[dbType]
                 else:
                     cntlr.addToLog(_("Probing host {0} port {1} to determine server database type.")
                                    .format(host, port))
                     if isPostgresPort(host, port):
                         dbType = "postgres"
+                        insertIntoDB = insertIntoPostgresDB
+                    elif isSemanticSqlPort(host, port):
+                        dbType = "pgSemantic"
                         insertIntoDB = insertIntoPostgresDB
                     elif isRexsterPort(host, port):
                         dbType = "rexster"
@@ -76,7 +97,8 @@ def xbrlDBmenuEntender(cntlr, menu):
                 cntlr.saveConfig()
                 startedAt = time.time()
                 insertIntoDB(cntlr.modelManager.modelXbrl, 
-                             host=host, port=port, user=user, password=password, database=db, timeout=timeout)
+                             host=host, port=port, user=user, password=password, database=db, timeout=timeout,
+                             product=product)
                 cntlr.addToLog(format_string(cntlr.modelManager.locale, 
                                             _("stored to database in %.2f secs"), 
                                             time.time() - startedAt))
@@ -116,10 +138,14 @@ def storeIntoDB(dbConnection, modelXbrl, rssItem=None):
         if len(dbConnection) > 6: dbType = dbConnection[6]
 
     startedAt = time.time()
+    product = None
     if dbType in dbTypes:
         insertIntoDB = dbTypes[dbType]
+        product = dbProduct[dbType]
     elif isPostgresPort(host, port):
         insertIntoDB = insertIntoPostgresDB
+    elif isSemanticSqlPort(host, port):
+        insertIntoDB = insertIntoSemanticSqlDB
     elif isRexsterPort(host, port):
         insertIntoDB = insertIntoRexsterDB
     elif isRdfPort(host, port, db):
@@ -129,7 +155,7 @@ def storeIntoDB(dbConnection, modelXbrl, rssItem=None):
     else:
         modelXbrl.modelManager.addToLog('Server at "{0}:{1}" is not recognized to be either a Postgres or a Rexter service.'.format(host, port))
         return
-    insertIntoDB(modelXbrl, host=host, port=port, user=user, password=password, database=db, timeout=timeout, rssItem=rssItem)
+    insertIntoDB(modelXbrl, host=host, port=port, user=user, password=password, database=db, timeout=timeout, product=product, rssItem=rssItem)
     modelXbrl.modelManager.addToLog(format_string(modelXbrl.modelManager.locale, 
                           _("stored to database in %.2f secs"), 
                           time.time() - startedAt), messageCode="info", file=modelXbrl.uri)
@@ -219,7 +245,11 @@ __pluginInfo__ = {
     'license': 'Apache-2 (Arelle plug-in), BSD license (pg8000 library)',
     'author': 'Mark V Systems Limited',
     'copyright': '(c) Copyright 2013 Mark V Systems Limited, All rights reserved,\n'
-                'uses: pg8000, Copyright (c) 2007-2009, Mathieu Fenniak (XBRL Public Postgres DB), and\n'
+                'uses: cx_Oracle Copyright (c) 2007-2012, Anthony Tuininga. All rights reserved (Oracle DB), \n'
+                '           (and)Copyright (c) 2001-2007, Computronix (Canada) Ltd., Edmonton, Alberta, Canada. All rights reserved, \n'
+                '      pg8000, Copyright (c) 2007-2009, Mathieu Fenniak (Postgres DB), \n'
+                '      pyodbc, no copyright, Michael Kleehammer (MS SQL), \n'
+                '      PyMySQL, Copyright (c) 2010, 2013 PyMySQL contributors (MySQL DB), and\n' 
                 '      rdflib, Copyright (c) 2002-2012, RDFLib Team (RDF DB)',
     # classes of mount points (required)
     'CntlrWinMain.Menu.Tools': xbrlDBmenuEntender,

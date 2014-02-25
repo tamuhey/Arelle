@@ -10,6 +10,7 @@ This module is Arelle's controller in command line non-interactive mode
 '''
 from arelle import PythonUtil # define 2.x or 3.x string types
 import gettext, time, datetime, os, shlex, sys, traceback
+from lxml import etree
 from optparse import OptionParser, SUPPRESS_HELP
 from arelle import (Cntlr, FileSource, ModelDocument, XmlUtil, Version, 
                     ViewFileDTS, ViewFileFactList, ViewFileFactTable, ViewFileConcepts, 
@@ -38,6 +39,9 @@ def main():
         
     gettext.install("arelle") # needed for options messages
     parseAndRun(args)
+    
+def wsgiApplication():
+    return parseAndRun( ["--webserver=::wsgi"] )
        
 def parseAndRun(args):
     """interface used by Main program and py.test (arelle_test.py)
@@ -185,23 +189,43 @@ def parseAndRun(args):
                              "none - prevent formula validation or running when also specifying -v or --validate.  "
                              "if this option is not specified, -v or --validate will validate and run formulas if present"))
     parser.add_option("--formulaParamExprResult", action="store_true", dest="formulaParamExprResult", help=_("Specify formula tracing."))
+    parser.add_option("--formulaparamexprresult", action="store_true", dest="formulaParamExprResult", help=SUPPRESS_HELP)
     parser.add_option("--formulaParamInputValue", action="store_true", dest="formulaParamInputValue", help=_("Specify formula tracing."))
+    parser.add_option("--formulaparaminputvalue", action="store_true", dest="formulaParamInputValue", help=SUPPRESS_HELP)
     parser.add_option("--formulaCallExprSource", action="store_true", dest="formulaCallExprSource", help=_("Specify formula tracing."))
+    parser.add_option("--formulacallexprsource", action="store_true", dest="formulaCallExprSource", help=SUPPRESS_HELP)
     parser.add_option("--formulaCallExprCode", action="store_true", dest="formulaCallExprCode", help=_("Specify formula tracing."))
+    parser.add_option("--formulacallexprcode", action="store_true", dest="formulaCallExprCode", help=SUPPRESS_HELP)
     parser.add_option("--formulaCallExprEval", action="store_true", dest="formulaCallExprEval", help=_("Specify formula tracing."))
+    parser.add_option("--formulacallexpreval", action="store_true", dest="formulaCallExprEval", help=SUPPRESS_HELP)
     parser.add_option("--formulaCallExprResult", action="store_true", dest="formulaCallExprResult", help=_("Specify formula tracing."))
+    parser.add_option("--formulacallexprtesult", action="store_true", dest="formulaCallExprResult", help=SUPPRESS_HELP)
     parser.add_option("--formulaVarSetExprEval", action="store_true", dest="formulaVarSetExprEval", help=_("Specify formula tracing."))
+    parser.add_option("--formulavarsetexpreval", action="store_true", dest="formulaVarSetExprEval", help=SUPPRESS_HELP)
     parser.add_option("--formulaVarSetExprResult", action="store_true", dest="formulaVarSetExprResult", help=_("Specify formula tracing."))
+    parser.add_option("--formulavarsetexprresult", action="store_true", dest="formulaVarSetExprResult", help=SUPPRESS_HELP)
     parser.add_option("--formulaVarSetTiming", action="store_true", dest="timeVariableSetEvaluation", help=_("Specify showing times of variable set evaluation."))
+    parser.add_option("--formulavarsettiming", action="store_true", dest="timeVariableSetEvaluation", help=SUPPRESS_HELP)
     parser.add_option("--formulaAsserResultCounts", action="store_true", dest="formulaAsserResultCounts", help=_("Specify formula tracing."))
+    parser.add_option("--formulaasserresultcounts", action="store_true", dest="formulaAsserResultCounts", help=SUPPRESS_HELP)
     parser.add_option("--formulaFormulaRules", action="store_true", dest="formulaFormulaRules", help=_("Specify formula tracing."))
+    parser.add_option("--formulaformularules", action="store_true", dest="formulaFormulaRules", help=SUPPRESS_HELP)
     parser.add_option("--formulaVarsOrder", action="store_true", dest="formulaVarsOrder", help=_("Specify formula tracing."))
+    parser.add_option("--formulavarsorder", action="store_true", dest="formulaVarsOrder", help=SUPPRESS_HELP)
     parser.add_option("--formulaVarExpressionSource", action="store_true", dest="formulaVarExpressionSource", help=_("Specify formula tracing."))
+    parser.add_option("--formulavarexpressionsource", action="store_true", dest="formulaVarExpressionSource", help=SUPPRESS_HELP)
     parser.add_option("--formulaVarExpressionCode", action="store_true", dest="formulaVarExpressionCode", help=_("Specify formula tracing."))
+    parser.add_option("--formulavarexpressioncode", action="store_true", dest="formulaVarExpressionCode", help=SUPPRESS_HELP)
     parser.add_option("--formulaVarExpressionEvaluation", action="store_true", dest="formulaVarExpressionEvaluation", help=_("Specify formula tracing."))
+    parser.add_option("--formulavarexpressionevaluation", action="store_true", dest="formulaVarExpressionEvaluation", help=SUPPRESS_HELP)
     parser.add_option("--formulaVarExpressionResult", action="store_true", dest="formulaVarExpressionResult", help=_("Specify formula tracing."))
+    parser.add_option("--formulavarexpressionresult", action="store_true", dest="formulaVarExpressionResult", help=SUPPRESS_HELP)
     parser.add_option("--formulaVarFilterWinnowing", action="store_true", dest="formulaVarFilterWinnowing", help=_("Specify formula tracing."))
+    parser.add_option("--formulavarfilterwinnowing", action="store_true", dest="formulaVarFilterWinnowing", help=SUPPRESS_HELP)
     parser.add_option("--formulaVarFiltersResult", action="store_true", dest="formulaVarFiltersResult", help=_("Specify formula tracing."))
+    parser.add_option("--formulavarfiltersresult", action="store_true", dest="formulaVarFiltersResult", help=SUPPRESS_HELP)
+    parser.add_option("--formulaRunIDs", action="store", dest="formulaRunIDs", help=_("Specify formula/assertion IDs to run, separated by a '|' character."))
+    parser.add_option("--formularunids", action="store", dest="formulaRunIDs", help=SUPPRESS_HELP)
     parser.add_option("--uiLang", action="store", dest="uiLang",
                       help=_("Language for user interface (override system settings, such as program messages).  Does not save setting."))
     parser.add_option("--uilang", action="store", dest="uiLang", help=SUPPRESS_HELP)
@@ -217,6 +241,12 @@ def parseAndRun(args):
     parser.add_option("--internetTimeout", type="int", dest="internetTimeout", 
                       help=_("Specify internet connection timeout in seconds (0 means unlimited)."))
     parser.add_option("--internettimeout", type="int", action="store", dest="internetTimeout", help=SUPPRESS_HELP)
+    parser.add_option("--internetRecheck", choices=("weekly", "daily", "never"), dest="internetRecheck", 
+                      help=_("Specify rechecking cache files (weekly is default)"))
+    parser.add_option("--internetrecheck", choices=("weekly", "daily", "never"), action="store", dest="internetRecheck", help=SUPPRESS_HELP)
+    parser.add_option("--internetLogDownloads", action="store_true", dest="internetLogDownloads", 
+                      help=_("Log info message for downloads to web cache."))
+    parser.add_option("--internetlogdownloads", action="store_true", dest="internetLogDownloads", help=SUPPRESS_HELP)
     parser.add_option("--xdgConfigHome", action="store", dest="xdgConfigHome", 
                       help=_("Specify non-standard location for configuration and cache files (overrides environment parameter XDG_CONFIG_HOME)."))
     parser.add_option("--plugins", action="store", dest="plugins",
@@ -240,6 +270,8 @@ def parseAndRun(args):
                              "URLs are full absolute paths.  "
                              "If + is omitted from package file nothing is saved (same as temp).  " ))
     parser.add_option("--abortOnMajorError", action="store_true", dest="abortOnMajorError", help=_("Abort process on major error, such as when load is unable to find an entry or discovered file."))
+    parser.add_option("--showEnvironment", action="store_true", dest="showEnvironment", help=_("Show Arelle's config and cache directory and host OS environment parameters."))
+    parser.add_option("--showenvironment", action="store_true", dest="showEnvironment", help=SUPPRESS_HELP)
     parser.add_option("--collectProfileStats", action="store_true", dest="collectProfileStats", help=_("Collect profile statistics, such as timing of validation activities and formulae."))
     if hasWebServer:
         parser.add_option("--webserver", action="store", dest="webserver",
@@ -256,6 +288,8 @@ def parseAndRun(args):
     
     if args is None and cntlr.isGAE:
         args = ["--webserver=::gae"]
+    elif args is None and cntlr.isCGI:
+        args = ["--webserver=::cgi"]
     elif cntlr.isMSW:
         # if called from java on Windows any empty-string arguments are lost, see:
         # http://bugs.sun.com/view_bug.do?bug_id=6518827
@@ -292,14 +326,15 @@ def parseAndRun(args):
                 "See the License for the specific language governing permissions and \n"
                 "limitations under the License."
                 "\n\nIncludes:"
-                "\n   Python(r) (c) 2001-2013 Python Software Foundation"
+                "\n   Python(r) {3[0]}.{3[1]}.{3[2]} (c) 2001-2013 Python Software Foundation"
                 "\n   PyParsing (c) 2003-2013 Paul T. McGuire"
-                "\n   lxml (c) 2004 Infrae, ElementTree (c) 1999-2004 by Fredrik Lundh"
+                "\n   lxml {4[0]}.{4[1]}.{4[2]} (c) 2004 Infrae, ElementTree (c) 1999-2004 by Fredrik Lundh"
                 "\n   xlrd (c) 2005-2013 Stephen J. Machin, Lingfo Pty Ltd, (c) 2001 D. Giffin, (c) 2000 A. Khan"
                 "\n   xlwt (c) 2007 Stephen J. Machin, Lingfo Pty Ltd, (c) 2005 R. V. Kiseliov"
                 "{2}"
                 ).format(cntlr.systemWordSize, Version.version,
-                         _("\n   Bottle (c) 2011-2013 Marcel Hellkamp") if hasWebServer else ""))
+                         _("\n   Bottle (c) 2011-2013 Marcel Hellkamp") if hasWebServer else "",
+                         sys.version_info, etree.LXML_VERSION))
     elif options.disclosureSystemName in ("help", "help-verbose"):
         text = _("Disclosure system choices: \n{0}").format(' \n'.join(cntlr.modelManager.disclosureSystem.dirlist(options.disclosureSystemName)))
         try:
@@ -322,7 +357,9 @@ def parseAndRun(args):
         else:
             cntlr.startLogging(logFileName='logToBuffer')
             from arelle import CntlrWebMain
-            CntlrWebMain.startWebserver(cntlr, options)
+            app = CntlrWebMain.startWebserver(cntlr, options)
+            if options.webserver == '::wsgi':
+                return app
     else:
         # parse and run the FILENAME
         cntlr.startLogging(logFileName=(options.logFile or "logToPrint"),
@@ -478,6 +515,13 @@ class CntlrCmdLine(Cntlr.Cntlr):
                                   packageInfo.get("fileDate"), packageInfo.get("description")),
                                   messageCode="info", file=packageInfo.get("URL"))
                 
+        if options.showEnvironment:
+            self.addToLog(_("Config directory: {0}").format(self.configDir))
+            self.addToLog(_("Cache directory: {0}").format(self.userAppDir))
+            for envVar in ("XDG_CONFIG_HOME",):
+                if envVar in os.environ:
+                    self.addToLog(_("XDG_CONFIG_HOME={0}").format(os.environ[envVar]))
+            return True
         # run utility command line options that don't depend on entrypoint Files
         hasUtilityPlugin = False
         for pluginXbrlMethod in pluginClassMethods("CntlrCmdLine.Utility.Run"):
@@ -545,12 +589,14 @@ class CntlrCmdLine(Cntlr.Cntlr):
             self.webCache.workOffline = False
         if options.internetTimeout is not None:
             self.webCache.timeout = (options.internetTimeout or None)  # use None if zero specified to disable timeout
+        if options.internetLogDownloads:
+            self.webCache.logDownloads = True
         fo = FormulaOptions()
         if options.parameters:
             parameterSeparator = (options.parameterSeparator or ',')
             fo.parameterValues = dict(((qname(key, noPrefixIsNoNamespace=True),(None,value)) 
                                        for param in options.parameters.split(parameterSeparator) 
-                                       for key,sep,value in (param.partition('='),) ) )   
+                                       for key,sep,value in (param.partition('='),) ) )
         if options.formulaParamExprResult:
             fo.traceParameterExpressionResult = True
         if options.formulaParamInputValue:
@@ -589,6 +635,8 @@ class CntlrCmdLine(Cntlr.Cntlr):
             fo.traceVariableFiltersResult = True
         if options.formulaVarFiltersResult:
             fo.traceVariableFiltersResult = True
+        if options.formulaRunIDs:
+            fo.runIDs = options.formulaRunIDs   
         self.modelManager.formulaOptions = fo
         timeNow = XmlUtil.dateunionValue(datetime.datetime.now())
         firstStartedAt = startedAt = time.time()
@@ -669,7 +717,11 @@ class CntlrCmdLine(Cntlr.Cntlr):
             try:
                 modelXbrl = self.modelManager.modelXbrl
                 hasFormulae = modelXbrl.hasFormulae
-                if options.validate:
+                isAlreadyValidated = False
+                for pluginXbrlMethod in pluginClassMethods("ModelDocument.IsValidated"):
+                    if pluginXbrlMethod(modelXbrl): # e.g., streaming extensions already has validated
+                        isAlreadyValidated = True
+                if options.validate and not isAlreadyValidated:
                     startedAt = time.time()
                     if options.formulaAction: # don't automatically run formulas
                         modelXbrl.hasFormulae = False
@@ -680,7 +732,8 @@ class CntlrCmdLine(Cntlr.Cntlr):
                                                 _("validated in %.2f secs"), 
                                                 time.time() - startedAt),
                                                 messageCode="info", file=self.entrypointFile)
-                if options.formulaAction in ("validate", "run"):  # do nothing here if "none"
+                if (options.formulaAction in ("validate", "run") and  # do nothing here if "none"
+                    not isAlreadyValidated):  # formulas can't run if streaming has validated the instance 
                     from arelle import ValidateXbrlDimensions, ValidateFormula
                     startedAt = time.time()
                     if not options.validate:

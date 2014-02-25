@@ -1,10 +1,30 @@
+﻿--
+-- XBRL-US Public Postgres DB 
 --
 -- PostgreSQL database dump
 --
 
+-- changes for Arelle:
+-- 
+-- 2013-12-01: Clear everything prior (drop schema and recreate) before loading ddl
+--
+-- 2014-01-02: Comment out fk_accession_entity as entity is not set up for non-RSS 
+--             accessions and not known until later in instance loading.
+--
+--             Comment out namespace_taxonomy_version_id_fkey, no version information known
+--             to arelle.
+--
+--             Comment out constraints and triggers not used in arelle; also the constraints
+--             appear to block bulk loading of taxonomy.
+ 
+
+-- clear everything prior
+DROP SCHEMA public CASCADE; create SCHEMA public;
+
 SET statement_timeout = 0;
 SET client_encoding = 'UTF8';
-SET standard_conforming_strings = off;
+-- HF - must have conforming strings on for Postgres interface to work, as it will include Windows paths sometimes
+SET standard_conforming_strings = on;
 SET check_function_bodies = false;
 SET client_min_messages = warning;
 SET escape_string_warning = off;
@@ -5359,11 +5379,14 @@ ALTER TABLE public.seq_fact OWNER TO postgres;
 --
 -- Name: fact; Type: TABLE; Schema: public; Owner: postgres; Tablespace: 
 --
+-- HF: modified to accept tuples by adding tuple_fact_id and
+--      context_id, is_precision_infinity, isdecimals_infinity now NULLable
 
 CREATE TABLE fact (
     fact_id integer DEFAULT nextval('seq_fact'::regclass) NOT NULL,
     accession_id integer NOT NULL,
-    context_id integer NOT NULL,
+    tuple_fact_id integer,
+    context_id integer,
     unit_id integer,
     element_id integer NOT NULL,
     effective_value numeric,
@@ -5371,8 +5394,8 @@ CREATE TABLE fact (
     xml_id character varying(2048),
     precision_value integer,
     decimals_value integer,
-    is_precision_infinity boolean DEFAULT false NOT NULL,
-    is_decimals_infinity boolean DEFAULT false NOT NULL,
+    is_precision_infinity boolean DEFAULT false,
+    is_decimals_infinity boolean DEFAULT false,
     ultimus_index integer,
     calendar_ultimus_index integer,
     uom character varying,
@@ -20377,7 +20400,7 @@ CREATE UNIQUE INDEX qname_namespace_localname ON qname USING btree (namespace, l
 -- Name: qname_ts_index06; Type: INDEX; Schema: public; Owner: postgres; Tablespace: 
 --
 
-CREATE INDEX qname_ts_index06 ON qname USING gin (to_tsvector('english'::regconfig, regexp_replace((local_name)::text, '([A-Z])'::text, ' \\1'::text, 'g'::text)));
+CREATE INDEX qname_ts_index06 ON qname USING gin (to_tsvector('english'::regconfig, regexp_replace((local_name)::text, '([A-Z])'::text, ' \1'::text, 'g'::text)));
 
 
 --
@@ -20470,6 +20493,8 @@ CREATE INDEX unit_measure_index01 ON unit_measure USING btree (unit_id);
 
 CREATE UNIQUE INDEX uri_index01 ON uri USING btree (uri);
 
+
+/*********** Arelle block out these Triggers and Constraints
 
 --
 -- Name: a1_accession_complete_restatement_period_index; Type: TRIGGER; Schema: public; Owner: postgres
@@ -20564,8 +20589,9 @@ ALTER TABLE ONLY fact_aug
 -- Name: fk_accession_entity; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
-ALTER TABLE ONLY accession
-    ADD CONSTRAINT fk_accession_entity FOREIGN KEY (entity_id) REFERENCES entity(entity_id);
+-- Arelle note: entities are not populated for reference by accession
+--ALTER TABLE ONLY accession
+--    ADD CONSTRAINT fk_accession_entity FOREIGN KEY (entity_id) REFERENCES entity(entity_id);
 
 
 --
@@ -20988,8 +21014,8 @@ ALTER TABLE ONLY context_aug
 -- Name: namespace_taxonomy_version_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
-ALTER TABLE ONLY namespace
-    ADD CONSTRAINT namespace_taxonomy_version_id_fkey FOREIGN KEY (taxonomy_version_id) REFERENCES taxonomy_version(taxonomy_version_id);
+--ALTER TABLE ONLY namespace
+--    ADD CONSTRAINT namespace_taxonomy_version_id_fkey FOREIGN KEY (taxonomy_version_id) --REFERENCES taxonomy_version(taxonomy_version_id);
 
 
 --
@@ -21023,6 +21049,7 @@ ALTER TABLE ONLY uri
 ALTER TABLE ONLY taxonomy_version
     ADD CONSTRAINT taxonomy_version_taxonomy_id_fkey FOREIGN KEY (taxonomy_id) REFERENCES taxonomy(taxonomy_id);
 
+********* end of removed triggers and constraints *****/
 
 --
 -- PostgreSQL database dump complete

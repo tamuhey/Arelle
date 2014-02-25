@@ -12,13 +12,15 @@ from arelle.ModelObject import ModelObject
 from arelle.ModelDtsObject import ModelResource
 from arelle.PrototypeDtsObject import LocPrototype
 from arelle.XbrlConst import consecutiveArcrole
-import os
+import os, sys
+
+USING_EQUIVALENCE_KEY = sys.intern(_STR_8BIT("using_equivalence_key")) # indicates hash entry replaced with keyed entry
 
 def create(modelXbrl, arcrole, linkrole=None, linkqname=None, arcqname=None, includeProhibits=False):
     return ModelRelationshipSet(modelXbrl, arcrole, linkrole, linkqname, arcqname, includeProhibits)
 
 def ineffectiveArcs(baseSetModelLinks, arcrole, arcqname=None):
-    relationships = defaultdict(list)
+    hashEquivalentRels = defaultdict(list)
     for modelLink in baseSetModelLinks:
         for linkChild in modelLink:
             if (isinstance(linkChild,ModelObject) and 
@@ -30,37 +32,51 @@ def ineffectiveArcs(baseSetModelLinks, arcrole, arcqname=None):
                 for fromResource in modelLink.labeledResources[fromLabel]:
                     for toResource in modelLink.labeledResources[toLabel]:
                         modelRel = ModelDtsObject.ModelRelationship(modelLink.modelDocument, linkChild, fromResource.dereference(), toResource.dereference())
-                        relationships[modelRel.equivalenceKey].append(modelRel)
+                        hashEquivalentRels[modelRel.equivalenceHash].append(modelRel)
     # determine ineffective relationships
     ineffectives = []
-    for equivalenceKey, relationship in relationships.items():
-        #sort by priority, prohibited
-        equivalentRels = [(modelRel.priority, modelRel.prohibitedUseSortKey, i)
-                          for i, modelRel in enumerate(relationship)]
-        priorRel = None
-        for rel in sorted( equivalentRels ):
-            if rel[1] == 2: # this rel is prohibited
-                if priorRel is None:
-                    ineffective = relationship[rel[2]]
-                    ineffective.ineffectivity = _("prohibited arc (priority {0}) has no other arc to prohibit").format(
-                                               ineffective.priority)
-                    ineffectives.append(ineffective) # this rel ineffective
-                elif priorRel[1] == 2: # prior rel is prohibited
-                    ineffective = relationship[priorRel[2]]
-                    effective = relationship[rel[2]]
-                    ineffective.ineffectivity = _("prohibited arc (priority {0}, {1} - {2}) has an equivalent prohibited arc (priority {3}, {4} - {5})\n").format(
-                                             ineffective.priority, ineffective.modelDocument.basename, ineffective.sourceline,
-                                             effective.priority, effective.modelDocument.basename, effective.sourceline)
-                    ineffectives.append(ineffective)
-            else:
-                if priorRel is not None and priorRel[1] != 2:
-                    ineffective = relationship[priorRel[2]]
-                    effective = relationship[rel[2]]
-                    ineffective.ineffectivity = _("arc (priority {0}, {1} - {2}) is ineffective due to equivalent arc (priority {3}, {4} - {5})\n").format(
-                                             ineffective.priority, ineffective.modelDocument.basename, ineffective.sourceline,
-                                             effective.priority, effective.modelDocument.basename, effective.sourceline)
-                    ineffectives.append(ineffective) # prior ineffective
-            priorRel = rel
+    keyEquivalentRels = defaultdict(list)
+    for hashEquivRelList in hashEquivalentRels.values():
+        # separate into relationships that are key-equivalent
+        if len(hashEquivRelList) == 1:
+            if hashEquivRelList[0].prohibitedUseSortKey == 2:
+                ineffective = hashEquivRelList[0]
+                ineffective.ineffectivity = _("prohibited arc (priority {0}) has no other arc to prohibit").format(
+                                           ineffective.priority)
+                ineffectives.append(ineffective) # this rel ineffective
+        else:
+            # index by equivalenceKey instead
+            for modelRel in hashEquivRelList:
+                keyEquivalentRels[modelRel.equivalenceKey].append(modelRel)
+            for keyEquivRelList in keyEquivalentRels.values():
+                #sort by priority, prohibited
+                equivalentRels = [(modelRel.priority, modelRel.prohibitedUseSortKey, i)
+                                  for i, modelRel in enumerate(keyEquivRelList)]
+                priorRel = None
+                for rel in sorted( equivalentRels ):
+                    if rel[1] == 2: # this rel is prohibited
+                        if priorRel is None:
+                            ineffective = keyEquivRelList[rel[2]]
+                            ineffective.ineffectivity = _("prohibited arc (priority {0}) has no other arc to prohibit").format(
+                                                       ineffective.priority)
+                            ineffectives.append(ineffective) # this rel ineffective
+                        elif priorRel[1] == 2: # prior rel is prohibited
+                            ineffective = keyEquivRelList[priorRel[2]]
+                            effective = keyEquivRelList[rel[2]]
+                            ineffective.ineffectivity = _("prohibited arc (priority {0}, {1} - {2}) has an equivalent prohibited arc (priority {3}, {4} - {5})\n").format(
+                                                     ineffective.priority, ineffective.modelDocument.basename, ineffective.sourceline,
+                                                     effective.priority, effective.modelDocument.basename, effective.sourceline)
+                            ineffectives.append(ineffective)
+                    else:
+                        if priorRel is not None and priorRel[1] != 2:
+                            ineffective = keyEquivRelList[priorRel[2]]
+                            effective = keyEquivRelList[rel[2]]
+                            ineffective.ineffectivity = _("arc (priority {0}, {1} - {2}) is ineffective due to equivalent arc (priority {3}, {4} - {5})\n").format(
+                                                     ineffective.priority, ineffective.modelDocument.basename, ineffective.sourceline,
+                                                     effective.priority, effective.modelDocument.basename, effective.sourceline)
+                            ineffectives.append(ineffective) # prior ineffective
+                    priorRel = rel
+            keyEquivalentRels.clear()
     return ineffectives
 
 def baseSetArcroles(modelXbrl):
@@ -121,7 +137,6 @@ class ModelRelationshipSet:
             for linkChild in modelLink:
                 linkChildArcrole = linkChild.get("{http://www.w3.org/1999/xlink}arcrole")
                 if linkChild.get("{http://www.w3.org/1999/xlink}type") == "arc" and linkChildArcrole:
-                    linkChildQname = linkChild
                     if isFootnoteRel:
                         arcs.append(linkChild)
                     elif isDimensionRel: 
@@ -134,7 +149,7 @@ class ModelRelationshipSet:
                         if XbrlConst.isTableRenderingArcrole(linkChildArcrole):
                             arcs.append(linkChild)
                     elif (linkChildArcrole in arcrole and 
-                          (arcqname is None or arcqname == linkChildQname) and 
+                          (arcqname is None or arcqname == linkChild.qname) and 
                           (linkqname is None or linkqname == linkEltQname)):
                         arcs.append(linkChild)
                         
@@ -146,10 +161,18 @@ class ModelRelationshipSet:
                     for toResource in modelLink.labeledResources[toLabel]:
                         if isinstance(fromResource,(ModelResource,LocPrototype)) and isinstance(toResource,(ModelResource,LocPrototype)):
                             modelRel = ModelDtsObject.ModelRelationship(modelLink.modelDocument, arcElement, fromResource.dereference(), toResource.dereference())
-                            modelRelEquivalenceKey = modelRel.equivalenceKey    # this is a complex tuple to compute, get once for below
-                            if modelRelEquivalenceKey not in relationships or \
-                               modelRel.priorityOver(relationships[modelRelEquivalenceKey]):
-                                relationships[modelRelEquivalenceKey] = modelRel
+                            modelRelEquivalenceHash = modelRel.equivalenceHash
+                            if modelRelEquivalenceHash not in relationships:
+                                relationships[modelRelEquivalenceHash] = modelRel
+                            else: # use equivalenceKey instead of hash
+                                otherRel = relationships[modelRelEquivalenceHash]
+                                if otherRel is not USING_EQUIVALENCE_KEY: # move equivalentRel to use key instead of hasn
+                                    relationships[otherRel.equivalenceKey] = otherRel
+                                    relationships[modelRelEquivalenceHash] = USING_EQUIVALENCE_KEY
+                                modelRelEquivalenceKey = modelRel.equivalenceKey    # this is a complex tuple to compute, get once for below
+                                if modelRelEquivalenceKey not in relationships or \
+                                   modelRel.priorityOver(relationships[modelRelEquivalenceKey]):
+                                    relationships[modelRelEquivalenceKey] = modelRel
 
         #reduce effective arcs and order relationships...
         self.modelRelationshipsFrom = None
@@ -158,7 +181,8 @@ class ModelRelationshipSet:
         self.modellinkRoleUris = None
         orderRels = defaultdict(list)
         for modelRel in relationships.values():
-            if includeProhibits or not modelRel.isProhibited:
+            if (modelRel is not USING_EQUIVALENCE_KEY and 
+                (includeProhibits or not modelRel.isProhibited)):
                 orderRels[modelRel.order].append(modelRel)
         self.modelRelationships = [modelRel
                                    for order in sorted(orderRels.keys())
@@ -287,6 +311,7 @@ class ModelRelationshipSet:
         shorterLangInLabel = longerLangInLabel = None
         shorterLangLabels = longerLangLabels = None
         langLabels = []
+        wildRole = role == '*'
         labels = self.fromModelObject(modelFrom)
         if linkroleHint:  # order of preference of linkroles to find label
             try:
@@ -299,7 +324,7 @@ class ModelRelationshipSet:
                 labelsOtherLinks = []
                 for modelLabelRel in labels:
                     label = modelLabelRel.toModelObject
-                    if role == label.role:
+                    if wildRole or role == label.role:
                         linkrole = modelLabelRel.linkrole
                         if linkrole == linkroleHint:
                             labelsHintedLink.append(modelLabelRel)
@@ -312,7 +337,7 @@ class ModelRelationshipSet:
             labels.sort(key=lambda rel: rel.priority, reverse=True)
         for modelLabelRel in labels:
             label = modelLabelRel.toModelObject
-            if role == label.role:
+            if wildRole or role == label.role:
                 labelLang = label.xmlLang
                 text = label.textValue if returnText else label
                 if lang is None or len(lang) == 0 or lang == labelLang:

@@ -7,7 +7,9 @@ Created on Feb 20, 2011
 import os, re
 from decimal import Decimal, InvalidOperation
 from arelle import XbrlConst, XmlUtil
-from arelle.ModelValue import qname, dateTime, DATE, DATETIME, DATEUNION, anyURI, INVALIDixVALUE, gYearMonth, gMonthDay, gYear, gMonth, gDay
+from arelle.ModelValue import (qname, qnameEltPfxName, qnameClarkName, 
+                               dateTime, DATE, DATETIME, DATEUNION, 
+                               anyURI, INVALIDixVALUE, gYearMonth, gMonthDay, gYear, gMonth, gDay)
 from arelle.ModelObject import ModelObject, ModelAttribute
 from arelle import UrlUtil
 validateElementSequence = None  #dynamic import to break dependency loops
@@ -85,7 +87,7 @@ def validate(modelXbrl, elt, recurse=True, attrQname=None, ixFacts=False):
     facets = None
 
     # attrQname can be provided for attributes that are global and LAX
-    if (not hasattr(elt,"xValid") or elt.xValid == UNVALIDATED) and (not isIxFact or ixFacts):
+    if (getattr(elt,"xValid", UNVALIDATED) == UNVALIDATED) and (not isIxFact or ixFacts):
         qnElt = elt.qname if ixFacts and isIxFact else elt.elementQname
         modelConcept = modelXbrl.qnameConcepts.get(qnElt)
         if modelConcept is not None:
@@ -148,7 +150,8 @@ def validate(modelXbrl, elt, recurse=True, attrQname=None, ixFacts=False):
         # validate attributes
         # find missing attributes for default values
         for attrTag, attrValue in elt.items():
-            qn = qname(attrTag, noPrefixIsNoNamespace=True)
+            qn = qnameClarkName(attrTag)
+            #qn = qname(attrTag, noPrefixIsNoNamespace=True)
             baseXsdAttrType = None
             facets = None
             if attrQname is not None: # validate all attributes and element
@@ -181,6 +184,9 @@ def validate(modelXbrl, elt, recurse=True, attrQname=None, ixFacts=False):
                         baseXsdAttrType = "NCName"
                     elif attrTag in {"default", "fixed", "form"}:
                         baseXsdAttrType = "string"
+                elif elt.namespaceURI == "http://xbrl.org/2006/xbrldi":
+                    if attrTag == "dimension":
+                        baseXsdAttrType = "QName"
                 elif qn in predefinedAttributeTypes:
                     baseXsdAttrType, facets = predefinedAttributeTypes[qn]
             validateValue(modelXbrl, elt, attrTag, baseXsdAttrType, attrValue, facets=facets)
@@ -224,9 +230,10 @@ def validate(modelXbrl, elt, recurse=True, attrQname=None, ixFacts=False):
                 if validateElementSequence is None:
                     from arelle.XmlValidateParticles import validateElementSequence, modelGroupCompositorTitle
                 try:
-                    childElts = list(elt) # uses __iter__ for inline facts
+                    #childElts = list(elt) # uses __iter__ for inline facts
+                    childElts = [e for e in elt if isinstance(e, ModelObject)]
                     if isNil:
-                        if childElts and any(True for e in childElts if isinstance(e, ModelObject)) or elt.text:
+                        if childElts or elt.text:
                             modelXbrl.error("xmlSchema:nilElementHasContent",
                                 _("Element %(element)s is nil but has contents"),
                                 modelObject=elt,
@@ -244,7 +251,8 @@ def validate(modelXbrl, elt, recurse=True, attrQname=None, ixFacts=False):
                             modelXbrl.error(*errDesc,**errArgs)
                     recurse = False # cancel child element validation below, recursion was within validateElementSequence
                 except AttributeError as ex:
-                    pass
+                    raise ex
+                    #pass  # HF Why is this here????
     if recurse: # if there is no complex or simple type (such as xbrli:measure) then this code is used
         for child in (elt.modelTupleFacts if ixFacts and isIxFact else elt):
             if isinstance(child, ModelObject):     
@@ -367,7 +375,8 @@ def validateValue(modelXbrl, elt, attrTag, baseXsdType, value, isNillable=False,
                         xValue = sValue = False
                     else: raise ValueError
                 elif baseXsdType == "QName":
-                    xValue = qname(elt, value, castException=ValueError, prefixException=ValueError)
+                    xValue = qnameEltPfxName(elt, value, prefixException=ValueError)
+                    #xValue = qname(elt, value, castException=ValueError, prefixException=ValueError)
                     sValue = value
                     ''' not sure here, how are explicitDimensions validated, but bad units not?
                     if xValue.namespaceURI in modelXbrl.namespaceDocs:

@@ -4,7 +4,7 @@ Created on Oct 3, 2010
 @author: Mark V Systems Limited
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
-import os, sys
+import os, io, sys
 from collections import defaultdict
 from lxml import etree
 from xml.sax import SAXParseException
@@ -17,6 +17,7 @@ from arelle.ModelInstanceObject import ModelFact
 from arelle.ModelObjectFactory import parser
 from arelle.PrototypeDtsObject import LinkPrototype, LocPrototype, ArcPrototype
 from arelle.PluginManager import pluginClassMethods
+creationSoftwareNames = None
 
 def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDiscovered=False, isIncluded=None, namespace=None, reloadCache=False):
     """Returns a new modelDocument, performing DTS discovery for instance, inline XBRL, schema, 
@@ -56,7 +57,8 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
             modelXbrl.error(("EFM.6.22.02", "GFM.1.1.3", "SBR.NL.2.1.0.06" if normalizedUri.startswith("http") else "SBR.NL.2.2.0.17"),
                     _("Prohibited file for filings %(blockedIndicator)s: %(url)s"),
                     modelObject=referringElement, url=normalizedUri,
-                    blockedIndicator=_(" blocked") if blocked else "")
+                    blockedIndicator=_(" blocked") if blocked else "",
+                    messageCodes=("EFM.6.22.02", "GFM.1.1.3", "SBR.NL.2.1.0.06", "SBR.NL.2.2.0.17"))
             modelXbrl.urlUnloadableDocs[normalizedUri] = blocked
         if blocked:
             return None
@@ -108,18 +110,24 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
     modelXbrl.modelManager.showStatus(_("parsing {0}").format(uri))
     file = None
     try:
+        for pluginMethod in pluginClassMethods("ModelDocument.PullLoader"):
+            # assumes not possible to check file in string format or not all available at once
+            modelDocument = pluginMethod(modelXbrl, mappedUri, filepath)
+            if modelDocument is not None:
+                return modelDocument
         if (modelXbrl.modelManager.validateDisclosureSystem and 
             modelXbrl.modelManager.disclosureSystem.validateFileText):
             file, _encoding = ValidateFilingText.checkfile(modelXbrl,filepath)
         else:
             file, _encoding = modelXbrl.fileSource.file(filepath)
-        _parser, _parserLookupName, _parserLookupClass = parser(modelXbrl,filepath)
         xmlDocument = None
         isPluginParserDocument = False
         for pluginMethod in pluginClassMethods("ModelDocument.CustomLoader"):
             modelDocument = pluginMethod(modelXbrl, file, mappedUri, filepath)
             if modelDocument is not None:
+                file.close()
                 return modelDocument
+        _parser, _parserLookupName, _parserLookupClass = parser(modelXbrl,filepath)
         xmlDocument = etree.parse(file,parser=_parser,base_url=filepath)
         for error in _parser.error_log:
             modelXbrl.error("xmlSchema:syntax",
@@ -162,7 +170,7 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
         modelXbrl.error(type(err).__name__,
                 _("Unrecoverable error: %(error)s, %(fileName)s, %(sourceAction)s source element"),
                 modelObject=referringElement, fileName=os.path.basename(uri), 
-                error=str(err), sourceAction=("including" if isIncluded else "importing"))
+                error=str(err), sourceAction=("including" if isIncluded else "importing"), exc_info=True)
         modelXbrl.urlUnloadableDocs[normalizedUri] = True  # not loadable due to exception issue
         return None
     
@@ -627,21 +635,50 @@ class ModelDocument:
         
     @property
     def creationSoftwareComment(self):
-        # first try for comments before root element
-        initialComment = ''
-        node = self.xmlRootElement
-        while node.getprevious() is not None:
-            node = node.getprevious()
-            if isinstance(node, ModelComment):
-                initialComment = node.text + '\n' + initialComment
-        if initialComment:
-            return initialComment
-        for i, node in enumerate(self.xmlDocument.iter()):
-            if isinstance(node, ModelComment):
-                return node.text
-            if i > 10:  # give up, no heading comment
-                break
-        return None
+        try:
+            return self._creationSoftwareComment
+        except AttributeError:
+            # first try for comments before root element
+            initialComment = ''
+            node = self.xmlRootElement
+            while node.getprevious() is not None:
+                node = node.getprevious()
+                if isinstance(node, ModelComment):
+                    initialComment = node.text + '\n' + initialComment
+            if initialComment:
+                self._creationSoftwareComment = initialComment
+            else:
+                self._creationSoftwareComment = None
+                for i, node in enumerate(self.xmlDocument.iter()):
+                    if isinstance(node, ModelComment):
+                        self._creationSoftwareComment = node.text
+                    if i > 10:  # give up, no heading comment
+                        break
+            return self._creationSoftwareComment
+    
+    @property
+    def creationSoftware(self):
+        global creationSoftwareNames
+        if creationSoftwareNames is None:
+            import json, re
+            creationSoftwareNames = []
+            try:
+                with io.open(os.path.join(self.modelXbrl.modelManager.cntlr.configDir, "creationSoftwareNames.json"), 
+                             'rt', encoding='utf-8') as f:
+                    for key, pattern in json.load(f):
+                        if key != "_description_":
+                            creationSoftwareNames.append( (key, re.compile(pattern)) )
+            except Exception as ex:
+                self.modelXbrl.error("arelle:creationSoftwareNamesTable",
+                                     _("Error loading creation software names table %(error)s"),
+                                     modelObject=self, error=ex)
+        creationSoftwareComment = self.creationSoftwareComment
+        if not creationSoftwareComment:
+            return "None"
+        for productKey, productNamePattern in creationSoftwareNames:
+            if productNamePattern.search(creationSoftwareComment):
+                return productKey
+        return "Other"
     
     def schemaDiscover(self, rootElement, isIncluded, namespace):
         targetNamespace = rootElement.get("targetNamespace")
@@ -658,7 +695,8 @@ class ModelDocument:
                 self.modelXbrl.modelManager.disclosureSystem.disallowedHrefOfNamespace(self.uri, targetNamespace)):
                     self.modelXbrl.error(("EFM.6.22.02", "GFM.1.1.3", "SBR.NL.2.1.0.06" if self.uri.startswith("http") else "SBR.NL.2.2.0.17"),
                             _("Namespace: %(namespace)s disallowed schemaLocation %(schemaLocation)s"),
-                            modelObject=rootElement, namespace=targetNamespace, schemaLocation=self.uri, url=self.uri)
+                            modelObject=rootElement, namespace=targetNamespace, schemaLocation=self.uri, url=self.uri,
+                            messageCodes=("EFM.6.22.02", "GFM.1.1.3", "SBR.NL.2.1.0.06", "SBR.NL.2.2.0.17"))
             self.noTargetNamespace = False
         else:
             if isIncluded == True and namespace:
@@ -716,7 +754,7 @@ class ModelDocument:
             baseAttr = baseElt.get("{http://www.w3.org/XML/1998/namespace}base")
             if baseAttr:
                 if self.modelXbrl.modelManager.validateDisclosureSystem:
-                    self.modelXbrl.error(("EFM.6.03.11", "GFM.1.1.7"),
+                    self.modelXbrl.error(("EFM.6.03.11", "GFM.1.1.7", "EBA.2.1"),
                         _("Prohibited base attribute: %(attribute)s"),
                         modelObejct=element, attribute=baseAttr, element=element.qname)
                 else:
@@ -747,7 +785,8 @@ class ModelDocument:
                     self.modelXbrl.modelManager.disclosureSystem.disallowedHrefOfNamespace(importSchemaLocation, importNamespace)):
                 self.modelXbrl.error(("EFM.6.22.02", "GFM.1.1.3", "SBR.NL.2.1.0.06" if importSchemaLocation.startswith("http") else "SBR.NL.2.2.0.17"),
                         _("Namespace: %(namespace)s disallowed schemaLocation blocked %(schemaLocation)s"),
-                        modelObject=element, namespace=importNamespace, schemaLocation=importSchemaLocation, url=importSchemaLocation)
+                        modelObject=element, namespace=importNamespace, schemaLocation=importSchemaLocation, url=importSchemaLocation,
+                        messageCodes=("EFM.6.22.02", "GFM.1.1.3", "SBR.NL.2.1.0.06", "SBR.NL.2.2.0.17"))
                 return
             doc = None
             importSchemaLocationBasename = os.path.basename(importNamespace)
@@ -809,8 +848,12 @@ class ModelDocument:
                 self.linkbaseDiscover(self, linkbaseElement)
 
     def linkbaseDiscover(self, linkbaseElement, inInstance=False):
-        for lbElement in linkbaseElement.iterchildren():
+        # sequence linkbase elements for elementPointer efficiency
+        lbElementSequence = 0
+        for lbElement in linkbaseElement:
             if isinstance(lbElement,ModelObject):
+                lbElementSequence += 1
+                lbElement._elementSequence = lbElementSequence
                 lbLn = lbElement.localName
                 lbNs = lbElement.namespaceURI
                 if lbNs == XbrlConst.link:
@@ -837,8 +880,11 @@ class ModelDocument:
                                            ("XBRL-footnotes",linkrole,None,None))
                             for baseSetKey in baseSetKeys:
                                 self.modelXbrl.baseSets[baseSetKey].append(lbElement)
+                        linkElementSequence = 0
                         for linkElement in lbElement.iterchildren():
                             if isinstance(linkElement,ModelObject):
+                                linkElementSequence += 1
+                                linkElement._elementSequence = linkElementSequence
                                 self.schemalocateElementNamespace(linkElement)
                                 xlinkType = linkElement.get("{http://www.w3.org/1999/xlink}type")
                                 modelResource = None
@@ -921,13 +967,16 @@ class ModelDocument:
     def instanceDiscover(self, xbrlElement):
         self.schemaLinkbaseRefsDiscover(xbrlElement)
         self.linkbaseDiscover(xbrlElement,inInstance=True) # for role/arcroleRefs and footnoteLinks
-        self.instanceContentsDiscover(xbrlElement)
         XmlValidate.validate(self.modelXbrl, xbrlElement) # validate instance elements
+        self.instanceContentsDiscover(xbrlElement)
 
     def instanceContentsDiscover(self,xbrlElement):
         nextUndefinedFact = len(self.modelXbrl.undefinedFacts)
+        instElementSequence = 0
         for instElement in xbrlElement.iterchildren():
             if isinstance(instElement,ModelObject):
+                instElementSequence += 1
+                instElement._elementSequence = instElementSequence
                 ln = instElement.localName
                 ns = instElement.namespaceURI
                 if ns == XbrlConst.xbrli:
@@ -1022,9 +1071,13 @@ class ModelDocument:
         if isinstance(modelFact, ModelFact):
             parentModelFacts.append( modelFact )
             self.modelXbrl.factsInInstance.add( modelFact )
+            tupleElementSequence = 0
             for tupleElement in modelFact:
-                if isinstance(tupleElement,ModelObject) and tupleElement.tag not in fractionParts:
-                    self.factDiscover(tupleElement, modelFact.modelTupleFacts)
+                if isinstance(tupleElement,ModelObject):
+                    tupleElementSequence += 1
+                    tupleElement._elementSequence = tupleElementSequence
+                    if tupleElement.tag not in fractionParts:
+                        self.factDiscover(tupleElement, modelFact.modelTupleFacts)
         else:
             self.modelXbrl.undefinedFacts.append(modelFact)
     

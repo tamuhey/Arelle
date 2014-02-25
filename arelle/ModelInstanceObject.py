@@ -33,13 +33,15 @@
 """
 from collections import defaultdict
 from lxml import etree
-from arelle import XmlUtil, XbrlConst, XbrlUtil, UrlUtil, Locale, ModelValue
+from arelle import XmlUtil, XbrlConst, XbrlUtil, UrlUtil, Locale, ModelValue, XmlValidate
 from arelle.ValidateXbrlCalcs import inferredPrecision, inferredDecimals, roundValue
 from arelle.PrototypeInstanceObject import DimValuePrototype
 from math import isnan
 from arelle.ModelObject import ModelObject
 from decimal import Decimal, InvalidOperation
+from hashlib import md5
 Aspect = None
+utrEntries = None
 POSINF = float("inf")
 NEGINF = float("-inf")
 
@@ -158,6 +160,13 @@ class ModelFact(ModelObject):
     def unitID(self):
         """(str) -- unitRef attribute"""
         return self.get("unitRef")
+    
+    @property
+    def utrEntries(self):
+        """(set(UtrEntry)) -- set of UtrEntry objects that match this fact and unit"""
+        if self.unit is not None and self.concept is not None:
+            return self.unit.utrEntries(self.concept.type)
+        return None
 
     @property
     def conceptContextUnitLangHash(self):
@@ -239,8 +248,12 @@ class ModelFact(ModelObject):
             if decimals:
                 self._decimals = decimals
             else:   #check for fixed decimals on type
-                type = self.concept.type
-                self._decimals = type.fixedOrDefaultAttrValue("decimals") if type is not None else None
+                concept = self.concept
+                if concept is not None:
+                    type = concept.type
+                    self._decimals = type.fixedOrDefaultAttrValue("decimals") if type is not None else None
+                else:
+                    self._decimals = None    
             return  self._decimals
 
     @decimals.setter
@@ -258,8 +271,12 @@ class ModelFact(ModelObject):
             if precision:
                 self._precision = precision
             else:   #check for fixed decimals on type
-                type = self.concept.type
-                self._precision = type.fixedOrDefaultAttrValue("precision") if type is not None else None
+                concept = self.concept
+                if concept is not None:
+                    type = self.concept.type
+                    self._precision = type.fixedOrDefaultAttrValue("precision") if type is not None else None
+                else:
+                    self._precision = None    
             return  self._precision
 
     @property
@@ -330,8 +347,8 @@ class ModelFact(ModelObject):
                     dec = self.decimals
                     if dec is None or dec == "INF":
                         dec = len(val.partition(".")[2])
-                    else:
-                        dec = int(dec) # 2.7 wants short int, 3.2 takes regular int, don't use _INT here
+                    else: # max decimals at 28
+                        dec = max( min(int(dec), 28), -28) # 2.7 wants short int, 3.2 takes regular int, don't use _INT here
                     return Locale.format(self.modelXbrl.locale, "%.*f", (dec, num), True)
                 except ValueError: 
                     return "(error)"
@@ -369,8 +386,11 @@ class ModelFact(ModelObject):
                         return True
                 else:
                     d = None; p = min((inferredPrecision(self), inferredPrecision(other)))
-                    if p == 0 and deemP0Equal:
-                        return True
+                    if p == 0:
+                        if deemP0Equal:
+                            return True
+                        else: # for test cases treat as INF comparison
+                            return self.xValue == other.xValue
                 return roundValue(self.value,precision=p,decimals=d) == roundValue(other.value,precision=p,decimals=d)
             else:
                 return False
@@ -397,7 +417,7 @@ class ModelFact(ModelObject):
             unmatchedFactsStack.append(self)
         if self.isItem:
             if (self == other or
-                self.qname != other or
+                self.qname != other.qname or
                 self.parentElement.qname != other.parentElement.qname):
                 return False    # can't be identical
             # parent test can only be done if in same instauce
@@ -1076,7 +1096,11 @@ class ModelDimensionValue(ModelObject):
     @property
     def dimensionQname(self):
         """(QName) -- QName of the dimension concept"""
-        return self.prefixedNameQname(self.get("dimension"))
+        dimAttr = self.xAttributes.get("dimension", None)
+        if dimAttr is not None and dimAttr.xValid >= XmlValidate.VALID:
+            return dimAttr.xValue
+        return None
+        #return self.prefixedNameQname(self.get("dimension"))
         
     @property
     def dimension(self):
@@ -1114,7 +1138,11 @@ class ModelDimensionValue(ModelObject):
         try:
             return self._memberQname
         except AttributeError:
-            self._memberQname = self.prefixedNameQname(self.textValue) if self.isExplicit else None
+            if self.isExplicit and self.xValid >= XmlValidate.VALID:
+                self._memberQname = self.xValue
+            else:
+                self._memberQname = None
+            #self._memberQname = self.prefixedNameQname(self.textValue) if self.isExplicit else None
             return self._memberQname
         
     @property
@@ -1195,6 +1223,24 @@ class ModelUnit(ModelObject):
             return self._hash
 
     @property
+    def md5hash(self):
+        """(bool) -- md5 Hash of measures in both multiply and divide lists."""
+        try:
+            return self._md5hash
+        except AttributeError:
+            md5hash = md5()
+            for i, measures in enumerate(self.measures):
+                if i:
+                    md5hash.update(b"divisor")
+                for measure in measures:
+                    if measure.namespaceURI:
+                        md5hash.update(measure.namespaceURI.encode('utf-8','replace'))
+                    md5hash.update(measure.localName.encode('utf-8','replace'))
+            # should this use frozenSet of each measures element?
+            self._md5hash = md5hash.hexdigest()
+            return self._md5hash
+
+    @property
     def isDivide(self):
         """(bool) -- True if unit has a divide element"""
         return XmlUtil.hasChild(self, XbrlConst.xbrli, "divide")
@@ -1219,6 +1265,19 @@ class ModelUnit(ModelObject):
         mul, div = self.measures
         return ' '.join([measuresStr(m) for m in mul] + (['/'] + [measuresStr(d) for d in div] if div else []))
 
+    def utrEntries(self, modelType):
+        try:
+            return self._utrEntries[modelType]
+        except AttributeError:
+            self._utrEntries = {}
+            return self.utrEntries(modelType)
+        except KeyError:
+            global utrEntries
+            if utrEntries is None:
+                from arelle.ValidateUtr import utrEntries
+            self._utrEntries[modelType] = utrEntries(modelType, self)
+            return self._utrEntries[modelType]
+    
     @property
     def propertyView(self):
         measures = self.measures

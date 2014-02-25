@@ -119,7 +119,8 @@ try:
 except ImportError as e:
     print("Documentation production by Sphinx is not available: %s" % e)
 
-        
+
+''' this section was for py2app which no longer works on Mavericks, switch below to cx_Freeze        
 if sys.platform == 'darwin':
     from setuptools import setup, find_packages
     
@@ -166,14 +167,16 @@ if sys.platform == 'darwin':
         dataFiles.append((dir[7:],
                           [dir + "/" + f for f in files]))
     cx_FreezeExecutables = []
-
-elif sys.platform in ('linux2', 'linux', 'sunos5'): # works on ubuntu with hand-built cx_Freeze
+#End of py2app defunct section
+'''
+if sys.platform in ('darwin', 'linux2', 'linux', 'sunos5'): # works on ubuntu with hand-built cx_Freeze
     from setuptools import find_packages 
     try:
         from cx_Freeze import setup, Executable  
         cx_FreezeExecutables = [ 
             Executable( 
                 script="arelleGUI.pyw", 
+                targetName="arelle"
                 ), 
             Executable( 
                 script="arelleCmdLine.py", 
@@ -185,32 +188,55 @@ elif sys.platform in ('linux2', 'linux', 'sunos5'): # works on ubuntu with hand-
 
     packages = find_packages('.') 
     dataFiles = None 
+    includeFiles = [('arelle/config','config'), 
+                    ('arelle/doc','doc'), 
+                    ('arelle/images','images'), 
+                    ('arelle/locale','locale'), 
+                    ('arelle/examples','examples'), 
+                    ('arelle/examples/plugin','examples/plugin'), 
+                    ('arelle/examples/plugin/locale/fr/LC_MESSAGES','examples/plugin/locale/fr/LC_MESSAGES'), 
+                    ('arelle/plugin','plugin')]
+    if sys.platform == 'darwin':
+        includeFiles.append(('arelle/scripts-macOS','scripts'))
+        # copy mac ports tcl and tk into build
+        includeFiles.append(('/opt/local/lib/tcl8.6','tcl8.6'))
+        includeFiles.append(('/opt/local/lib/tk8.6','tk8.6'))
+    else: 
+        includeFiles.append(('arelle/scripts-unix','scripts'))
+        if os.path.exists("/etc/redhat-release"):
+            # extra libraries needed for red hat
+            includeFiles.append(('/usr/local/lib/libexslt.so', 'libexslt.so'))
+            includeFiles.append(('/usr/local/lib/libxml2.so', 'libxml2.so'))
+            includeFiles.append(('/usr/local/lib/libxslt.so', 'libxslt.so'))
+            includeFiles.append(('/usr/local/lib/libz.so', 'libz.so'))
+    includeLibs = ['lxml', 'lxml.etree', 'lxml._elementpath', 'pg8000', 'pymysql', 
+                    # note cx_Oracle isn't here because it is version and machine specific, ubuntu not likely working
+                    'rdflib', 'rdflib.extras', 'rdflib.tools', 
+                    # more rdflib plugin modules may need to be added later
+                    'rdflib.plugins', 'rdflib.plugins.memory', 
+                    'rdflib.plugins.parsers', 
+                    'rdflib.plugins.serializers', 'rdflib.plugins.serializers.rdfxml', 'rdflib.plugins.serializers.turtle', 'rdflib.plugins.serializers.xmlwriter', 
+                    'rdflib.plugins.sparql', 
+                    'rdflib.plugins.stores', 
+                    'isodate', 'regex', 'gzip', 'zlib']
+    if sys.platform != 'sunos5':
+        try:
+            import pyodbc # see if this is importable
+            includeLibs.append('pyodbc')  # has C compiling errors on Sparc
+        except ImportError:
+            pass
     options = dict( build_exe =  { 
-        "include_files": [('arelle/config','config'), 
-                          ('arelle/doc','doc'), 
-                          ('arelle/images','images'), 
-                          ('arelle/locale','locale'), 
-                          ('arelle/examples','examples'), 
-                          ('arelle/examples/plugin','examples/plugin'), 
-                          ('arelle/examples/plugin/locale/fr/LC_MESSAGES','examples/plugin/locale/fr/LC_MESSAGES'), 
-                          ('arelle/plugin','plugin'), 
-                          ('arelle/scripts-unix','scripts'),
-                          ],
+        "include_files": includeFiles,
         #
         # rdflib & isodate egg files: rename .zip cpy lib & egg-info subdirectories to site-packages directory
         #
-        "includes": ['lxml', 'lxml.etree', 'lxml._elementpath', 'pg8000', 
-                     'rdflib', 'rdflib.extras', 'rdflib.tools', 
-                     # more rdflib plugin modules may need to be added later
-                     'rdflib.plugins', 'rdflib.plugins.memory', 
-                     'rdflib.plugins.parsers', 
-                     'rdflib.plugins.serializers', 'rdflib.plugins.serializers.rdfxml', 'rdflib.plugins.serializers.turtle', 'rdflib.plugins.serializers.xmlwriter', 
-                     'rdflib.plugins.sparql', 
-                     'rdflib.plugins.stores', 
-                     'isodate', 'regex', 'gzip', 'zlib'], 
+        "includes": includeLibs,
         "packages": packages, 
         } ) 
-    
+    if sys.platform == 'darwin':
+        options["bdist_mac"] = {"iconfile": 'arelle/images/arelle.icns',
+                                "bundle_name": 'Arelle'}
+        
     
 elif sys.platform == 'win32':
     from setuptools import find_packages
@@ -239,7 +265,7 @@ elif sys.platform == 'win32':
         #
         # rdflib & isodate egg files: rename .zip cpy lib & egg-info subdirectories to site-packages directory
         #
-        "includes": ['lxml', 'lxml.etree', 'lxml._elementpath', 'pg8000', 
+        "includes": ['lxml', 'lxml.etree', 'lxml._elementpath', 'pg8000', 'pymysql', 'cx_Oracle', 'pyodbc',
                      'rdflib', 'rdflib.extras', 'rdflib.tools', 
                      # more rdflib plugin modules may need to be added later
                      'rdflib.plugins', 'rdflib.plugins.memory', 

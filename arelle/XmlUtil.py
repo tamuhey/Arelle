@@ -10,8 +10,8 @@ from arelle import XbrlConst
 from arelle.ModelObject import ModelObject, ModelComment
 from arelle.ModelValue import qname, QName
 
-datetimePattern = re.compile('\s*([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})\s*|'
-                             '\s*([0-9]{4})-([0-9]{2})-([0-9]{2})\s*')
+datetimePattern = re.compile(r"\s*([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})\s*|"
+                             r"\s*([0-9]{4})-([0-9]{2})-([0-9]{2})\s*")
 xmlEncodingPattern = re.compile(r"\s*<\?xml\s.*encoding=['\"]([^'\"]*)['\"].*\?>")
 xpointerFragmentIdentifierPattern = re.compile(r"([\w.]+)(\(([^)]*)\))?")
 xmlnsStripPattern = re.compile(r'\s*xmlns(:\w+)?="[^"]*"')
@@ -708,10 +708,13 @@ def elementFragmentIdentifier(element):
                 if element.get('id'):  # has ID, use as start of path instead of root
                     childSequence[0] = element.get('id')
                     break
-                siblingPosition = 1
-                for sibling in element.itersiblings(preceding=True):
-                    if isinstance(sibling,etree.ElementBase):
-                        siblingPosition += 1
+                try:
+                    siblingPosition = element._elementSequence # set by loader in some element hierarchies
+                except AttributeError:
+                    siblingPosition = 1
+                    for sibling in element.itersiblings(preceding=True):
+                        if isinstance(sibling,etree.ElementBase):
+                            siblingPosition += 1
                 childSequence.insert(1, str(siblingPosition))
             element = element.getparent()
         location = "/".join(childSequence)
