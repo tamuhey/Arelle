@@ -47,7 +47,7 @@ def string(xc, p, contextItem, args):
     item = anytypeArg(xc, args, 0, "item()?", missingArgFallback=contextItem)
     if item == (): 
         return ''
-    if isinstance(item, ModelObject) and item.xValid == VALID_NO_CONTENT:
+    if isinstance(item, ModelObject) and getattr(item,"xValid", 0) == VALID_NO_CONTENT:
         x = item.stringValue # represents inner text of this and all subelements
     else:
         x = xc.atomize(p, item)
@@ -637,15 +637,24 @@ def unordered(xc, p, contextItem, args):
 
 def zero_or_one(xc, p, contextItem, args):
     if len(args) != 1: raise XPathContext.FunctionNumArgs()
-    return len(args[0]) in ( 0, 1 )
+    if len(args[0]) > 1:
+        raise XPathContext.FunctionNumArgs(errCode='err:FORG0003',
+                                           errText=_('fn:zero-or-one called with a sequence containing more than one item'))
+    return args[0]
 
 def one_or_more(xc, p, contextItem, args):
     if len(args) != 1: raise XPathContext.FunctionNumArgs()
-    return len(args[0]) >= 1
+    if len(args[0]) < 1:
+        raise XPathContext.FunctionNumArgs(errCode='err:FORG0004',
+                                           errText=_('fn:one-or-more called with a sequence containing no items'))
+    return args[0]
 
 def exactly_one(xc, p, contextItem, args):
     if len(args) != 1: raise XPathContext.FunctionNumArgs()
-    return len(args[0]) == 1
+    if len(args[0]) != 1:
+        raise XPathContext.FunctionNumArgs(errCode='err:FORG0005',
+                                           errText=_('fn:exactly-one called with a sequence containing zero or more than one item'))
+    return args[0]
 
 def deep_equal(xc, p, contextItem, args):
     if len(args) != 2: raise XPathContext.FunctionNumArgs()
@@ -659,12 +668,22 @@ def avg(xc, p, contextItem, args):
     if len(args) != 1: raise XPathContext.FunctionNumArgs()
     addends = xc.atomize( p, args[0] )
     try:
-        if len(addends) == 0: 
+        l = len(addends)
+        if l == 0: 
             return ()  # xpath allows empty sequence argument
-        if any(isinstance(a, float) and (math.isnan(a) or math.isinf(a)) 
-               for a in addends):
-            return NaN
-        return sum( addends / len( args[0] ) )
+        hasFloat = False
+        hasDecimal = False
+        for a in addends:
+            if math.isnan(a) or math.isinf(a):
+                return NaN
+            if isinstance(a, float):
+                hasFloat = True
+            elif isinstance(a, Decimal):
+                hasDecimal = True
+        if hasFloat and hasDecimal: # promote decimals to float
+            addends = [float(a) if isinstance(a, Decimal) else a
+                       for a in addends]
+        return sum( addends ) / len( args[0] )
     except TypeError:
         raise XPathContext.FunctionArgType(1,"sumable values", addends, errCode='err:FORG0001')
 
@@ -698,8 +717,18 @@ def fn_sum(xc, p, contextItem, args):
     try:
         if len(addends) == 0: 
             return 0  # xpath allows empty sequence argument
-        if any(isinstance(a, float) and math.isnan(a) for a in addends):
-            return NaN
+        hasFloat = False
+        hasDecimal = False
+        for a in addends:
+            if math.isnan(a):
+                return NaN
+            if isinstance(a, float):
+                hasFloat = True
+            elif isinstance(a, Decimal):
+                hasDecimal = True
+        if hasFloat and hasDecimal: # promote decimals to float
+            addends = [float(a) if isinstance(a, Decimal) else a
+                       for a in addends]
         return sum( addends )
     except TypeError:
         raise XPathContext.FunctionArgType(1,"summable sequence", addends, errCode='err:FORG0001')

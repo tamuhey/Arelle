@@ -55,11 +55,15 @@ arcroleChecks = {
                                       XbrlConst.qnTableAspectNode),
                                      "xbrlte:breakdownTreeSourceError",
                                      "xbrlte:breakdownTreeTargetError"),
-    XbrlConst.tableDefinitionNodeSubtree: (XbrlConst.qnTableRuleNode, 
-                                     (XbrlConst.qnTableClosedDefinitionNode, 
-                                      XbrlConst.qnTableAspectNode),
+    XbrlConst.tableDefinitionNodeSubtree: (XbrlConst.qnTableDefinitionNode, 
+                                     XbrlConst.qnTableDefinitionNode,
                                      "xbrlte:definitionNodeSubtreeSourceError",
-                                     "xbrlte:definitionNodeSubtreeTargetError"),
+                                     "xbrlte:definitionNodeSubtreeTargetError",
+                                     (XbrlConst.qnTableConceptRelationshipNode,
+                                      XbrlConst.qnTableDimensionRelationshipNode),
+                                     None,
+                                     "xbrlte:prohibitedDefinitionNodeSubtreeSourceError",
+                                     None),
     XbrlConst.tableFilter:          (XbrlConst.qnTableTable, 
                                      XbrlConst.qnVariableFilter,
                                      "xbrlte:tableFilterSourceError",
@@ -81,11 +85,15 @@ arcroleChecks = {
                                       XbrlConst.qnTableAspectNodeMMDD),
                                      "xbrlte:breakdownTreeSourceError",
                                      "xbrlte:breakdownTreeTargetError"),
-    XbrlConst.tableDefinitionNodeSubtreeMMDD: (XbrlConst.qnTableRuleNodeMMDD, 
-                                     (XbrlConst.qnTableClosedDefinitionNodeMMDD, 
-                                      XbrlConst.qnTableAspectNodeMMDD),
+    XbrlConst.tableDefinitionNodeSubtreeMMDD: (XbrlConst.qnTableDefinitionNodeMMDD, 
+                                     XbrlConst.qnTableDefinitionNodeMMDD,
                                      "xbrlte:definitionNodeSubtreeSourceError",
-                                     "xbrlte:definitionNodeSubtreeTargetError"),
+                                     "xbrlte:definitionNodeSubtreeTargetError",
+                                     (XbrlConst.qnTableConceptRelationshipNodeMMDD,
+                                      XbrlConst.qnTableDimensionRelationshipNodeMMDD),
+                                     None,
+                                     "xbrlte:prohibitedDefinitionNodeSubtreeSourceError",
+                                     None),
     XbrlConst.tableFilterMMDD:      (XbrlConst.qnTableTableMMDD, 
                                      XbrlConst.qnVariableFilter,
                                      "xbrlte:tableFilterSourceError",
@@ -158,11 +166,14 @@ def checkBaseSet(val, arcrole, ELR, relsSet):
      
     if arcrole in arcroleChecks:
         arcroleCheck = arcroleChecks[arcrole]
+        notFromQname = notToQname = notFromErrCode = notToErrCode = None
         if len(arcroleCheck) == 3:
             fromQname, toQname, fromErrCode = arcroleCheck
             toErrCode = fromErrCode
         elif len(arcroleCheck) == 4: 
             fromQname, toQname, fromErrCode, toErrCode = arcroleCheck
+        elif len(arcroleCheck) == 8:
+            fromQname, toQname, fromErrCode, toErrCode, notFromQname, notToQname, notFromErrCode, notToErrCode = arcroleCheck
         else:
             raise Exception("Invalid arcroleCheck " + str(arcroleCheck))
         level = "INFO" if fromErrCode.endswith(":info") else "ERROR"
@@ -177,6 +188,10 @@ def checkBaseSet(val, arcrole, ELR, relsSet):
                     val.modelXbrl.log(level, fromErrCode,
                         _("Relationship from %(xlinkFrom)s to %(xlinkTo)s should have an %(element)s source"),
                         modelObject=modelRel, xlinkFrom=modelRel.fromLabel, xlinkTo=modelRel.toLabel, element=fromQname)
+                elif notFromQname and val.modelXbrl.isInSubstitutionGroup(fromMdlObj.elementQname, notFromQname):
+                    val.modelXbrl.log(level, notFromErrCode,
+                        _("Relationship from %(xlinkFrom)s to %(xlinkTo)s should not have an %(element)s source"),
+                        modelObject=modelRel, xlinkFrom=modelRel.fromLabel, xlinkTo=modelRel.toLabel, element=fromQname)
             if toQname:
                 if (toMdlObj is None or 
                     (not val.modelXbrl.isInSubstitutionGroup(toMdlObj.elementQname, toQname) and
@@ -184,6 +199,10 @@ def checkBaseSet(val, arcrole, ELR, relsSet):
                     val.modelXbrl.log(level, toErrCode,
                         _("Relationship from %(xlinkFrom)s to %(xlinkTo)s should have an %(element)s target"),
                         modelObject=modelRel, xlinkFrom=modelRel.fromLabel, xlinkTo=modelRel.toLabel, element=toQname)
+                elif notToQname and val.modelXbrl.isInSubstitutionGroup(fromMdlObj.elementQname, notToQname):
+                    val.modelXbrl.log(level, notFromErrCode,
+                        _("Relationship from %(xlinkFrom)s to %(xlinkTo)s should not have an %(element)s target"),
+                        modelObject=modelRel, xlinkFrom=modelRel.fromLabel, xlinkTo=modelRel.toLabel, element=fromQname)
     if arcrole == XbrlConst.functionImplementation:
         for relFrom, rels in relsSet.fromModelObjects().items():
             if len(rels) > 1:
@@ -296,7 +315,7 @@ def validate(val, xpathContext=None, parametersOnly=False, statusMsg='', compile
     for custFnSig in val.modelXbrl.modelCustomFunctionSignatures.values():
         # entries indexed by qname, arity are signature, by qname are just for parser (value=None)
         if custFnSig is not None:
-            custFnQname = custFnSig.qname
+            custFnQname = custFnSig.functionQname
             if custFnQname.namespaceURI == XbrlConst.xfi:
                 val.modelXbrl.error("xbrlve:noProhibitedNamespaceForCustomFunction",
                     _("Custom function %(name)s has namespace reserved for functions in the function registry %(namespace)s"),
@@ -407,13 +426,13 @@ def validate(val, xpathContext=None, parametersOnly=False, statusMsg='', compile
                 instance = modelRel.toModelObject
                 if isinstance(instance, ModelInstance):
                     if instanceQname is None:
-                        instanceQname = instance.qname
+                        instanceQname = instance.instanceQname
                         modelVariableSet.fromInstanceQnames = {instanceQname} # required if referred to by variables scope chaining
                     else:
                         val.modelXbrl.info("arelle:multipleOutputInstances",
                             _("Multiple output instances for formula %(xlinkLabel)s, to names %(instanceTo)s, %(instanceTo2)s"),
                             modelObject=modelVariableSet, xlinkLabel=modelVariableSet.xlinkLabel, 
-                            instanceTo=instanceQname, instanceTo2=instance.qname)
+                            instanceTo=instanceQname, instanceTo2=instance.instanceQname)
             if instanceQname is None: 
                 instanceQname = XbrlConst.qnStandardOutputInstance
                 instanceQnames.add(instanceQname)
@@ -457,7 +476,7 @@ def validate(val, xpathContext=None, parametersOnly=False, statusMsg='', compile
                 for instRel in val.modelXbrl.relationshipSet(XbrlConst.instanceVariable).toModelObject(toVariable):
                     fromInstance = instRel.fromModelObject
                     if isinstance(fromInstance, ModelInstance):
-                        fromInstanceQname = fromInstance.qname
+                        fromInstanceQname = fromInstance.instanceQname
                         varSetInstanceDependencies.add(fromInstanceQname)
                         instanceDependencies[instanceQname].add(fromInstanceQname)
                         if fromInstanceQnames is None: fromInstanceQnames = set()
@@ -512,7 +531,7 @@ def validate(val, xpathContext=None, parametersOnly=False, statusMsg='', compile
                     varSetInstanceDependencies.add(varqname)
                     instanceDependencies[instanceQname].add(varqname)
                 elif isinstance(nameVariables.get(varqname), ModelInstance):
-                    instqname = nameVariables[varqname].qname
+                    instqname = nameVariables[varqname].instanceQname
                     varSetInstanceDependencies.add(instqname)
                     instanceDependencies[instanceQname].add(instqname)
                     
@@ -544,7 +563,7 @@ def validate(val, xpathContext=None, parametersOnly=False, statusMsg='', compile
                 varSetInstanceDependencies.add(varSetDepVarQname)
                 instanceDependencies[instanceQname].add(varSetDepVarQname)
             elif isinstance(nameVariables.get(varSetDepVarQname), ModelInstance):
-                instqname = nameVariables[varSetDepVarQname].qname
+                instqname = nameVariables[varSetDepVarQname].instanceQname
                 varSetInstanceDependencies.add(instqname)
                 instanceDependencies[instanceQname].add(instqname)
         
@@ -698,7 +717,7 @@ def validate(val, xpathContext=None, parametersOnly=False, statusMsg='', compile
                         _("Consistency assertion %(xlinkLabel)s has relationship to a %(elementTo)s %(xlinkLabelTo)s"),
                         modelObject=consisAsser, xlinkLabel=consisAsser.xlinkLabel, 
                         elementTo=consisParamRel.toModelObject.localName, xlinkLabelTo=consisParamRel.toModelObject.xlinkLabel)
-                else:
+                elif isinstance(consisParamRel.toModelObject, ModelParameter):
                     consisAsser.orderedVariableRelationships.append(consisParamRel)
             consisAsser.compile()
             modelRel.toModelObject.hasConsistencyAssertion = True
@@ -773,7 +792,8 @@ def validate(val, xpathContext=None, parametersOnly=False, statusMsg='', compile
         
     val.modelXbrl.modelManager.showStatus(_("running formulae"))
     
-    runIDs = (formulaOptions.runIDs or '').split()
+    # IDs may be "|" or whitespace separated
+    runIDs = (formulaOptions.runIDs or '').replace('|',' ').split()
     if runIDs:
         val.modelXbrl.info("formula:trace",
                            _("Formua/assertion IDs restriction: %(ids)s"), 
@@ -786,7 +806,6 @@ def validate(val, xpathContext=None, parametersOnly=False, statusMsg='', compile
             maxFormulaRunTimeTimer.start()
         else:
             maxFormulaRunTimeTimer = None
-            
         # evaluate variable sets not in consistency assertions
         val.modelXbrl.profileActivity("... evaluations", minTimeToShow=1.0)
         for instanceQname in orderedInstancesList:
@@ -821,7 +840,8 @@ def validate(val, xpathContext=None, parametersOnly=False, statusMsg='', compile
     # log assertion result counts
     asserTests = {}
     for exisValAsser in val.modelXbrl.modelVariableSets:
-        if isinstance(exisValAsser, ModelVariableSetAssertion):
+        if isinstance(exisValAsser, ModelVariableSetAssertion) and \
+           (not runIDs or exisValAsser.id in runIDs):
             asserTests[exisValAsser.id] = (exisValAsser.countSatisfied, exisValAsser.countNotSatisfied)
             if formulaOptions.traceAssertionResultCounts:
                 val.modelXbrl.info("formula:trace",
@@ -832,7 +852,8 @@ def validate(val, xpathContext=None, parametersOnly=False, statusMsg='', compile
 
     for modelRel in val.modelXbrl.relationshipSet(XbrlConst.consistencyAssertionFormula).modelRelationships:
         if modelRel.fromModelObject is not None and modelRel.toModelObject is not None and \
-           isinstance(modelRel.toModelObject,ModelFormula):
+           isinstance(modelRel.toModelObject,ModelFormula) and \
+           (not runIDs or modelRel.fromModelObject.id in runIDs):
             consisAsser = modelRel.fromModelObject
             asserTests[consisAsser.id] = (consisAsser.countSatisfied, consisAsser.countNotSatisfied)
             if formulaOptions.traceAssertionResultCounts:
@@ -1058,10 +1079,12 @@ def checkDefinitionNodeRules(val, table, parent, arcrole, xpathContext):
         axis = rel.toModelObject
         if axis is not None:
             if isinstance(axis, ModelFilterDefinitionNode):
-                if not checkFilterAspectModel(val, table, axis.filterRelationships, xpathContext):
-                    val.modelXbrl.error("xbrlte:axisFilterCoversNoAspects",
-                        _("FilterAxis %(xlinkLabel)s does not cover any aspects."),
-                        modelObject=axis, xlinkLabel=axis.xlinkLabel)
+                checkFilterAspectModel(val, table, axis.filterRelationships, xpathContext)
+                #if not checkFilterAspectModel(val, table, axis.filterRelationships, xpathContext):
+                    # this removed after 2013-01-06 PWD
+                    #val.modelXbrl.error("xbrlte:axisFilterCoversNoAspects",
+                    #    _("FilterAxis %(xlinkLabel)s does not cover any aspects."),
+                    #    modelObject=axis, xlinkLabel=axis.xlinkLabel)
             else:
                 if isinstance(axis, ModelRuleDefinitionNode):
                     # check dimension elements

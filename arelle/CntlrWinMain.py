@@ -397,8 +397,9 @@ class CntlrWinMain (Cntlr.Cntlr):
         self.fileMenu.add_cascade(label=_("Recent imports"), menu=self.recentAttachMenu, underline=0)
         self.packagesMenu = Menu(self.menubar, tearoff=0)
         hasPackages = False
-        for packageInfo in sorted(PackageManager.packagesConfig.get("packages", []),
-                                  key=lambda packageInfo: packageInfo.get("name")):
+        for i, packageInfo in enumerate(sorted(PackageManager.packagesConfig.get("packages", []),
+                                               key=lambda packageInfo: packageInfo.get("name")),
+                                        start=1):
             name = packageInfo.get("name", "package{}".format(i))
             URL = packageInfo.get("URL")
             if name and URL and packageInfo.get("status") == "enabled":
@@ -1130,6 +1131,7 @@ class CntlrWinMain (Cntlr.Cntlr):
             
     def helpAbout(self, event=None):
         from arelle import DialogAbout, Version
+        from lxml import etree
         DialogAbout.about(self.parent,
                           _("About arelle"),
                           os.path.join(self.imagesDir, "arelle32.gif"),
@@ -1147,15 +1149,16 @@ class CntlrWinMain (Cntlr.Cntlr):
                               "See the License for the specific language governing permissions and "
                               "limitations under the License."
                               "\n\nIncludes:"
-                              "\n   Python\u00ae \u00a9 2001-2013 Python Software Foundation"
+                              "\n   Python\u00ae {4[0]}.{4[1]}.{4[2]} \u00a9 2001-2013 Python Software Foundation"
                               "\n   PyParsing \u00a9 2003-2013 Paul T. McGuire"
-                              "\n   lxml \u00a9 2004 Infrae, ElementTree \u00a9 1999-2004 by Fredrik Lundh"
+                              "\n   lxml {5[0]}.{5[1]}.{5[2]} \u00a9 2004 Infrae, ElementTree \u00a9 1999-2004 by Fredrik Lundh"
                               "\n   xlrd \u00a9 2005-2013 Stephen J. Machin, Lingfo Pty Ltd, \u00a9 2001 D. Giffin, \u00a9 2000 A. Khan"
                               "\n   xlwt \u00a9 2007 Stephen J. Machin, Lingfo Pty Ltd, \u00a9 2005 R. V. Kiseliov"                              
                               "{3}"
                               )
                             .format(self.__version__, self.systemWordSize, Version.version,
-                                    _("\n   Bottle \u00a9 2011-2013 Marcel Hellkamp") if self.hasWebServer else ""))
+                                    _("\n   Bottle \u00a9 2011-2013 Marcel Hellkamp") if self.hasWebServer else "",
+                                    sys.version_info, etree.LXML_VERSION))
 
     # worker threads addToLog        
     def addToLog(self, message, messageCode="", file="", level=logging.INFO):
@@ -1353,6 +1356,12 @@ def main():
         application = Tk()
         cntlrWinMain = CntlrWinMain(application)
         application.protocol("WM_DELETE_WINDOW", cntlrWinMain.quit)
+        if sys.platform == "darwin" and not __file__.endswith(".app/Contents/MacOS/arelle"):
+            # not built app - launches behind python or eclipse
+            application.lift()
+            application.call('wm', 'attributes', '.', '-topmost', True)
+            cntlrWinMain.uiThreadQueue.put((application.call, ['wm', 'attributes', '.', '-topmost', False]))
+            os.system('''/usr/bin/osascript -e 'tell app "Finder" to set frontmost of process "Python" to true' ''')
         application.mainloop()            
 
 if __name__ == "__main__":

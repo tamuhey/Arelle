@@ -56,17 +56,8 @@ def load(modelManager, url, nextaction=None, base=None, useFileSource=None, erro
         modelXbrl.closeFileSource= True
     modelXbrl.modelDocument = ModelDocument.load(modelXbrl, url, base, isEntry=True)
     del modelXbrl.entryLoadingUrl
-    if modelXbrl.modelDocument is not None and modelXbrl.modelDocument.type < ModelDocument.Type.DTSENTRIES:
-        # at this point DTS is fully discovered but schemaLocated xsd's are not yet loaded
-        modelDocumentsSchemaLocated = set()
-        while True: # need this logic because each new pass may add new urlDocs
-            modelDocuments = set(modelXbrl.urlDocs.values()) - modelDocumentsSchemaLocated
-            if not modelDocuments:
-                break
-            modelDocument = modelDocuments.pop()
-            modelDocumentsSchemaLocated.add(modelDocument)
-            modelDocument.loadSchemalocatedSchemas()
-
+    loadSchemalocatedSchemas(modelXbrl)
+    
     #from arelle import XmlValidate
     #uncomment for trial use of lxml xml schema validation of entry document
     #XmlValidate.xmlValidate(modelXbrl.modelDocument)
@@ -85,8 +76,22 @@ def create(modelManager, newDocumentType=None, url=None, schemaRefs=None, create
             modelXbrl.modelDocument = ModelDocument.create(modelXbrl, newDocumentType, str(url), schemaRefs=schemaRefs, isEntry=isEntry, initialXml=initialXml, base=base)
             if isEntry:
                 del modelXbrl.entryLoadingUrl
+                loadSchemalocatedSchemas(modelXbrl)
     return modelXbrl
-
+    
+def loadSchemalocatedSchemas(modelXbrl):
+    from arelle import ModelDocument
+    if modelXbrl.modelDocument is not None and modelXbrl.modelDocument.type < ModelDocument.Type.DTSENTRIES:
+        # at this point DTS is fully discovered but schemaLocated xsd's are not yet loaded
+        modelDocumentsSchemaLocated = set()
+        while True: # need this logic because each new pass may add new urlDocs
+            modelDocuments = set(modelXbrl.urlDocs.values()) - modelDocumentsSchemaLocated
+            if not modelDocuments:
+                break
+            modelDocument = modelDocuments.pop()
+            modelDocumentsSchemaLocated.add(modelDocument)
+            modelDocument.loadSchemalocatedSchemas()
+        
 class ModelXbrl:
     """
     .. class:: ModelXbrl(modelManager)
@@ -585,9 +590,9 @@ class ModelXbrl:
             if scenarioElt is None:
                 scenarioElt = XmlUtil.addChild(newCntxElt, XbrlConst.xbrli, "scenario")
             XmlUtil.copyNodes(scenarioElt, scenOCCs)
-
-        self.modelDocument.contextDiscover(newCntxElt)
+                
         XmlValidate.validate(self, newCntxElt)
+        self.modelDocument.contextDiscover(newCntxElt)
         return newCntxElt
 
 
@@ -639,8 +644,8 @@ class ModelXbrl:
                 XmlUtil.addChild(numElt, XbrlConst.xbrli, "measure", text=XmlUtil.addQnameValue(xbrlElt, multiply))
             for divide in divideBy:
                 XmlUtil.addChild(denElt, XbrlConst.xbrli, "measure", text=XmlUtil.addQnameValue(xbrlElt, divide))
-        self.modelDocument.unitDiscover(newUnitElt)
         XmlValidate.validate(self, newUnitElt)
+        self.modelDocument.unitDiscover(newUnitElt)
         return newUnitElt
 
     @property
@@ -780,11 +785,11 @@ class ModelXbrl:
         """
         if parent is None: parent = self.modelDocument.xmlRootElement
         newFact = XmlUtil.addChild(parent, conceptQname, attributes=attributes, text=text,
-            afterSibling=afterSibling, beforeSibling=beforeSibling)
-        self.modelDocument.factDiscover(newFact, parentElement=parent)
+                                   afterSibling=afterSibling, beforeSibling=beforeSibling)
         XmlValidate.validate(self, newFact)
-        return newFact
-
+        self.modelDocument.factDiscover(newFact, parentElement=parent)
+        return newFact    
+        
     def modelObject(self, objectId):
         """Finds a model object by an ordinal ID which may be buried in a tkinter view id string (e.g., 'somedesignation_ordinalnumber').
         
@@ -969,11 +974,13 @@ class ModelXbrl:
     def info(self, codes, msg, **args):
         """Same as error(), but as info
         """
+        """@messageCatalog=[]"""
         self.log('INFO', codes, msg, **args)
 
     def warning(self, codes, msg, **args):
         """Same as error(), but as warning, and no error code saved for Validate
         """
+        """@messageCatalog=[]"""
         self.log('WARNING', codes, msg, **args)
 
     def log(self, level, codes, msg, **args):
@@ -990,6 +997,7 @@ class ModelXbrl:
             self.logCount[numericLevel] = self.logCount.get(numericLevel, 0) + 1
             if numericLevel >= self.errorCaptureLevel:
                 self.errors.append(messageCode)
+            """@messageCatalog=[]"""
             logger.log(numericLevel, *logArgs, exc_info=args.get("exc_info"), extra=extras)
 
     def error(self, codes, msg, **args):
@@ -1009,14 +1017,16 @@ class ModelXbrl:
         :param codes: Message code or tuple/list of message codes
         :type codes: str or [str]
         :param msg: Message text string to be formatted and replaced with named parameters in **args
-        :param **args: Named arguments including modelObject, modelXbrl, or modelDocument, named arguments in msg string, and any exec_info argument.
+        :param **args: Named arguments including modelObject, modelXbrl, or modelDocument, named arguments in msg string, and any exc_info argument.
         :param messageCodes: If first parameter codes, above, is dynamically formatted, this is a documentation string of the message codes only used for extraction of the message catalog document (not used in run-time processing).
         """
+        """@messageCatalog=[]"""
         self.log('ERROR', codes, msg, **args)
 
     def exception(self, codes, msg, **args):
         """Same as error(), but as exception
         """
+        """@messageCatalog=[]"""
         self.log('CRITICAL', codes, msg, **args)
 
     def logProfileStats(self):

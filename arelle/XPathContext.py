@@ -43,7 +43,9 @@ class XPathException(Exception):
             
     
 class FunctionNumArgs(Exception):
-    def __init__(self):
+    def __init__(self, errCode='err:XPST0017', errText=None):
+        self.errCode = errCode
+        self.errText = errText or _('Number of arguments do not match signature arity')
         self.args = ( self.__repr__(), )
     def __repr__(self):
         return _("Exception: Number of arguments mismatch")
@@ -110,6 +112,11 @@ class XPathContext:
         for pluginXbrlMethod in pluginClassMethods("Formula.CustomFunctions"):
             self.customFunctions.update(pluginXbrlMethod())
         
+    def copy(self):  # shallow copy (for such as for Table LB table processiong
+        xpCtxCpy = XPathContext(self.modelXbrl, self.inputXbrlInstance, self.sourceElement, 
+                                self.inScopeVars.copy())
+        # note: not currently duplicating cachedFilterResults
+        return xpCtxCpy
             
     def close(self):
         self.outputLastContext.clear() # dereference
@@ -176,8 +183,8 @@ class XPathContext:
                             result = FunctionIxt.call(self, p, localname, args)
                         else:
                             raise XPathException(p, 'err:XPST0017', _('Function call not identified: {0}.').format(op))
-                    except FunctionNumArgs:
-                        raise XPathException(p, 'err:XPST0017', _('Number of arguments do not match signature arity: {0}').format(op))
+                    except FunctionNumArgs as err:
+                        raise XPathException(p, err.errCode, "{}: {}".format(err.errText, op))
                     except FunctionArgType as err:
                         raise XPathException(p, err.errCode, _('Argument {0} does not match expected type {1} for {2} {3}.')
                                              .format(err.argNum, err.expectedType, op, err.foundObject))
@@ -632,7 +639,7 @@ class XPathContext:
             if isinstance(x, ModelObject):
                 e = x
             if e is not None:
-                if e.xValid == VALID_NO_CONTENT:
+                if getattr(e, "xValid", 0) == VALID_NO_CONTENT:
                     raise XPathException(p, 'err:FOTY0012', _('Atomizing element {0} that does not have a typed value').format(x))
                 if e.get("{http://www.w3.org/2001/XMLSchema-instance}nil") == "true":
                     return []
@@ -689,6 +696,21 @@ class XPathContext:
     def effectiveBooleanValue(self, p, x):
         from arelle.FunctionFn import boolean
         return boolean( self, p, None, (self.flattenSequence(x),) )
+    
+    def traceEffectiveVariableValue(self, elt, varname):
+        # used for tracing variable value
+        if varname.startswith('$'):
+            varQname = qname(elt,varname[1:])
+            if varQname in self.inScopeVars:
+                varValue = self.inScopeVars[varQname]
+                if isinstance(varValue, ModelFact):
+                    return varValue.effectiveValue
+                else:
+                    return str(varValue)
+            else:
+                return varname
+        else: # not a variable name
+            return varname
 
     # flatten into a sequence
     def flattenSequence(self, x, sequence=None):

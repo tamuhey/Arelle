@@ -52,7 +52,6 @@ def viewRenderedGrid(modelXbrl, tabWin, lang=None):
     saveMenu.add_command(label=_("Layout model"), underline=0, command=lambda: view.modelXbrl.modelManager.cntlr.fileSave(view=view, fileType="xml"))
     saveMenu.add_command(label=_("XBRL instance"), underline=0, command=view.saveInstance)
     menu.add_cascade(label=_("Save"), menu=saveMenu, underline=0)
-    menu.add_command(label=_("Enter new facts..."), underline=0, command=view.enterNewFacts)
     view.view()
     view.blockSelectEvent = 1
     view.blockViewModelObject = 0
@@ -159,6 +158,7 @@ class ViewRenderedGrid(ViewWinGrid.ViewGrid):
         self.viewFrame.clearGrid()
 
         tblAxisRelSet, xTopStructuralNode, yTopStructuralNode, zTopStructuralNode = resolveAxesStructure(self, viewTblELR) 
+        self.hasTableFilters = bool(self.modelTable.filterRelationships)
         
         if tblAxisRelSet:
             self.aspectEntryObjectIdsNode.clear()
@@ -487,7 +487,6 @@ class ViewRenderedGrid(ViewWinGrid.ViewGrid):
     
     def bodyCells(self, row, yParentStructuralNode, xStructuralNodes, zAspectStructuralNodes, yChildrenFirst):
         if yParentStructuralNode is not None:
-            rendrCntx = getattr(self.modelXbrl, "rendrCntx", None) # none for EU 2010 tables
             dimDefaults = self.modelXbrl.qnameDimensionDefaults
             for yStructuralNode in yParentStructuralNode.childStructuralNodes:
                 if yChildrenFirst:
@@ -544,6 +543,8 @@ class ViewRenderedGrid(ViewWinGrid.ViewGrid):
                         if conceptNotAbstract:
                             # reduce set of matchable facts to those with pri item qname and have dimension aspects
                             facts = self.modelXbrl.factsByQname[priItemQname] if priItemQname else self.modelXbrl.factsInInstance
+                            if self.hasTableFilters:
+                                facts = self.modelTable.filterFacts(self.rendrCntx, facts)
                             for aspect in matchableAspects:  # trim down facts with explicit dimensions match or just present
                                 if isinstance(aspect, QName):
                                     aspectValue = cellAspectValues.get(aspect, None)
@@ -560,7 +561,7 @@ class ViewRenderedGrid(ViewWinGrid.ViewGrid):
                                         dimMemQname = None # match facts that report this dimension
                                     facts = facts & self.modelXbrl.factsByDimMemQname(aspect, dimMemQname)
                             for fact in facts:
-                                if (all(aspectMatches(rendrCntx, fact, fp, aspect) 
+                                if (all(aspectMatches(self.rendrCntx, fact, fp, aspect) 
                                         for aspect in matchableAspects) and
                                     all(fact.context.dimMemberQname(dim,includeDefaults=True) in (dimDefaults[dim], None)
                                         for dim in cellDefaultedDims)):
@@ -592,9 +593,6 @@ class ViewRenderedGrid(ViewWinGrid.ViewGrid):
                 if not yChildrenFirst:
                     row = self.bodyCells(row, yStructuralNode, xStructuralNodes, zAspectStructuralNodes, yChildrenFirst)
             return row
-        
-    def enterNewFacts(self):
-        pass # print("enter new facts")
         
     def onClick(self, event):
         try:
@@ -771,7 +769,7 @@ class ViewRenderedGrid(ViewWinGrid.ViewGrid):
                         else:
                             typedDimElement = dimConcept.typedDomainElement
                             aspectValue = FunctionXfi.create_element(
-                                  self.modelXbrl.rendrCntx, None, (typedDimElement.qname, (), value))
+                                  self.rendrCntx, None, (typedDimElement.qname, (), value))
                 if aspectValue is not None:
                     aspectValues[aspect] = aspectValue
         return aspectValues
@@ -824,7 +822,7 @@ class ViewRenderedGrid(ViewWinGrid.ViewGrid):
         if structuralNode is not None:
             valueHeaders = set()
             headerValues = {}
-            relationships = concept_relationships(self.modelXbrl.rendrCntx, 
+            relationships = concept_relationships(self.rendrCntx, 
                                  None, 
                                  (aspect,
                                   "XBRL-all-linkroles", # linkrole,

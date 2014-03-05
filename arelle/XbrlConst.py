@@ -296,25 +296,46 @@ qnPrecisionFilter = qname("{http://xbrl.org/2008/filter/value}vf:precision")
 xpath2err = "http://www.w3.org/2005/xqt-errors"
 variablesScope = "http://xbrl.org/arcrole/2010/variables-scope"
 
-# 2013-MM-DD current IWD
-tableMMDD = "http://xbrl.org/PWD/2013-MM-DD/table"
-tableModelMMDD = "http://xbrl.org/PWD/2013-MM-DD/table/model"
-tableBreakdownMMDD = "http://xbrl.org/arcrole/PWD/2013-MM-DD/table-breakdown"
-tableBreakdownTreeMMDD = "http://xbrl.org/arcrole/PWD/2013-MM-DD/breakdown-tree"
-tableDefinitionNodeSubtreeMMDD = "http://xbrl.org/arcrole/PWD/2013-MM-DD/definition-node-subtree"
-tableFilterMMDD = "http://xbrl.org/arcrole/PWD/2013-MM-DD/table-filter"
-tableAspectNodeFilterMMDD = "http://xbrl.org/arcrole/PWD/2013-MM-DD/aspect-node-filter"
-tableParameterMMDD = "http://xbrl.org/arcrole/PWD/2013-MM-DD/table-parameter"
-qnTableTableMMDD = qname("{http://xbrl.org/PWD/2013-MM-DD/table}table:table")
-qnTableBreakdownMMDD = qname("{http://xbrl.org/PWD/2013-MM-DD/table}table:breakdown")
-qnTableRuleNodeMMDD = qname("{http://xbrl.org/PWD/2013-MM-DD/table}table:ruleNode")
-qnTableRuleSetMMDD = qname("{http://xbrl.org/PWD/2013-MM-DD/table}table:ruleSet")
-qnTableClosedDefinitionNodeMMDD = qname("{http://xbrl.org/PWD/2013-MM-DD/table}table:closedDefinitionNode")
-qnTableConceptRelationshipNodeMMDD = qname("{http://xbrl.org/PWD/2013-MM-DD/table}table:conceptRelationshipNode")
-qnTableDimensionRelationshipNodeMMDD = qname("{http://xbrl.org/PWD/2013-MM-DD/table}table:dimensionRelationshipNode")
-qnTableAspectNodeMMDD = qname("{http://xbrl.org/PWD/2013-MM-DD/table}table:aspectNode")
+# 2014-MM-DD current IWD
+tableMMDD = "http://xbrl.org/PWD/2014-MM-DD/table"
+tableModelMMDD = "http://xbrl.org/PWD/2014-MM-DD/table/model"
+tableBreakdownMMDD = "http://xbrl.org/arcrole/PWD/2014-MM-DD/table-breakdown"
+tableBreakdownTreeMMDD = "http://xbrl.org/arcrole/PWD/2014-MM-DD/breakdown-tree"
+tableDefinitionNodeSubtreeMMDD = "http://xbrl.org/arcrole/PWD/2014-MM-DD/definition-node-subtree"
+tableFilterMMDD = "http://xbrl.org/arcrole/PWD/2014-MM-DD/table-filter"
+tableAspectNodeFilterMMDD = "http://xbrl.org/arcrole/PWD/2014-MM-DD/aspect-node-filter"
+tableParameterMMDD = "http://xbrl.org/arcrole/PWD/2014-MM-DD/table-parameter"
+qnTableTableMMDD = qname("{http://xbrl.org/PWD/2014-MM-DD/table}table:table")
+qnTableBreakdownMMDD = qname("{http://xbrl.org/PWD/2014-MM-DD/table}table:breakdown")
+qnTableRuleNodeMMDD = qname("{http://xbrl.org/PWD/2014-MM-DD/table}table:ruleNode")
+qnTableRuleSetMMDD = qname("{http://xbrl.org/PWD/2014-MM-DD/table}table:ruleSet")
+qnTableDefinitionNodeMMDD = qname("{http://xbrl.org/PWD/2014-MM-DD/table}table:definitionNode")
+qnTableClosedDefinitionNodeMMDD = qname("{http://xbrl.org/PWD/2014-MM-DD/table}table:closedDefinitionNode")
+qnTableConceptRelationshipNodeMMDD = qname("{http://xbrl.org/PWD/2014-MM-DD/table}table:conceptRelationshipNode")
+qnTableDimensionRelationshipNodeMMDD = qname("{http://xbrl.org/PWD/2014-MM-DD/table}table:dimensionRelationshipNode")
+qnTableAspectNodeMMDD = qname("{http://xbrl.org/PWD/2014-MM-DD/table}table:aspectNode")
 
-# 2013-08-28 current PWD
+# 2013-MM-DD current CR
+table = "http://xbrl.org/CR/2013-11-13/table"
+tableModel = "http://xbrl.org/CR/2013-11-13/table/model"
+tableBreakdown = "http://xbrl.org/arcrole/CR/2013-11-13/table-breakdown"
+tableBreakdownTree = "http://xbrl.org/arcrole/CR/2013-11-13/breakdown-tree"
+tableDefinitionNodeSubtree = "http://xbrl.org/arcrole/CR/2013-11-13/definition-node-subtree"
+tableFilter = "http://xbrl.org/arcrole/CR/2013-11-13/table-filter"
+tableAspectNodeFilter = "http://xbrl.org/arcrole/CR/2013-11-13/aspect-node-filter"
+tableParameter = "http://xbrl.org/arcrole/CR/2013-11-13/table-parameter"
+qnTableTable = qname("{http://xbrl.org/CR/2013-11-13/table}table:table")
+qnTableBreakdown = qname("{http://xbrl.org/CR/2013-11-13/table}table:breakdown")
+qnTableRuleNode = qname("{http://xbrl.org/CR/2013-11-13/table}table:ruleNode")
+qnTableRuleSet = qname("{http://xbrl.org/CR/2013-11-13/table}table:ruleSet")
+qnTableDefinitionNode = qname("{http://xbrl.org/CR/2013-11-13/table}table:definitionNode")
+qnTableClosedDefinitionNode = qname("{http://xbrl.org/CR/2013-11-13/table}table:closedDefinitionNode")
+qnTableConceptRelationshipNode = qname("{http://xbrl.org/CR/2013-11-13/table}table:conceptRelationshipNode")
+qnTableDimensionRelationshipNode = qname("{http://xbrl.org/CR/2013-11-13/table}table:dimensionRelationshipNode")
+qnTableAspectNode = qname("{http://xbrl.org/CR/2013-11-13/table}table:aspectNode")
+
+# prior 2013-08-28 PWD
+''' not supported
 table = "http://xbrl.org/PWD/2013-08-28/table"
 tableModel = "http://xbrl.org/PWD/2013-08-28/table/model"
 tableBreakdown = "http://xbrl.org/arcrole/PWD/2013-08-28/table-breakdown"
@@ -330,8 +351,9 @@ qnTableClosedDefinitionNode = qname("{http://xbrl.org/PWD/2013-08-28/table}table
 qnTableConceptRelationshipNode = qname("{http://xbrl.org/PWD/2013-08-28/table}table:conceptRelationshipNode")
 qnTableDimensionRelationshipNode = qname("{http://xbrl.org/PWD/2013-08-28/table}table:dimensionRelationshipNode")
 qnTableAspectNode = qname("{http://xbrl.org/PWD/2013-08-28/table}table:aspectNode")
+'''
 
-# 2013-05-17 current PWD
+# prior 2013-05-17 PWD
 table201305 = "http://xbrl.org/PWD/2013-05-17/table"
 tableModel201305 = "http://xbrl.org/PWD/2013-05-17/table/model"
 tableBreakdown201305 = "http://xbrl.org/arcrole/PWD/2013-05-17/table-breakdown"
@@ -394,12 +416,6 @@ qnEuTable = qname("{http://www.eurofiling.info/2010/rendering}rendering:table")
 qnEuAxisCoord = qname("{http://www.eurofiling.info/2010/rendering}rendering:axisCoord")
 euGroupTable = "http://www.eurofiling.info/xbrl/arcrole/group-table"
 
-def tableModelQName(localName):
-    return '{' + tableModel + '}' + localName
-
-def tableModelMMDDQName(localName):
-    return '{' + tableModelMMDD + '}' + localName
-
 xdtSchemaErrorNS = "http://www.xbrl.org/2005/genericXmlSchemaError"
 errMsgPrefixNS = {
     "err": xpath2err,
@@ -425,7 +441,7 @@ errMsgPrefixNS = {
     "xbrlcfie": "http://xbrl.org/2010/custom-function/error",
     "xbrlmfe": "http://xbrl.org/2008/filter/match/error",
     "xbrlvarscopee": "http://xbrl.org/2010/variable/variables-scope/error",
-    "xbrlte": "http://xbrl.org/PWD/2013-MM-DD/table/error",
+    "xbrlte": "http://xbrl.org/PWD/2014-MM-DD/table/error",
     "utre": "http://www.xbrl.org/2009/utr/errors",
     "enumte": "http://xbrl.org/2013/extensible-enumerations/taxonomy-errors",
     "enumie": "http://xbrl.org/2013/extensible-enumerations/instance-errors"
@@ -527,6 +543,25 @@ def isNetRole(role):
     
 def isLabelRole(role):
     return role in standardLabelRoles or role == genLabel
+
+def isNumericRole(role):
+    return role in {"http://www.xbrl.org/2003/role/totalLabel",
+                    "http://www.xbrl.org/2003/role/positiveLabel",
+                    "http://www.xbrl.org/2003/role/negativeLabel",
+                    "http://www.xbrl.org/2003/role/zeroLabel",
+                    "http://www.xbrl.org/2003/role/positiveTerseLabel",
+                    "http://www.xbrl.org/2003/role/negativeTerseLabel",
+                    "http://www.xbrl.org/2003/role/zeroTerseLabel",
+                    "http://www.xbrl.org/2003/role/positiveVerboseLabel",
+                    "http://www.xbrl.org/2003/role/negativeVerboseLabel",
+                    "http://www.xbrl.org/2003/role/zeroVerboseLabel",
+                    "http://www.xbrl.org/2009/role/negatedLabel",
+                    "http://www.xbrl.org/2009/role/negatedPeriodEndLabel",
+                    "http://www.xbrl.org/2009/role/negatedPeriodStartLabel",
+                    "http://www.xbrl.org/2009/role/negatedTotalLabel",
+                    "http://www.xbrl.org/2009/role/negatedNetLabel",
+                    "http://www.xbrl.org/2009/role/negatedTerseLabel"
+                    }
     
 def isStandardArcrole(role):
     return role in {"http://www.w3.org/1999/xlink/properties/linkbase",

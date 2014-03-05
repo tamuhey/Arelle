@@ -49,6 +49,7 @@ class DisclosureSystem:
         self.EFMorGFM = False
         self.HMRC = False
         self.SBRNL = False
+        self.EBA = False
         self.validateFileText = False
         self.schemaValidateSchema = None
         self.blockDisallowedReferences = False
@@ -79,6 +80,7 @@ class DisclosureSystem:
         self.deiFilerNameElement = None
         self.logLevelFilter = None
         self.logCodeFilter = None
+        self.version = (0,0,0)
 
     @property
     def dir(self):
@@ -126,6 +128,7 @@ class DisclosureSystem:
                             self.EFMorGFM = self.EFM or self.GFM
                             self.HMRC = self.validationType == "HMRC"
                             self.SBRNL = self.validationType == "SBR-NL"
+                            self.EBA = self.validationType == "EBA"
                             self.validateFileText = dsElt.get("validateFileText") == "true"
                             self.blockDisallowedReferences = dsElt.get("blockDisallowedReferences") == "true"
                             try:
@@ -201,6 +204,12 @@ class DisclosureSystem:
                     file = openXmlFileStream(self.modelManager.cntlr, filepath, stripDeclaration=True)[0]
                     xmldoc = etree.parse(file)
                     file.close()
+                    for erxlElt in xmldoc.iter(tag="Erxl"):
+                        v = erxlElt.get("version")
+                        if v and re.match(r"[0-9]+([.][0-9]+)*$", v):
+                            vSplit = v.split('.') # at least 3 digits always!
+                            self.version = tuple(int(n) for n in vSplit) + tuple(0 for n in range(3 - len(vSplit)))
+                        break
                     for locElt in xmldoc.iter(tag="Loc"):
                         href = None
                         localHref = None

@@ -62,6 +62,7 @@ import os, sys
 from lxml import etree
 import decimal
 from arelle import (XmlUtil, XbrlConst, XbrlUtil, UrlUtil, Locale, ModelValue, XmlValidate)
+from arelle.XmlValidate import UNVALIDATED, VALID
 from arelle.ModelObject import ModelObject
 
 ModelFact = None
@@ -125,6 +126,18 @@ class ModelRoleType(ModelObject):
                                 for usedOn in self.iterdescendants("{http://www.xbrl.org/2003/linkbase}usedOn")
                                 if isinstance(usedOn,ModelObject))
             return self._usedOns
+        
+    @property
+    def tableCode(self):
+        """ table code from structural model for presentable table by ELR"""
+        if self.isArcrole:
+            return None
+        try:
+            return self._tableCode
+        except AttributeError:
+            from arelle import TableStructure
+            TableStructure.evaluateRoleTypesTableCodes(self.modelXbrl)
+            return self._tableCode
     
     @property
     def propertyView(self):
@@ -197,7 +210,7 @@ class ModelNamableTerm(ModelObject):
         :returns: QName -- the resolved prefixed name, or None if no prefixed name was provided
         """
         if prefixedName:    # passing None would return element qname, not prefixedName None Qname
-            qn = ModelValue.qname(self, prefixedName, prefixException=prefixException)
+            qn = ModelValue.qnameEltPfxName(self, prefixedName, prefixException=prefixException)
             # may be in an included file with no target namespace
             # a ref to local attribute or element wihich is qualified MAY need to assume targetNamespace
             if qn and not qn.namespaceURI and self.modelDocument.noTargetNamespace and not isQualifiedForm:
@@ -806,7 +819,7 @@ class ModelAttribute(ModelNamableTerm):
         """(QName) -- QName of type of attribute"""
         if self.get("type"):
             return self.schemaNameQname(self.get("type"))
-        else:
+        elif getattr(self,"xValid", 0) >= 4:
             # check if anonymous type exists
             typeqname = ModelValue.qname(self.qname.clarkNotation +  anonymousTypeSuffix)
             if typeqname in self.modelXbrl.qnameTypes:
@@ -817,7 +830,7 @@ class ModelAttribute(ModelNamableTerm):
             if subs:
                 return subs.typeQname
             '''
-            return None
+        return None
     
     @property
     def type(self):
@@ -1878,6 +1891,17 @@ class ModelRelationship(ModelObject):
             elif aType in ("zAxis","z"): self._axisDisposition = "z"
             else: self._axisDisposition = None
             return self._axisDisposition
+        
+    @property
+    def equivalenceHash(self): # not exact, use equivalenceKey if hashes are the same
+        return hash((self.qname, 
+                     self.linkQname,
+                     self.linkrole,  # needed when linkrole=None merges multiple links
+                     self.fromModelObject.objectIndex if self.fromModelObject is not None else -1, 
+                     self.toModelObject.objectIndex if self.toModelObject is not None else -1, 
+                     self.order, 
+                     self.weight, 
+                     self.preferredLabel))
         
     @property
     def equivalenceKey(self):
