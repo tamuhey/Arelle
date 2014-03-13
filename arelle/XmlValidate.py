@@ -249,6 +249,12 @@ def validate(modelXbrl, elt, recurse=True, attrQname=None, ixFacts=False):
                             if "compositor" in errArgs:  # compositor is an object, provide friendly string
                                 errArgs["compositor"] = modelGroupCompositorTitle(errArgs["compositor"])
                             modelXbrl.error(*errDesc,**errArgs)
+                                                        
+                            # when error is in an xbrli element, check any further unvalidated children
+                            if qnElt.namespaceURI == XbrlConst.xbrli and iElt < len(childElts):
+                                for childElt in childElts[iElt:]:
+                                    if (getattr(childElt,"xValid", UNVALIDATED) == UNVALIDATED):
+                                        validate(modelXbrl, childElt, ixFacts=ixFacts)
                     recurse = False # cancel child element validation below, recursion was within validateElementSequence
                 except AttributeError as ex:
                     raise ex
@@ -485,7 +491,7 @@ def validateFacet(typeElt, facetElt):
     if facetName in ("length", "minLength", "maxLength", "totalDigits", "fractionDigits"):
         baseXsdType = "integer"
         facets = None
-    elif facetName in ("maxInclusive", "maxExclusive", "minExclusive"):
+    elif facetName in ("minInclusive", "maxInclusive", "minExclusive", "maxExclusive"):
         baseXsdType = typeElt.baseXsdType
         facets = None
     elif facetName == "whiteSpace":

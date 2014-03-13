@@ -1,431 +1,321 @@
--- This DDL (SQL) script initializes a database for the XBRL Abstract Model using MySQL (or GAE Cloud SQL)
+-- This DDL (SQL) script initializes a database for the XBRL Abstract Model Postgres
 
--- (c) Copyright 2013 Mark V Systems Limited, California US, All rights reserved.  
+-- (c) Copyright 2014 Mark V Systems Limited, California US, All rights reserved.  
 -- Mark V copyright applies to this software, which is licensed according to the terms of Arelle(r).
 
-SET @@sql_mode=CONCAT_WS(',', @@sql_mode, 'NO_BACKSLASH_ESCAPES');
+-- drop tables and sequences
+DROP TABLE IF EXISTS filing;
+DROP TABLE IF EXISTS report;
+DROP TABLE IF EXISTS document;
+DROP TABLE IF EXISTS referenced_documents;
+DROP TABLE IF EXISTS aspect;
+DROP TABLE IF EXISTS data_type;
+DROP TABLE IF EXISTS role_type;
+DROP TABLE IF EXISTS arcrole_type;
+DROP TABLE IF EXISTS used_on;
+DROP TABLE IF EXISTS resource;
+DROP TABLE IF EXISTS relationship_set;
+DROP TABLE IF EXISTS relationship;
+DROP TABLE IF EXISTS root;
+DROP TABLE IF EXISTS data_point;
+DROP TABLE IF EXISTS entity;
+DROP TABLE IF EXISTS period;
+DROP TABLE IF EXISTS unit;
+DROP TABLE IF EXISTS unit_measure;
+DROP TABLE IF EXISTS aspect_value_selection_set;
+DROP TABLE IF EXISTS aspect_value_selection;
+DROP TABLE IF EXISTS table_data_points;
+DROP TABLE IF EXISTS message;
+DROP TABLE IF EXISTS message_reference;
+DROP TABLE IF EXISTS industry;
+DROP TABLE IF EXISTS industry_level;
+DROP TABLE IF EXISTS industry_structure;
+
+-- sequences are synced up in loading code by Arelle
 
 --
 -- note that dropping table also drops the indexes and triggers
 --
-DROP TABLE IF EXISTS sequences CASCADE;
-DROP TABLE IF EXISTS filing CASCADE;
-DROP TABLE IF EXISTS report CASCADE;
-DROP TABLE IF EXISTS document CASCADE;
-DROP TABLE IF EXISTS referenced_documents CASCADE;
-DROP TABLE IF EXISTS aspect CASCADE;
-DROP TABLE IF EXISTS data_type CASCADE;
-DROP TABLE IF EXISTS role_type CASCADE;
-DROP TABLE IF EXISTS arcrole_type CASCADE;
-DROP TABLE IF EXISTS used_on CASCADE;
-DROP TABLE IF EXISTS resource CASCADE;
-DROP TABLE IF EXISTS relationship_set CASCADE;
-DROP TABLE IF EXISTS root CASCADE;
-DROP TABLE IF EXISTS relationship CASCADE;
-DROP TABLE IF EXISTS data_point CASCADE;
-DROP TABLE IF EXISTS entity CASCADE;
-DROP TABLE IF EXISTS period CASCADE;
-DROP TABLE IF EXISTS unit CASCADE;
-DROP TABLE IF EXISTS unit_measure CASCADE;
-DROP TABLE IF EXISTS aspect_value_selection_set CASCADE;
-DROP TABLE IF EXISTS aspect_value_selection CASCADE;
-DROP TABLE IF EXISTS table_data_points CASCADE;
-DROP TABLE IF EXISTS message CASCADE;
-DROP TABLE IF EXISTS message_reference CASCADE;
-DROP TABLE IF EXISTS industry CASCADE;
-DROP TABLE IF EXISTS industry_level CASCADE;
-DROP TABLE IF EXISTS industry_structure CASCADE;
-
--- currently only shared sequence in use is seq_object, for semantic 'objects'
--- single-table sequences are implemented using AUTO_INCREMENT for efficiency
-CREATE TABLE sequences (
-    sequence_name varchar(100) NOT NULL,    
-    sequence_max_value bigint NOT NULL DEFAULT 9223372036854775807,
-    sequence_cur_value bigint DEFAULT 1,    
-    sequence_cycle boolean NOT NULL DEFAULT FALSE,    
-    PRIMARY KEY (sequence_name)
-); 
-
-
 CREATE TABLE filing (
-    filing_id bigint NOT NULL AUTO_INCREMENT,
-    filing_number varchar(30) NOT NULL,
-    reference_number  varchar(30),
-    form_type  varchar(30),
-    accepted_timestamp timestamp NOT NULL DEFAULT now(),
-    is_most_current boolean NOT NULL DEFAULT false,
-    filing_date date NOT NULL,
-    entity_id bigint NOT NULL,
-    entity_name varchar(1024),
-    creation_software text,
-    standard_industry_code integer NOT NULL DEFAULT -1,
-    authority_html_url text,
-    entry_url text,
-    PRIMARY KEY (filing_id)
+    filing_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    filing_number TEXT NOT NULL,
+    reference_number TEXT,
+    form_type TEXT,
+    accepted_timestamp DATE DEFAULT (datetime('now','localtime')),
+    is_most_current BOOLEAN DEFAULT false NOT NULL,
+    filing_date DATE NOT NULL,
+    entity_id INTEGER NOT NULL,
+    entity_name TEXT,
+    creation_software TEXT,
+    standard_industry_code integer DEFAULT (-1) NOT NULL,
+    authority_html_url TEXT,
+    entry_url TEXT
 );
-CREATE UNIQUE INDEX filing_index02 USING btree ON filing (filing_number);
-
-
--- object sequence can be any element that can terminate a relationship (aspect, type, resource, data point, document, role type, ...)
--- or be a reference of a message (report or any of above)
-INSERT INTO sequences (sequence_name) VALUES ('seq_object');
+CREATE UNIQUE INDEX filing_index02 ON filing  (filing_number);
 
 CREATE TABLE report (
-    report_id bigint NOT NULL,
-    filing_id bigint NOT NULL
+    report_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    filing_id INTEGER NOT NULL
 );
-CREATE INDEX report_index01 USING btree ON report (report_id);
-CREATE INDEX report_index02 USING btree ON report (filing_id);
-
-DELIMITER //
-CREATE TRIGGER report_seq BEFORE INSERT ON report 
-  FOR EACH ROW BEGIN
-    SET NEW.report_id = (SELECT sequence_cur_value FROM sequences WHERE sequence_name = 'seq_object');
-    UPDATE sequences SET sequence_cur_value = sequence_cur_value + 1 WHERE sequence_name = 'seq_object';
-  END;//
-DELIMITER ;
+CREATE INDEX report_index02 ON report(filing_id);
 
 CREATE TABLE document (
-    document_id bigint NOT NULL,
-    document_url varchar(2048) NOT NULL,
-    document_type varchar(32),  -- ModelDocument.Type string value
-    namespace varchar(1024),  -- targetNamespace if schema else NULL
-    PRIMARY KEY (document_id)
+    document_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_url TEXT NOT NULL,
+    document_type TEXT,  -- ModelDocument.Type string value
+    namespace TEXT  -- targetNamespace if schema else NULL
 );
-CREATE INDEX document_index02 USING btree ON document (document_url(512));
-
-DELIMITER //
-CREATE TRIGGER document_seq BEFORE INSERT ON document 
-  FOR EACH ROW BEGIN
-    SET NEW.document_id = (SELECT sequence_cur_value FROM sequences WHERE sequence_name = 'seq_object');
-    UPDATE sequences SET sequence_cur_value = sequence_cur_value + 1 WHERE sequence_name = 'seq_object';
-  END;//
-DELIMITER ;
+CREATE INDEX document_index02 ON document (document_url);
 
 -- documents referenced by report or document
 
 CREATE TABLE referenced_documents (
-    object_id bigint NOT NULL,
-    document_id bigint NOT NULL
+    object_id INTEGER NOT NULL,
+    document_id INTEGER NOT NULL
 );
-CREATE INDEX referenced_documents_index01 USING btree ON referenced_documents (object_id);
-CREATE UNIQUE INDEX referenced_documents_index02 USING btree ON referenced_documents (object_id, document_id);
+CREATE INDEX referenced_documents_index01 ON referenced_documents  (object_id);
+CREATE UNIQUE INDEX referenced_documents_index02 ON referenced_documents  (object_id, document_id);
 
 CREATE TABLE aspect (
-    aspect_id bigint NOT NULL,
-    document_id bigint NOT NULL,
-    xml_id varchar(1024),  -- xml id or element pointer (do we need this?)
-    qname varchar(1024) NOT NULL,  -- clark notation qname (do we need this?)
-    name varchar(1024) NOT NULL,  -- local qname
-    datatype_id bigint,
-    base_type varchar(128), -- xml base type if any
-    substitution_group_aspect_id bigint,
-    balance varchar(16),
-    period_type varchar(16),
-    abstract boolean NOT NULL,
-    nillable boolean NOT NULL,
-    is_numeric boolean NOT NULL,
-    is_monetary boolean NOT NULL,
-    is_text_block boolean NOT NULL,
-    PRIMARY KEY (aspect_id)
+    aspect_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER NOT NULL,
+    xml_id TEXT,  -- xml id or element pointer (do we need this?)
+    qname TEXT NOT NULL,  -- clark notation qname (do we need this?)
+    name TEXT NOT NULL,  -- local qname
+    datatype_id INTEGER,
+    base_type TEXT, -- xml base type if any
+    substitution_group_aspect_id INTEGER,
+    balance TEXT,
+    period_type TEXT,
+    abstract BOOLEAN NOT NULL,
+    nillable BOOLEAN NOT NULL,
+    is_numeric BOOLEAN NOT NULL,
+    is_monetary BOOLEAN NOT NULL,
+    is_TEXT_block BOOLEAN NOT NULL
 );
-CREATE INDEX aspect_index02 USING btree ON aspect (document_id);
-CREATE INDEX aspect_index03 USING hash ON aspect (qname(512));
-
-DELIMITER //
-CREATE TRIGGER aspect_seq BEFORE INSERT ON aspect 
-  FOR EACH ROW BEGIN
-    SET NEW.aspect_id = (SELECT sequence_cur_value FROM sequences WHERE sequence_name = 'seq_object');
-    UPDATE sequences SET sequence_cur_value = sequence_cur_value + 1 WHERE sequence_name = 'seq_object';
-  END;//
-DELIMITER ;
+CREATE INDEX aspect_index02 ON aspect  (document_id);
+CREATE INDEX aspect_index03 ON aspect (qname);
 
 CREATE TABLE data_type (
-    data_type_id bigint NOT NULL,
-    document_id bigint NOT NULL,
-    xml_id varchar(1024),  -- xml id or element pointer (do we need this?)
-    qname varchar(1024) NOT NULL,  -- clark notation qname (do we need this?)
-    name varchar(1024) NOT NULL,  -- local qname
-    base_type varchar(128), -- xml base type if any
-    derived_from_type_id bigint,
-    PRIMARY KEY (data_type_id)
+    data_type_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER NOT NULL,
+    xml_id TEXT,  -- xml id or element pointer (do we need this?)
+    qname TEXT NOT NULL,  -- clark notation qname (do we need this?)
+    name TEXT NOT NULL,  -- local qname
+    base_type TEXT, -- xml base type if any
+    derived_from_type_id INTEGER
 );
-CREATE INDEX data_type_index02 USING btree ON data_type (document_id);
-CREATE INDEX data_type_index03 USING hash ON data_type (qname(512));
-
-DELIMITER //
-CREATE TRIGGER data_type_seq BEFORE INSERT ON data_type 
-  FOR EACH ROW BEGIN
-    SET NEW.data_type_id = (SELECT sequence_cur_value FROM sequences WHERE sequence_name = 'seq_object');
-    UPDATE sequences SET sequence_cur_value = sequence_cur_value + 1 WHERE sequence_name = 'seq_object';
-  END;//
-DELIMITER ;
+CREATE INDEX data_type_index02 ON data_type (document_id);
+CREATE INDEX data_type_index03 ON data_type (qname);
 
 CREATE TABLE role_type (
-    role_type_id bigint NOT NULL,
-    document_id bigint NOT NULL,
-    xml_id varchar(1024),  -- xml id or element pointer (do we need this?)
-    role_uri varchar(1024) NOT NULL,
-    definition text,
-    PRIMARY KEY (role_type_id)
+    role_type_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER NOT NULL,
+    xml_id TEXT,  -- xml id or element pointer (do we need this?)
+    role_uri TEXT NOT NULL,
+    definition TEXT
 );
-CREATE INDEX role_type_index02 USING btree ON role_type (document_id);
-CREATE INDEX role_type_index03 USING hash ON role_type (role_uri(512));
-
-DELIMITER //
-CREATE TRIGGER role_type_seq BEFORE INSERT ON role_type 
-  FOR EACH ROW BEGIN
-    SET NEW.role_type_id = (SELECT sequence_cur_value FROM sequences WHERE sequence_name = 'seq_object');
-    UPDATE sequences SET sequence_cur_value = sequence_cur_value + 1 WHERE sequence_name = 'seq_object';
-  END;//
-DELIMITER ;
+CREATE INDEX role_type_index02 ON role_type (document_id);
+CREATE INDEX role_type_index03 ON role_type (role_uri);
 
 CREATE TABLE arcrole_type (
-    arcrole_type_id bigint NOT NULL,
-    document_id bigint NOT NULL,
-    xml_id varchar(1024),  -- xml id or element pointer (do we need this?)
-    arcrole_uri varchar(1024) NOT NULL,
-    cycles_allowed varchar(10) NOT NULL,
-    definition text,
-    PRIMARY KEY (arcrole_type_id)
+    arcrole_type_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER NOT NULL,
+    xml_id TEXT,  -- xml id or element pointer (do we need this?)
+    arcrole_uri TEXT NOT NULL,
+    cycles_allowed TEXT NOT NULL,
+    definition TEXT
 );
-CREATE INDEX arcrole_type_index02 USING btree ON arcrole_type (document_id);
-CREATE INDEX arcrole_type_index03 USING hash ON arcrole_type (arcrole_uri(512));
-
-DELIMITER //
-CREATE TRIGGER arcrole_type_seq BEFORE INSERT ON arcrole_type 
-  FOR EACH ROW BEGIN
-    SET NEW.arcrole_type_id = (SELECT sequence_cur_value FROM sequences WHERE sequence_name = 'seq_object');
-    UPDATE sequences SET sequence_cur_value = sequence_cur_value + 1 WHERE sequence_name = 'seq_object';
-  END;//
-DELIMITER ;
+CREATE INDEX arcrole_type_index02 ON arcrole_type (document_id);
+CREATE INDEX arcrole_type_index03 ON arcrole_type (arcrole_uri);
 
 CREATE TABLE used_on (
-    object_id bigint NOT NULL,
-    aspect_id bigint NOT NULL
+    object_id INTEGER NOT NULL,
+    aspect_id INTEGER NOT NULL
 );
-CREATE INDEX used_on_index01 USING btree ON used_on (object_id);
-CREATE UNIQUE INDEX used_on_index02 USING btree ON used_on (object_id, aspect_id);
+CREATE INDEX used_on_index01 ON used_on (object_id);
+CREATE UNIQUE INDEX used_on_index02 ON used_on (object_id, aspect_id);
 
 CREATE TABLE resource (
-    resource_id bigint NOT NULL,
-    document_id bigint NOT NULL,
-    xml_id varchar(1024),  -- xml id or element pointer (do we need this?)
-    qname varchar(1024) NOT NULL,  -- clark notation qname (do we need this?)
-    role varchar(1024) NOT NULL,
-    value longtext,
-    xml_lang varchar(16),
-    PRIMARY KEY (resource_id)
+    resource_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER NOT NULL,
+    xml_id TEXT,  -- xml id or element pointer (do we need this?)
+    qname TEXT NOT NULL,  -- clark notation qname (do we need this?)
+    role TEXT NOT NULL,
+    value TEXT,
+    xml_lang TEXT
 );
-CREATE INDEX resource_index02 USING btree ON resource (document_id, xml_id(512));
-
-DELIMITER //
-CREATE TRIGGER resource_seq BEFORE INSERT ON resource 
-  FOR EACH ROW BEGIN
-    SET NEW.resource_id = (SELECT sequence_cur_value FROM sequences WHERE sequence_name = 'seq_object');
-    UPDATE sequences SET sequence_cur_value = sequence_cur_value + 1 WHERE sequence_name = 'seq_object';
-  END;//
-DELIMITER ;
+CREATE INDEX resource_index02 ON resource  (document_id, xml_id);
 
 CREATE TABLE relationship_set (
-    relationship_set_id bigint NOT NULL AUTO_INCREMENT,
-    document_id bigint NOT NULL,
-    arc_qname varchar(1024) NOT NULL,  -- clark notation qname (do we need this?)
-    link_qname varchar(1024) NOT NULL,  -- clark notation qname (do we need this?)
-    arc_role varchar(1024) NOT NULL,
-    link_role varchar(1024) NOT NULL,
-    PRIMARY KEY (relationship_set_id)
+    relationship_set_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER NOT NULL,
+    arc_qname TEXT NOT NULL,  -- clark notation qname (do we need this?)
+    link_qname TEXT NOT NULL,  -- clark notation qname (do we need this?)
+    arc_role TEXT NOT NULL,
+    link_role TEXT NOT NULL
 );
-CREATE INDEX relationship_set_index02 USING btree ON relationship_set (document_id);
-CREATE INDEX relationship_set_index03 USING hash ON relationship_set (arc_role(512));
-CREATE INDEX relationship_set_index04 USING hash ON relationship_set (link_role(512));
+CREATE INDEX relationship_set_index02 ON relationship_set (document_id); 
+CREATE INDEX relationship_set_index03 ON relationship_set (arc_role); 
+CREATE INDEX relationship_set_index04 ON relationship_set (link_role); 
 
 CREATE TABLE root (
-    relationship_set_id bigint NOT NULL,
-    relationship_id bigint NOT NULL
+    relationship_set_id INTEGER NOT NULL,
+    relationship_id INTEGER NOT NULL
 );
-CREATE INDEX root_index01 USING btree ON root (relationship_set_id);
+CREATE INDEX root_index01 ON root  (relationship_set_id); 
 
 CREATE TABLE relationship (
-    relationship_id bigint NOT NULL,
-    document_id bigint NOT NULL,
-    xml_id varchar(1024),  -- xml id or element pointer (do we need this?)
-    relationship_set_id bigint NOT NULL,
-    reln_order double,
-    from_id bigint,
-    to_id bigint,
-    calculation_weight double,
+    relationship_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER NOT NULL,
+    xml_id TEXT,  -- xml id or element pointer (do we need this?)
+    relationship_set_id INTEGER NOT NULL,
+    reln_order double precision,
+    from_id INTEGER,
+    to_id INTEGER,
+    calculation_weight double precision,
     tree_sequence integer NOT NULL,
     tree_depth integer NOT NULL,
-    preferred_label_role varchar(1024),
-    PRIMARY KEY (relationship_id)
+    preferred_label_role TEXT
 );
-CREATE INDEX relationship_index02 USING btree ON relationship (relationship_set_id, document_id, xml_id(32));
-CREATE INDEX relationship_index03 USING btree ON relationship (relationship_set_id);
-CREATE INDEX relationship_index04 USING btree ON relationship (relationship_set_id, tree_depth);
-
-DELIMITER //
-CREATE TRIGGER relationship_seq BEFORE INSERT ON relationship 
-  FOR EACH ROW BEGIN
-    SET NEW.relationship_id = (SELECT sequence_cur_value FROM sequences WHERE sequence_name = 'seq_object');
-    UPDATE sequences SET sequence_cur_value = sequence_cur_value + 1 WHERE sequence_name = 'seq_object';
-  END;//
-DELIMITER ;
+CREATE INDEX relationship_index02 ON relationship  (relationship_set_id); 
+CREATE INDEX relationship_index03 ON relationship  (relationship_set_id, tree_depth); 
+CREATE INDEX relationship_index04 ON relationship  (relationship_set_id, document_id, xml_id);
 
 CREATE TABLE data_point (
-    datapoint_id bigint NOT NULL,
-    report_id bigint,
-    document_id bigint NOT NULL,  -- multiple inline documents are sources of data points
-    xml_id varchar(1024),  -- xml id or element pointer (do we need this?)
+    datapoint_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_id INTEGER,
+    document_id INTEGER NOT NULL,  -- multiple inline documents are sources of data points
+    xml_id TEXT,  -- xml id or element pointer (do we need this?)
     source_line integer,
-    parent_datapoint_id bigint, -- id of tuple parent
-    aspect_id bigint NOT NULL,
-    context_xml_id varchar(1024), -- (do we need this?)
-    entity_id bigint,
-    period_id bigint,
-    aspect_value_selections_id bigint,
-    unit_id bigint,
-    is_nil boolean DEFAULT FALSE,
-    precision_value varchar(16),
-    decimals_value varchar(16),
-    effective_value double,
-    value longtext,
-    PRIMARY KEY (datapoint_id)
+    parent_datapoint_id INTEGER, -- id of tuple parent
+    aspect_id INTEGER NOT NULL,
+    conTEXT_xml_id TEXT, -- (do we need this?)
+    entity_id INTEGER,
+    period_id INTEGER,
+    aspect_value_selections_id INTEGER,
+    unit_id INTEGER,
+    is_nil BOOLEAN DEFAULT FALSE,
+    precision_value TEXT,
+    decimals_value TEXT,
+    effective_value double precision,
+    value TEXT
 );
-CREATE INDEX data_point_index02 USING btree ON data_point (document_id, xml_id(32));
-CREATE INDEX data_point_index03 USING btree ON data_point (report_id);
-CREATE INDEX data_point_index04 USING btree ON data_point (aspect_id);
-
-DELIMITER //
-CREATE TRIGGER data_point_seq BEFORE INSERT ON data_point 
-  FOR EACH ROW BEGIN
-    SET NEW.datapoint_id = (SELECT sequence_cur_value FROM sequences WHERE sequence_name = 'seq_object');
-    UPDATE sequences SET sequence_cur_value = sequence_cur_value + 1 WHERE sequence_name = 'seq_object';
-  END;//
-DELIMITER ;
+CREATE INDEX data_point_index02 ON data_point  (document_id, xml_id);
+CREATE INDEX data_point_index03 ON data_point  (report_id);
+CREATE INDEX data_point_index04 ON data_point  (aspect_id);
 
 CREATE TABLE entity (
-    entity_id bigint NOT NULL,
-    report_id bigint,
-    entity_scheme varchar(1024) NOT NULL,
-    entity_identifier varchar(1024) NOT NULL,
-    PRIMARY KEY (entity_id)
+    entity_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_id INTEGER,
+    entity_scheme TEXT NOT NULL,
+    entity_identifier TEXT NOT NULL
 );
-CREATE INDEX entity_index02 USING btree ON entity (report_id, entity_scheme(32), entity_identifier(32));
-
-DELIMITER //
-CREATE TRIGGER entity_seq BEFORE INSERT ON entity 
-  FOR EACH ROW BEGIN
-    SET NEW.entity_id = (SELECT sequence_cur_value FROM sequences WHERE sequence_name = 'seq_object');
-    UPDATE sequences SET sequence_cur_value = sequence_cur_value + 1 WHERE sequence_name = 'seq_object';
-  END;//
-DELIMITER ;
+CREATE INDEX entity_index02 ON entity  (report_id, entity_identifier);
 
 CREATE TABLE period (
-    period_id bigint NOT NULL,
-    report_id bigint,
+    period_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_id INTEGER,
     start_date date,
     end_date date,
-    is_instant boolean NOT NULL,
-    is_forever boolean NOT NULL,
-    PRIMARY KEY (period_id)
+    is_instant BOOLEAN NOT NULL,
+    is_forever BOOLEAN NOT NULL
 );
-CREATE INDEX period_index02 USING btree ON period (report_id, start_date, end_date, is_instant, is_forever);
-
-DELIMITER //
-CREATE TRIGGER period_seq BEFORE INSERT ON period 
-  FOR EACH ROW BEGIN
-    SET NEW.period_id = (SELECT sequence_cur_value FROM sequences WHERE sequence_name = 'seq_object');
-    UPDATE sequences SET sequence_cur_value = sequence_cur_value + 1 WHERE sequence_name = 'seq_object';
-  END;//
-DELIMITER ;
+CREATE INDEX period_index02 ON period  (report_id, start_date, end_date, is_instant, is_forever);
 
 CREATE TABLE unit (
-    unit_id bigint NOT NULL,
-    report_id bigint,
-    xml_id varchar(1024),  -- xml id or element pointer (first if multiple)
-    measures_hash char(32),
-    PRIMARY KEY (unit_id)
+    unit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_id INTEGER,
+    xml_id TEXT,  -- xml id or element pointer (first if multiple)
+    measures_hash TEXT
 );
-CREATE INDEX unit_index02 USING btree ON unit (report_id, measures_hash);
+CREATE INDEX unit_index02 ON unit  (report_id, measures_hash);
 
-DELIMITER //
-CREATE TRIGGER unit_seq BEFORE INSERT ON unit 
-  FOR EACH ROW BEGIN
-    SET NEW.unit_id = (SELECT sequence_cur_value FROM sequences WHERE sequence_name = 'seq_object');
-    UPDATE sequences SET sequence_cur_value = sequence_cur_value + 1 WHERE sequence_name = 'seq_object';
-  END;//
-DELIMITER ;
 
 CREATE TABLE unit_measure (
-    unit_id bigint NOT NULL,
-    qname varchar(1024) NOT NULL,  -- clark notation qname (do we need this?)
-    is_multiplicand boolean NOT NULL
+    unit_id INTEGER NOT NULL,
+    qname TEXT NOT NULL,  -- clark notation qname (do we need this?)
+    is_multiplicand BOOLEAN NOT NULL
 );
-CREATE INDEX unit_measure_index01 USING btree ON unit_measure (unit_id);
-CREATE INDEX unit_measure_index02 USING btree ON unit_measure (unit_id, qname(32), is_multiplicand);
+CREATE INDEX unit_measure_index01 ON unit_measure  (unit_id);
+CREATE INDEX unit_measure_index02 ON unit_measure  (unit_id, qname, is_multiplicand);
 
 CREATE TABLE aspect_value_selection_set (
-    aspect_value_selection_id bigint NOT NULL,
-    report_id bigint,
-    PRIMARY KEY (aspect_value_selection_id)
+    aspect_value_selection_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_id INTEGER
 );
-CREATE INDEX aspect_value_selection_set_index02 USING btree ON aspect_value_selection_set (report_id);
-
-DELIMITER //
-CREATE TRIGGER aspect_value_selection_set_seq BEFORE INSERT ON aspect_value_selection_set 
-  FOR EACH ROW BEGIN
-    SET NEW.aspect_value_selection_id = (SELECT sequence_cur_value FROM sequences WHERE sequence_name = 'seq_object');
-    UPDATE sequences SET sequence_cur_value = sequence_cur_value + 1 WHERE sequence_name = 'seq_object';
-  END;//
-DELIMITER ;
+CREATE UNIQUE INDEX aspect_value_sel_set_index01 ON aspect_value_selection_set (aspect_value_selection_id);
+CREATE INDEX aspect_value_sel_set_index02 ON aspect_value_selection_set (report_id);
 
 CREATE TABLE aspect_value_selection (
-    aspect_value_selection_id bigint NOT NULL,
-    aspect_id bigint NOT NULL,
-    aspect_value_id bigint,
-    is_typed_value boolean NOT NULL,
-    typed_value longtext
+    aspect_value_selection_id INTEGER NOT NULL,
+    report_id INTEGER,
+    aspect_id INTEGER NOT NULL,
+    aspect_value_id INTEGER,
+    is_typed_value BOOLEAN NOT NULL,
+    typed_value TEXT
 );
-CREATE INDEX aspect_value_selection_index01 USING btree ON aspect_value_selection (aspect_value_selection_id);
+CREATE INDEX aspect_value_selection_index01 ON aspect_value_selection  (aspect_value_selection_id);
 
 CREATE TABLE table_data_points(
-    report_id bigint,
-    object_id bigint NOT NULL, -- may be any role_type or aspect defining a table table with 'seq_object' id
-    table_code varchar(16),  -- short code of table, like BS, PL, or 4.15.221
-    datapoint_id bigint -- id of data_point in this table (according to its aspects)
+    report_id INTEGER,
+    object_id INTEGER NOT NULL, -- may be any role_type or aspect defining a table table with 'seq_object' id
+    table_code TEXT,  -- short code of table, like BS, PL, or 4.15.221
+    datapoint_id INTEGER -- id of data_point in this table (according to its aspects)
 );
-CREATE INDEX table_data_points_index01 USING btree ON table_data_points (report_id);
-CREATE INDEX table_data_points_index02 USING btree ON table_data_points (table_code);
+CREATE INDEX table_data_points_index01 ON table_data_points  (report_id);
+CREATE INDEX table_data_points_index02 ON table_data_points  (table_code);
 
 CREATE TABLE message (
-    message_id bigint NOT NULL AUTO_INCREMENT,
-    report_id bigint,
+    message_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_id INTEGER,
     sequence_in_report int,
-    message_code varchar(256),
-    message_level varchar(256),
-    value text,
-    PRIMARY KEY (message_id)
+    message_code TEXT,
+    message_level TEXT,
+    value TEXT
 );
-CREATE INDEX message_index02 USING btree ON message (report_id, sequence_in_report);
+CREATE INDEX message_index02 ON message  (report_id, sequence_in_report);
 
 CREATE TABLE message_reference (
-    message_id bigint NOT NULL,
-    object_id bigint NOT NULL -- may be any table with 'seq_object' id
+    message_id INTEGER NOT NULL,
+    object_id INTEGER NOT NULL -- may be any table with 'seq_object' id
 );
-CREATE INDEX message_reference_index01 USING btree ON message_reference (message_id);
-CREATE UNIQUE INDEX message_reference_index02 USING btree ON message_reference (message_id, object_id);
+CREATE INDEX message_reference_index01 ON message_reference  (message_id);
+CREATE UNIQUE INDEX message_reference_index02 ON message_reference  (message_id, object_id);
 
 CREATE TABLE industry (
-    industry_id bigint NOT NULL,
-    industry_classification varchar(16),
+    industry_id INTEGER,
+    industry_classification TEXT,
     industry_code integer,
-    industry_description varchar(512),
+    industry_description TEXT,
     depth integer,
-    parent_id bigint,
+    parent_id INTEGER,
     PRIMARY KEY (industry_id)
 );
 
+CREATE TABLE industry_level (
+    industry_level_id INTEGER,
+    industry_classification TEXT,
+    ancestor_id INTEGER,
+    ancestor_code integer,
+    ancestor_depth integer,
+    descendant_id INTEGER,
+    descendant_code integer,
+    descendant_depth integer,
+    PRIMARY KEY (industry_level_id)
+);
+
+CREATE TABLE industry_structure (
+    industry_structure_id INTEGER,
+    industry_classification TEXT NOT NULL,
+    depth integer NOT NULL,
+    level_name TEXT,
+    PRIMARY KEY (industry_structure_id)
+);
+
+--
+-- optional inserts for standard industry codes
+--
 INSERT INTO industry (industry_id, industry_classification, industry_code, industry_description, depth, parent_id) VALUES
 (4315, 'SEC', 3576, 'Computer Communications Equipment', 4, 2424),
 (4316, 'SEC', 4955, 'Hazardous Waste Management', 4, 2552),
@@ -518,7 +408,7 @@ INSERT INTO industry (industry_id, industry_classification, industry_code, indus
 (2214, 'SEC', 900, 'FISHING, HUNTING & TRAPPING', 2, 2788),
 (2213, 'SEC', 800, 'FORESTRY', 2, 2788),
 (105, 'NAICS', 1133, 'Logging', 3, 98),
-(368, 'NAICS', 313, 'Textile Mills', 2, 278),
+(368, 'NAICS', 313, 'TEXTile Mills', 2, 278),
 (2817, 'SIC', 174, 'Citrus Fruits', 4, 2813),
 (2818, 'SIC', 175, 'Deciduous Tree Fruits/Orchards', 4, 2813),
 (2819, 'SIC', 179, 'Fruits & Tree Nuts, nec', 4, 2813),
@@ -655,7 +545,7 @@ INSERT INTO industry (industry_id, industry_classification, industry_code, indus
 (2936, 'SIC', 1481, 'Nonmetallic Minerals Services', 4, 2935),
 (2938, 'SIC', 1499, 'Miscellaneous Nonmetallic Minerals', 4, 2937),
 (2942, 'SIC', 1522, 'Residential Construction, nec', 4, 2940),
-(2941, 'SIC', 1521, 'Single-Family Housing Construction', 4, 2940),
+(2941, 'SIC', 1521, 'Single-Family HoConstruction', 4, 2940),
 (2232, 'SEC', 1531, 'Operative Builders', 4, 2231),
 (2944, 'SIC', 1531, 'Operative Builders', 4, 2943),
 (2946, 'SIC', 1541, 'Industrial Buildings & Warehouses', 4, 2945),
@@ -689,7 +579,7 @@ INSERT INTO industry (industry_id, industry_classification, industry_code, indus
 (3076, 'SIC', 2284, 'Thread Mills', 4, 3073),
 (3074, 'SIC', 2281, 'Yarn Spinning Mills', 4, 3073),
 (3079, 'SIC', 2296, 'Tire Cord & Fabrics', 4, 3077),
-(3082, 'SIC', 2299, 'Textile Goods, nec', 4, 3077),
+(3082, 'SIC', 2299, 'TEXTile Goods, nec', 4, 3077),
 (3081, 'SIC', 2298, 'Cordage & Twine', 4, 3077),
 (3080, 'SIC', 2297, 'Nonwoven Fabrics', 4, 3077),
 (3078, 'SIC', 2295, 'Coated Fabrics, Not Rubberized', 4, 3077),
@@ -923,7 +813,9 @@ INSERT INTO industry (industry_id, industry_classification, industry_code, indus
 (3584, 'SIC', 3942, 'Dolls & Stuffed Toys', 4, 3583),
 (3585, 'SIC', 3944, 'Games, Toys & Children''s Vehicles', 4, 3583),
 (3591, 'SIC', 3955, 'Carbon Paper & Inked Ribbons', 4, 3587),
-(3590, 'SIC', 3953, 'Marking Devices', 4, 3587),
+(3590, 'SIC', 3953, 'Marking Devices', 4, 3587);
+
+INSERT INTO industry (industry_id, industry_classification, industry_code, industry_description, depth, parent_id) VALUES
 (3589, 'SIC', 3952, 'Lead Pencils & Art Goods', 4, 3587),
 (3588, 'SIC', 3951, 'Pens & Mechanical Pencils', 4, 3587),
 (3593, 'SIC', 3961, 'Costume Jewelry', 4, 3592),
@@ -950,10 +842,10 @@ INSERT INTO industry (industry_id, industry_classification, industry_code, indus
 (3624, 'SIC', 4214, 'Local Trucking With Storage', 4, 3621),
 (3625, 'SIC', 4215, 'Courier Service, Except by Air', 4, 3621),
 (3623, 'SIC', 4213, 'Trucking, Except Local', 4, 3621),
-(3627, 'SIC', 4221, 'Farm Product Warehousing & Storage', 4, 3626),
-(3630, 'SIC', 4226, 'Special Warehousing & Storage, nec', 4, 3626),
-(3629, 'SIC', 4225, 'General Warehousing & Storage', 4, 3626),
-(3628, 'SIC', 4222, 'Refrigerated Warehousing & Storage', 4, 3626),
+(3627, 'SIC', 4221, 'Farm Product Wareho& Storage', 4, 3626),
+(3630, 'SIC', 4226, 'Special Wareho& Storage, nec', 4, 3626),
+(3629, 'SIC', 4225, 'General Wareho& Storage', 4, 3626),
+(3628, 'SIC', 4222, 'Refrigerated Wareho& Storage', 4, 3626),
 (2522, 'SEC', 4231, 'Trucking Terminal Facilities', 4, 2521),
 (2525, 'SEC', 4412, 'Deep Sea Foreign Transport of Freight', 4, 2524),
 (3638, 'SIC', 4412, 'Deep Sea Foreign Transport of Freight', 4, 3637),
@@ -1270,7 +1162,7 @@ INSERT INTO industry (industry_id, industry_classification, industry_code, indus
 (4280, 'SIC', 9512, 'Land, Mineral, Wildlife Conservation', 4, 4278),
 (4279, 'SIC', 9511, 'Air, Water & Solid Waste Management', 4, 4278),
 (4283, 'SIC', 9532, 'Urban & Community Development', 4, 4281),
-(4282, 'SIC', 9531, 'Housing Programs', 4, 4281),
+(4282, 'SIC', 9531, 'HoPrograms', 4, 4281),
 (4286, 'SIC', 9611, 'Administration of General Economic Programs', 4, 4285),
 (4288, 'SIC', 9621, 'Regulation, Admin. of Transportation', 4, 4287),
 (4290, 'SIC', 9631, 'Regulation, Admin. of Utilities', 4, 4289),
@@ -1368,9 +1260,9 @@ INSERT INTO industry (industry_id, industry_classification, industry_code, indus
 (3120, 'SIC', 2395, 'Pleating & Stitching', 4, 3115),
 (3122, 'SIC', 2397, 'Schiffli Machine Embroideries', 4, 3115),
 (3116, 'SIC', 2391, 'Curtains & Draperies', 4, 3115),
-(3123, 'SIC', 2399, 'Fabricated Textile Products, nec', 4, 3115),
+(3123, 'SIC', 2399, 'Fabricated TEXTile Products, nec', 4, 3115),
 (3117, 'SIC', 2392, 'House Furnishings, nec', 4, 3115),
-(3118, 'SIC', 2393, 'Textile Bags', 4, 3115),
+(3118, 'SIC', 2393, 'TEXTile Bags', 4, 3115),
 (3119, 'SIC', 2394, 'Canvas & Related Products', 4, 3115),
 (3121, 'SIC', 2396, 'Automotive & Apparel Trimmings', 4, 3115),
 (3126, 'SIC', 2411, 'Logging', 4, 3125),
@@ -1422,7 +1314,9 @@ INSERT INTO industry (industry_id, industry_classification, industry_code, indus
 (3244, 'SIC', 2875, 'Fertilizers, Mixing Only', 4, 3241),
 (3245, 'SIC', 2879, 'Agricultural Chemicals, nec', 4, 3241),
 (3243, 'SIC', 2874, 'Phosphatic Fertilizers', 4, 3241),
-(3242, 'SIC', 2873, 'Nitrogenous Fertilizers', 4, 3241),
+(3242, 'SIC', 2873, 'Nitrogenous Fertilizers', 4, 3241);
+
+INSERT INTO industry (industry_id, industry_classification, industry_code, industry_description, depth, parent_id) VALUES
 (2336, 'SEC', 2891, 'Adhesives & Sealants', 4, 2335),
 (3251, 'SIC', 2899, 'Chemical Preparations, nec', 4, 3246),
 (3247, 'SIC', 2891, 'Adhesives & Sealants', 4, 3246),
@@ -1497,7 +1391,7 @@ INSERT INTO industry (industry_id, industry_classification, industry_code, indus
 (3427, 'SIC', 3531, 'Construction Machinery', 4, 3426),
 (3433, 'SIC', 3537, 'Industrial Trucks & Tractors', 4, 3426),
 (3450, 'SIC', 3559, 'Special Industry Machinery, nec', 4, 3444),
-(3445, 'SIC', 3552, 'Textile Machinery', 4, 3444),
+(3445, 'SIC', 3552, 'TEXTile Machinery', 4, 3444),
 (3447, 'SIC', 3554, 'Paper Industries Machinery', 4, 3444),
 (3446, 'SIC', 3553, 'Woodworking Machinery', 4, 3444),
 (3448, 'SIC', 3555, 'Printing Trades Machinery', 4, 3444),
@@ -1919,7 +1813,9 @@ INSERT INTO industry (industry_id, industry_classification, industry_code, indus
 (116, 'NAICS', 11421, 'Hunting and Trapping', 4, 114),
 (115, 'NAICS', 114210, 'Hunting and Trapping', 5, 116),
 (129, 'NAICS', 1153, 'Support Activities for Forestry', 3, 117),
-(126, 'NAICS', 1152, 'Support Activities for Animal Production', 3, 117),
+(126, 'NAICS', 1152, 'Support Activities for Animal Production', 3, 117);
+
+INSERT INTO industry (industry_id, industry_classification, industry_code, industry_description, depth, parent_id) VALUES
 (118, 'NAICS', 1151, 'Support Activities for Crop Production', 3, 117),
 (119, 'NAICS', 11511, 'Support Activities for Crop Production', 4, 118),
 (120, 'NAICS', 115111, 'Cotton Ginning', 5, 119),
@@ -2010,9 +1906,9 @@ INSERT INTO industry (industry_id, industry_classification, industry_code, indus
 (213, 'NAICS', 2362, 'Nonresidential Building Construction', 3, 206),
 (207, 'NAICS', 2361, 'Residential Building Construction', 3, 206),
 (208, 'NAICS', 23611, 'Residential Building Construction', 4, 207),
-(209, 'NAICS', 236115, 'New Single-Family Housing Construction (except For-Sale Builders)', 5, 208),
-(210, 'NAICS', 236116, 'New Multifamily Housing Construction (except For-Sale Builders)', 5, 208),
-(211, 'NAICS', 236117, 'New Housing For-Sale Builders', 5, 208),
+(209, 'NAICS', 236115, 'New Single-Family HoConstruction (except For-Sale Builders)', 5, 208),
+(210, 'NAICS', 236116, 'New Multifamily HoConstruction (except For-Sale Builders)', 5, 208),
+(211, 'NAICS', 236117, 'New HoFor-Sale Builders', 5, 208),
 (212, 'NAICS', 236118, 'Residential Remodelers', 5, 208),
 (217, 'NAICS', 23622, 'Commercial and Institutional Building Construction', 4, 213),
 (215, 'NAICS', 23621, 'Industrial Building Construction', 4, 213),
@@ -2083,7 +1979,7 @@ INSERT INTO industry (industry_id, industry_classification, industry_code, indus
 (798, 'NAICS', 335, 'Electrical Equipment, Appliance, and Component Manufacturing', 2, 278),
 (279, 'NAICS', 311, 'Food Manufacturing', 2, 278),
 (759, 'NAICS', 334, 'Computer and Electronic Product Manufacturing', 2, 278),
-(386, 'NAICS', 314, 'Textile Product Mills', 2, 278),
+(386, 'NAICS', 314, 'TEXTile Product Mills', 2, 278),
 (398, 'NAICS', 315, 'Apparel Manufacturing', 2, 278),
 (416, 'NAICS', 316, 'Leather and Allied Product Manufacturing', 2, 278),
 (427, 'NAICS', 321, 'Wood Product Manufacturing', 2, 278),
@@ -2180,7 +2076,7 @@ INSERT INTO industry (industry_id, industry_classification, industry_code, indus
 (363, 'NAICS', 312140, 'Distilleries', 5, 364),
 (367, 'NAICS', 31223, 'Tobacco Manufacturing', 4, 365),
 (366, 'NAICS', 312230, 'Tobacco Manufacturing', 5, 367),
-(381, 'NAICS', 3133, 'Textile and Fabric Finishing and Fabric Coating Mills', 3, 368),
+(381, 'NAICS', 3133, 'TEXTile and Fabric Finishing and Fabric Coating Mills', 3, 368),
 (369, 'NAICS', 3131, 'Fiber, Yarn, and Thread Mills', 3, 368),
 (372, 'NAICS', 3132, 'Fabric Mills', 3, 368),
 (371, 'NAICS', 31311, 'Fiber, Yarn, and Thread Mills', 4, 369),
@@ -2194,20 +2090,20 @@ INSERT INTO industry (industry_id, industry_classification, industry_code, indus
 (377, 'NAICS', 313230, 'Nonwoven Fabric Mills', 5, 378),
 (379, 'NAICS', 313240, 'Knit Fabric Mills', 5, 380),
 (385, 'NAICS', 31332, 'Fabric Coating Mills', 4, 381),
-(383, 'NAICS', 31331, 'Textile and Fabric Finishing Mills', 4, 381),
-(382, 'NAICS', 313310, 'Textile and Fabric Finishing Mills', 5, 383),
+(383, 'NAICS', 31331, 'TEXTile and Fabric Finishing Mills', 4, 381),
+(382, 'NAICS', 313310, 'TEXTile and Fabric Finishing Mills', 5, 383),
 (384, 'NAICS', 313320, 'Fabric Coating Mills', 5, 385),
-(387, 'NAICS', 3141, 'Textile Furnishings Mills', 3, 386),
-(392, 'NAICS', 3149, 'Other Textile Product Mills', 3, 386),
+(387, 'NAICS', 3141, 'TEXTile Furnishings Mills', 3, 386),
+(392, 'NAICS', 3149, 'Other TEXTile Product Mills', 3, 386),
 (391, 'NAICS', 31412, 'Curtain and Linen Mills', 4, 387),
 (389, 'NAICS', 31411, 'Carpet and Rug Mills', 4, 387),
 (388, 'NAICS', 314110, 'Carpet and Rug Mills', 5, 389),
 (390, 'NAICS', 314120, 'Curtain and Linen Mills', 5, 391),
-(394, 'NAICS', 31491, 'Textile Bag and Canvas Mills', 4, 392),
-(395, 'NAICS', 31499, 'All Other Textile Product Mills', 4, 392),
-(393, 'NAICS', 314910, 'Textile Bag and Canvas Mills', 5, 394),
+(394, 'NAICS', 31491, 'TEXTile Bag and Canvas Mills', 4, 392),
+(395, 'NAICS', 31499, 'All Other TEXTile Product Mills', 4, 392),
+(393, 'NAICS', 314910, 'TEXTile Bag and Canvas Mills', 5, 394),
 (396, 'NAICS', 314994, 'Rope, Cordage, Twine, Tire Cord, and Tire Fabric Mills', 5, 395),
-(397, 'NAICS', 314999, 'All Other Miscellaneous Textile Product Mills', 5, 395),
+(397, 'NAICS', 314999, 'All Other Miscellaneous TEXTile Product Mills', 5, 395),
 (399, 'NAICS', 3151, 'Apparel Knitting Mills', 3, 398),
 (404, 'NAICS', 3152, 'Cut and Sew Apparel Manufacturing', 3, 398),
 (413, 'NAICS', 3159, 'Apparel Accessories and Other Apparel Manufacturing', 3, 398),
@@ -2418,7 +2314,9 @@ INSERT INTO industry (industry_id, industry_classification, industry_code, indus
 (610, 'NAICS', 33111, 'Iron and Steel Mills and Ferroalloy Manufacturing', 4, 608),
 (609, 'NAICS', 331110, 'Iron and Steel Mills and Ferroalloy Manufacturing', 5, 610),
 (614, 'NAICS', 33122, 'Rolling and Drawing of Purchased Steel', 4, 611),
-(613, 'NAICS', 33121, 'Iron and Steel Pipe and Tube Manufacturing from Purchased Steel', 4, 611),
+(613, 'NAICS', 33121, 'Iron and Steel Pipe and Tube Manufacturing from Purchased Steel', 4, 611);
+
+INSERT INTO industry (industry_id, industry_classification, industry_code, industry_description, depth, parent_id) VALUES
 (612, 'NAICS', 331210, 'Iron and Steel Pipe and Tube Manufacturing from Purchased Steel', 5, 613),
 (616, 'NAICS', 331222, 'Steel Wire Drawing', 5, 614),
 (615, 'NAICS', 331221, 'Rolled Steel Shape Manufacturing', 5, 614),
@@ -2915,7 +2813,9 @@ INSERT INTO industry (industry_id, industry_classification, industry_code, indus
 (1103, 'NAICS', 441210, 'Recreational Vehicle Dealers', 5, 1104),
 (1106, 'NAICS', 441222, 'Boat Dealers', 5, 1105),
 (1107, 'NAICS', 441228, 'Motorcycle, ATV, and All Other Motor Vehicle Dealers', 5, 1105),
-(1112, 'NAICS', 44132, 'Tire Dealers', 4, 1108),
+(1112, 'NAICS', 44132, 'Tire Dealers', 4, 1108);
+
+INSERT INTO industry (industry_id, industry_classification, industry_code, industry_description, depth, parent_id) VALUES
 (1110, 'NAICS', 44131, 'Automotive Parts and Accessories Stores', 4, 1108),
 (1109, 'NAICS', 441310, 'Automotive Parts and Accessories Stores', 5, 1110),
 (1111, 'NAICS', 441320, 'Tire Dealers', 5, 1112),
@@ -3057,7 +2957,7 @@ INSERT INTO industry (industry_id, industry_classification, industry_code, indus
 (1328, 'NAICS', 486, 'Pipeline Transportation', 2, 1262),
 (1340, 'NAICS', 487, 'Scenic and Sightseeing Transportation', 2, 1262),
 (1350, 'NAICS', 488, 'Support Activities for Transportation', 2, 1262),
-(1392, 'NAICS', 493, 'Warehousing and Storage', 2, 1262),
+(1392, 'NAICS', 493, 'Warehoand Storage', 2, 1262),
 (1278, 'NAICS', 483, 'Water Transportation', 2, 1262),
 (1385, 'NAICS', 492, 'Couriers and Messengers', 2, 1262),
 (1289, 'NAICS', 484, 'Truck Transportation', 2, 1262),
@@ -3180,15 +3080,15 @@ INSERT INTO industry (industry_id, industry_classification, industry_code, indus
 (1387, 'NAICS', 492110, 'Couriers and Express Delivery Services', 5, 1388),
 (1391, 'NAICS', 49221, 'Local Messengers and Local Delivery', 4, 1389),
 (1390, 'NAICS', 492210, 'Local Messengers and Local Delivery', 5, 1391),
-(1393, 'NAICS', 4931, 'Warehousing and Storage', 3, 1392),
-(1401, 'NAICS', 49319, 'Other Warehousing and Storage', 4, 1393),
-(1395, 'NAICS', 49311, 'General Warehousing and Storage', 4, 1393),
-(1397, 'NAICS', 49312, 'Refrigerated Warehousing and Storage', 4, 1393),
-(1399, 'NAICS', 49313, 'Farm Product Warehousing and Storage', 4, 1393),
-(1394, 'NAICS', 493110, 'General Warehousing and Storage', 5, 1395),
-(1396, 'NAICS', 493120, 'Refrigerated Warehousing and Storage', 5, 1397),
-(1398, 'NAICS', 493130, 'Farm Product Warehousing and Storage', 5, 1399),
-(1400, 'NAICS', 493190, 'Other Warehousing and Storage', 5, 1401),
+(1393, 'NAICS', 4931, 'Warehoand Storage', 3, 1392),
+(1401, 'NAICS', 49319, 'Other Warehoand Storage', 4, 1393),
+(1395, 'NAICS', 49311, 'General Warehoand Storage', 4, 1393),
+(1397, 'NAICS', 49312, 'Refrigerated Warehoand Storage', 4, 1393),
+(1399, 'NAICS', 49313, 'Farm Product Warehoand Storage', 4, 1393),
+(1394, 'NAICS', 493110, 'General Warehoand Storage', 5, 1395),
+(1396, 'NAICS', 493120, 'Refrigerated Warehoand Storage', 5, 1397),
+(1398, 'NAICS', 493130, 'Farm Product Warehoand Storage', 5, 1399),
+(1400, 'NAICS', 493190, 'Other Warehoand Storage', 5, 1401),
 (1403, 'NAICS', 511, 'Publishing Industries (except Internet)', 2, 1402),
 (1442, 'NAICS', 515, 'Broadcasting (except Internet)', 2, 1402),
 (1470, 'NAICS', 519, 'Other Information Services', 2, 1402),
@@ -3415,7 +3315,9 @@ INSERT INTO industry (industry_id, industry_classification, industry_code, indus
 (1672, 'NAICS', 5416, 'Management, Scientific, and Technical Consulting Services', 3, 1625),
 (1657, 'NAICS', 5414, 'Specialized Design Services', 3, 1625),
 (1706, 'NAICS', 5419, 'Other Professional, Scientific, and Technical Services', 3, 1625),
-(1683, 'NAICS', 5417, 'Scientific Research and Development Services', 3, 1625),
+(1683, 'NAICS', 5417, 'Scientific Research and Development Services', 3, 1625);
+
+INSERT INTO industry (industry_id, industry_classification, industry_code, industry_description, depth, parent_id) VALUES
 (1640, 'NAICS', 5413, 'Architectural, Engineering, and Related Services', 3, 1625),
 (1631, 'NAICS', 54119, 'Other Legal Services', 4, 1626),
 (1628, 'NAICS', 54111, 'Offices of Lawyers', 4, 1626),
@@ -3708,12 +3610,12 @@ INSERT INTO industry (industry_id, industry_classification, industry_code, indus
 (1922, 'NAICS', 624110, 'Child and Youth Services', 5, 1923),
 (1924, 'NAICS', 624120, 'Services for the Elderly and Persons with Disabilities', 5, 1925),
 (1926, 'NAICS', 624190, 'Other Individual and Family Services', 5, 1927),
-(1931, 'NAICS', 62422, 'Community Housing Services', 4, 1928),
+(1931, 'NAICS', 62422, 'Community HoServices', 4, 1928),
 (1935, 'NAICS', 62423, 'Emergency and Other Relief Services', 4, 1928),
 (1930, 'NAICS', 62421, 'Community Food Services', 4, 1928),
 (1929, 'NAICS', 624210, 'Community Food Services', 5, 1930),
 (1932, 'NAICS', 624221, 'Temporary Shelters', 5, 1931),
-(1933, 'NAICS', 624229, 'Other Community Housing Services', 5, 1931),
+(1933, 'NAICS', 624229, 'Other Community HoServices', 5, 1931),
 (1934, 'NAICS', 624230, 'Emergency and Other Relief Services', 5, 1935),
 (1938, 'NAICS', 62431, 'Vocational Rehabilitation Services', 4, 1936),
 (1937, 'NAICS', 624310, 'Vocational Rehabilitation Services', 5, 1938),
@@ -3907,12 +3809,14 @@ INSERT INTO industry (industry_id, industry_classification, industry_code, indus
 (2132, 'NAICS', 8141, 'Private Households', 3, 2131),
 (2134, 'NAICS', 81411, 'Private Households', 4, 2132),
 (2133, 'NAICS', 814110, 'Private Households', 5, 2134),
-(2182, 'NAICS', 925, 'Administration of Housing Programs, Urban Planning, and Community Development', 2, 2135),
+(2182, 'NAICS', 925, 'Administration of HoPrograms, Urban Planning, and Community Development', 2, 2135),
 (2204, 'NAICS', 928, 'National Security and International Affairs', 2, 2135),
 (2200, 'NAICS', 927, 'Space Research and Technology', 2, 2135),
 (2188, 'NAICS', 926, 'Administration of Economic Programs', 2, 2135),
 (2176, 'NAICS', 924, 'Administration of Environmental Quality Programs', 2, 2135),
-(2166, 'NAICS', 923, 'Administration of Human Resource Programs', 2, 2135),
+(2166, 'NAICS', 923, 'Administration of Human Resource Programs', 2, 2135);
+
+INSERT INTO industry (industry_id, industry_classification, industry_code, industry_description, depth, parent_id) VALUES
 (2136, 'NAICS', 921, 'Executive, Legislative, and Other General Government Support', 2, 2135),
 (2150, 'NAICS', 922, 'Justice, Public Order, and Safety Activities', 2, 2135),
 (2137, 'NAICS', 9211, 'Executive, Legislative, and Other General Government Support', 3, 2136),
@@ -3957,10 +3861,10 @@ INSERT INTO industry (industry_id, industry_classification, industry_code, indus
 (2181, 'NAICS', 92412, 'Administration of Conservation Programs', 4, 2177),
 (2178, 'NAICS', 924110, 'Administration of Air and Water Resource and Solid Waste Management Programs', 5, 2179),
 (2180, 'NAICS', 924120, 'Administration of Conservation Programs', 5, 2181),
-(2183, 'NAICS', 9251, 'Administration of Housing Programs, Urban Planning, and Community Development', 3, 2182),
-(2185, 'NAICS', 92511, 'Administration of Housing Programs', 4, 2183),
+(2183, 'NAICS', 9251, 'Administration of HoPrograms, Urban Planning, and Community Development', 3, 2182),
+(2185, 'NAICS', 92511, 'Administration of HoPrograms', 4, 2183),
 (2187, 'NAICS', 92512, 'Administration of Urban Planning and Community and Rural Development', 4, 2183),
-(2184, 'NAICS', 925110, 'Administration of Housing Programs', 5, 2185),
+(2184, 'NAICS', 925110, 'Administration of HoPrograms', 5, 2185),
 (2186, 'NAICS', 925120, 'Administration of Urban Planning and Community and Rural Development', 5, 2187),
 (2189, 'NAICS', 9261, 'Administration of Economic Program', 3, 2188),
 (2193, 'NAICS', 92612, 'Regulation and Administration of Transportation Programs', 4, 2189),
@@ -4218,14 +4122,14 @@ INSERT INTO industry (industry_id, industry_classification, industry_code, indus
 (3071, 'SIC', 2270, 'Carpets & Rugs', 3, 3050),
 (3053, 'SIC', 2220, 'Broadwoven Fabric Mills, Manmade', 3, 3050),
 (3057, 'SIC', 2240, 'Narrow Fabric Mills', 3, 3050),
-(3077, 'SIC', 2290, 'Miscellaneous Textile Goods', 3, 3050),
-(3067, 'SIC', 2260, 'Textile Finishing, Except Wool', 3, 3050),
+(3077, 'SIC', 2290, 'Miscellaneous TEXTile Goods', 3, 3050),
+(3067, 'SIC', 2260, 'TEXTile Finishing, Except Wool', 3, 3050),
 (3055, 'SIC', 2230, 'Broadwoven Fabric Mills, Wool', 3, 3050),
 (2272, 'SEC', 2320, 'Men''s & Boys'' Furnishings', 3, 2271),
-(2275, 'SEC', 2390, 'Miscellaneous Fabricated Textile Products', 3, 2271),
+(2275, 'SEC', 2390, 'Miscellaneous Fabricated TEXTile Products', 3, 2271),
 (2274, 'SEC', 2340, 'Women''s & Children''s Undergarments', 3, 2271),
 (2273, 'SEC', 2330, 'Women''s & Misses'' Outerwear', 3, 2271),
-(3115, 'SIC', 2390, 'Miscellaneous Fabricated Textile Products', 3, 3083),
+(3115, 'SIC', 2390, 'Miscellaneous Fabricated TEXTile Products', 3, 3083),
 (3098, 'SIC', 2340, 'Women''s & Children''s Undergarments', 3, 3083),
 (3084, 'SIC', 2310, 'Men''s & Boys'' Suits & Coats', 3, 3083),
 (3086, 'SIC', 2320, 'Men''s & Boys'' Furnishings', 3, 3083),
@@ -4410,7 +4314,9 @@ INSERT INTO industry (industry_id, industry_classification, industry_code, indus
 (3544, 'SIC', 3760, 'Guided Missiles, Space Vehicles, Parts', 3, 3526),
 (3537, 'SIC', 3730, 'Ship & Boat Building & Repairing', 3, 3526),
 (3533, 'SIC', 3720, 'Aircraft & Parts', 3, 3526),
-(3548, 'SIC', 3790, 'Miscellaneous Transportation Equipment', 3, 3526),
+(3548, 'SIC', 3790, 'Miscellaneous Transportation Equipment', 3, 3526);
+
+INSERT INTO industry (industry_id, industry_classification, industry_code, industry_description, depth, parent_id) VALUES
 (3527, 'SIC', 3710, 'Motor Vehicles & Equipment', 3, 3526),
 (3540, 'SIC', 3740, 'Railroad Equipment', 3, 3526),
 (3542, 'SIC', 3750, 'Motorcycles, Bicycles & Parts', 3, 3526),
@@ -4446,9 +4352,9 @@ INSERT INTO industry (industry_id, industry_classification, industry_code, indus
 (3616, 'SIC', 4150, 'School Buses', 3, 3605),
 (3611, 'SIC', 4130, 'Intercity & Rural Bus Transportation', 3, 3605),
 (2521, 'SEC', 4230, 'Trucking Terminal Facilities', 3, 2517),
-(2520, 'SEC', 4220, 'Public Warehousing & Storage', 3, 2517),
+(2520, 'SEC', 4220, 'Public Wareho& Storage', 3, 2517),
 (2518, 'SEC', 4210, 'Trucking & Courier Services, Except Air', 3, 2517),
-(3626, 'SIC', 4220, 'Public Warehousing & Storage', 3, 3620),
+(3626, 'SIC', 4220, 'Public Wareho& Storage', 3, 3620),
 (3631, 'SIC', 4230, 'Trucking Terminal Facilities', 3, 3620),
 (3621, 'SIC', 4210, 'Trucking & Courier Services, Except Air', 3, 3620),
 (3634, 'SIC', 4310, 'US Postal Service', 3, 3633),
@@ -4749,7 +4655,7 @@ INSERT INTO industry (industry_id, industry_classification, industry_code, indus
 (4273, 'SIC', 9440, 'Admin. of Social & Manpower Programs', 3, 4268),
 (4269, 'SIC', 9410, 'Admin. of Educational Programs', 3, 4268),
 (4278, 'SIC', 9510, 'Environmental Quality', 3, 4277),
-(4281, 'SIC', 9530, 'Housing & Urban Development', 3, 4277),
+(4281, 'SIC', 9530, 'Ho& Urban Development', 3, 4277),
 (4289, 'SIC', 9630, 'Regulation, Admin. of Utilities', 3, 4284),
 (4293, 'SIC', 9650, 'Regulation Misc. Commercial Sectors', 3, 4284),
 (4295, 'SIC', 9660, 'Space Research & Technology', 3, 4284),
@@ -4759,20 +4665,12 @@ INSERT INTO industry (industry_id, industry_classification, industry_code, indus
 (2786, 'SEC', 9720, 'International Affairs', 3, 2785),
 (4300, 'SIC', 9720, 'International Affairs', 3, 4297),
 (4298, 'SIC', 9710, 'National Security', 3, 4297),
-(4303, 'SIC', 9990, 'Nonclassifiable Establishments', 3, 4302)
-;
+(4303, 'SIC', 9990, 'Nonclassifiable Establishments', 3, 4302);
 
-CREATE TABLE industry_level (
-    industry_level_id bigint NOT NULL,
-    industry_classification varchar(16),
-    ancestor_id bigint,
-    ancestor_code integer,
-    ancestor_depth integer,
-    descendant_id bigint,
-    descendant_code integer,
-    descendant_depth integer,
-    PRIMARY KEY (industry_level_id)
-);
+--
+-- Data for Name: industry_level; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
 
 INSERT INTO industry_level (industry_level_id, industry_classification, ancestor_id, ancestor_code, ancestor_depth, descendant_id, descendant_code, descendant_depth) VALUES
 (1, 'SEC', 2677, 6300, 2, 2689, 6390, 3),
@@ -5109,7 +5007,9 @@ INSERT INTO industry_level (industry_level_id, industry_classification, ancestor
 (332, 'NAICS', 1015, 424, 2, 1072, 424810, 5),
 (333, 'NAICS', 1549, 52421, 4, 1548, 524210, 5),
 (334, 'NAICS', 1624, 54, 1, 1645, 541330, 5),
-(335, 'SEC', 2539, 4800, 2, 2541, 4812, 4),
+(335, 'SEC', 2539, 4800, 2, 2541, 4812, 4);
+
+INSERT INTO industry_level (industry_level_id, industry_classification, ancestor_id, ancestor_code, ancestor_depth, descendant_id, descendant_code, descendant_depth) VALUES
 (336, 'NAICS', 2151, 9221, 3, 2163, 92216, 4),
 (337, 'SIC', 3215, 2810, 3, 3217, 2813, 4),
 (338, 'NAICS', 1657, 5414, 3, 1658, 541410, 5),
@@ -5606,7 +5506,10 @@ INSERT INTO industry_level (industry_level_id, industry_classification, ancestor
 (829, 'NAICS', 2191, 92611, 4, 2190, 926110, 5),
 (830, 'SIC', 3301, 3200, 2, 3303, 3211, 4),
 (831, 'SIC', 3762, 5100, 2, 3796, 5182, 4),
-(832, 'SIC', 2847, 700, 2, 2860, 752, 4),
+(832, 'SIC', 2847, 700, 2, 2860, 752, 4);
+
+INSERT INTO industry_level (industry_level_id, industry_classification, ancestor_id, ancestor_code, ancestor_depth, descendant_id, descendant_code, descendant_depth) VALUES
+
 (833, 'SIC', 3167, 2600, 2, 3170, 2620, 3),
 (834, 'SEC', 2391, 3440, 3, 2392, 3442, 4),
 (835, 'SIC', 4308, 20, 1, 3112, 2386, 4),
@@ -6103,7 +6006,9 @@ INSERT INTO industry_level (industry_level_id, industry_classification, ancestor
 (1326, 'NAICS', 1, 11, 1, 37, 11141, 4),
 (1327, 'NAICS', 1625, 541, 2, 1669, 541512, 5),
 (1328, 'SIC', 4308, 20, 1, 3330, 3290, 3),
-(1329, 'SIC', 3174, 2650, 3, 3176, 2653, 4),
+(1329, 'SIC', 3174, 2650, 3, 3176, 2653, 4);
+
+INSERT INTO industry_level (industry_level_id, industry_classification, ancestor_id, ancestor_code, ancestor_depth, descendant_id, descendant_code, descendant_depth) VALUES
 (1330, 'SEC', 2476, 3800, 2, 2479, 3820, 3),
 (1331, 'SIC', 4308, 20, 1, 3350, 3331, 4),
 (1332, 'NAICS', 1404, 5111, 3, 1405, 511110, 5),
@@ -6602,7 +6507,9 @@ INSERT INTO industry_level (industry_level_id, industry_classification, ancestor
 (1825, 'SIC', 4146, 8000, 2, 4171, 8090, 3),
 (1826, 'SEC', 2543, 4820, 3, 2544, 4822, 4),
 (1827, 'SIC', 4012, 7030, 3, 4013, 7032, 4),
-(1828, 'NAICS', 1969, 712, 2, 1973, 712120, 5),
+(1828, 'NAICS', 1969, 712, 2, 1973, 712120, 5);
+
+INSERT INTO industry_level (industry_level_id, industry_classification, ancestor_id, ancestor_code, ancestor_depth, descendant_id, descendant_code, descendant_depth) VALUES
 (1829, 'SIC', 3124, 2400, 2, 3136, 2439, 4),
 (1830, 'SIC', 4308, 20, 1, 3016, 2064, 4),
 (1831, 'SIC', 4308, 20, 1, 3526, 3700, 2),
@@ -7099,7 +7006,9 @@ INSERT INTO industry_level (industry_level_id, industry_classification, ancestor
 (2322, 'SIC', 3711, 4960, 3, 3712, 4961, 4),
 (2323, 'SIC', 4308, 20, 1, 3464, 3575, 4),
 (2324, 'SIC', 3762, 5100, 2, 3785, 5153, 4),
-(2325, 'SIC', 4311, 52, 1, 3823, 5410, 3),
+(2325, 'SIC', 4311, 52, 1, 3823, 5410, 3);
+
+INSERT INTO industry_level (industry_level_id, industry_classification, ancestor_id, ancestor_code, ancestor_depth, descendant_id, descendant_code, descendant_depth) VALUES
 (2326, 'NAICS', 1624, 54, 1, 1643, 541320, 5),
 (2327, 'SEC', 2796, 70, 1, 2736, 7510, 3),
 (2328, 'SEC', 2403, 3500, 2, 2420, 3562, 4),
@@ -7597,7 +7506,9 @@ INSERT INTO industry_level (industry_level_id, industry_classification, ancestor
 (2820, 'SIC', 4310, 50, 1, 3726, 5032, 4),
 (2821, 'SIC', 4313, 70, 1, 4065, 7370, 3),
 (2822, 'SEC', 2722, 7360, 3, 2723, 7361, 4),
-(2823, 'NAICS', 1015, 424, 2, 1053, 42449, 4),
+(2823, 'NAICS', 1015, 424, 2, 1053, 42449, 4);
+
+INSERT INTO industry_level (industry_level_id, industry_classification, ancestor_id, ancestor_code, ancestor_depth, descendant_id, descendant_code, descendant_depth) VALUES
 (2824, 'NAICS', 1812, 61, 1, 1833, 611512, 5),
 (2825, 'NAICS', 1015, 424, 2, 1057, 424520, 5),
 (2826, 'SEC', 2391, 3440, 3, 2394, 3444, 4),
@@ -8094,7 +8005,10 @@ INSERT INTO industry_level (industry_level_id, industry_classification, ancestor
 (3317, 'NAICS', 2150, 922, 2, 2159, 92214, 4),
 (3318, 'SIC', 3552, 3800, 2, 3559, 3824, 4),
 (3319, 'SIC', 3083, 2300, 2, 3116, 2391, 4),
-(3320, 'SIC', 3434, 3540, 3, 3438, 3544, 4),
+(3320, 'SIC', 3434, 3540, 3, 3438, 3544, 4);
+
+
+INSERT INTO industry_level (industry_level_id, industry_classification, ancestor_id, ancestor_code, ancestor_depth, descendant_id, descendant_code, descendant_depth) VALUES
 (3321, 'NAICS', 1003, 42386, 4, 1002, 423860, 5),
 (3322, 'NAICS', 205, 23, 1, 234, 23799, 4),
 (3323, 'SIC', 2955, 1700, 2, 2968, 1752, 4),
@@ -8591,7 +8505,9 @@ INSERT INTO industry_level (industry_level_id, industry_classification, ancestor
 (3814, 'NAICS', 128, 11521, 4, 127, 115210, 5),
 (3815, 'NAICS', 1480, 52, 1, 1487, 522110, 5),
 (3816, 'SIC', 4308, 20, 1, 3358, 3354, 4),
-(3817, 'NAICS', 1015, 424, 2, 1083, 424940, 5),
+(3817, 'NAICS', 1015, 424, 2, 1083, 424940, 5);
+
+INSERT INTO industry_level (industry_level_id, industry_classification, ancestor_id, ancestor_code, ancestor_depth, descendant_id, descendant_code, descendant_depth) VALUES
 (3818, 'NAICS', 1403, 511, 2, 1413, 51119, 4),
 (3819, 'NAICS', 181, 221, 2, 188, 221115, 5),
 (3820, 'SIC', 3756, 5090, 3, 3758, 5092, 4),
@@ -9090,7 +9006,9 @@ INSERT INTO industry_level (industry_level_id, industry_classification, ancestor
 (4313, 'SIC', 4308, 20, 1, 3063, 2254, 4),
 (4314, 'NAICS', 1944, 7111, 3, 1951, 711190, 5),
 (4315, 'SIC', 3911, 5990, 3, 3916, 5999, 4),
-(4316, 'SIC', 3945, 6160, 3, 3946, 6162, 4),
+(4316, 'SIC', 3945, 6160, 3, 3946, 6162, 4);
+
+INSERT INTO industry_level (industry_level_id, industry_classification, ancestor_id, ancestor_code, ancestor_depth, descendant_id, descendant_code, descendant_depth) VALUES
 (4317, 'SIC', 4312, 60, 1, 3930, 6062, 4),
 (4318, 'SEC', 2659, 6100, 2, 2666, 6159, 4),
 (4319, 'NAICS', 205, 23, 1, 206, 236, 2),
@@ -9588,7 +9506,10 @@ INSERT INTO industry_level (industry_level_id, industry_classification, ancestor
 (4811, 'SEC', 2792, 40, 1, 2530, 4520, 3),
 (4812, 'NAICS', 1624, 54, 1, 1660, 541420, 5),
 (4813, 'SEC', 2791, 20, 1, 2376, 3330, 3),
-(4814, 'SIC', 4308, 20, 1, 3487, 3625, 4),
+(4814, 'SIC', 4308, 20, 1, 3487, 3625, 4);
+
+
+INSERT INTO industry_level (industry_level_id, industry_classification, ancestor_id, ancestor_code, ancestor_depth, descendant_id, descendant_code, descendant_depth) VALUES
 (4815, 'NAICS', 1419, 512, 2, 1437, 51223, 4),
 (4816, 'SIC', 3658, 4520, 3, 3659, 4522, 4),
 (4817, 'SIC', 4308, 20, 1, 3152, 2514, 4),
@@ -10084,7 +10005,10 @@ INSERT INTO industry_level (industry_level_id, industry_classification, ancestor
 (5307, 'SEC', 2791, 20, 1, 2341, 2990, 3),
 (5308, 'SIC', 4314, 90, 1, 4263, 9224, 4),
 (5309, 'SEC', 2791, 20, 1, 2441, 3634, 4),
-(5310, 'SIC', 4247, 9100, 2, 4248, 9110, 3),
+(5310, 'SIC', 4247, 9100, 2, 4248, 9110, 3);
+
+
+INSERT INTO industry_level (industry_level_id, industry_classification, ancestor_id, ancestor_code, ancestor_depth, descendant_id, descendant_code, descendant_depth) VALUES
 (5311, 'SIC', 4308, 20, 1, 3002, 2043, 4),
 (5312, 'NAICS', 56, 112, 2, 62, 11212, 4),
 (5313, 'SIC', 3204, 2760, 3, 3205, 2761, 4),
@@ -10581,7 +10505,10 @@ INSERT INTO industry_level (industry_level_id, industry_classification, ancestor
 (5804, 'NAICS', 1625, 541, 2, 1711, 541922, 5),
 (5805, 'SEC', 2792, 40, 1, 2539, 4800, 2),
 (5806, 'NAICS', 1006, 42391, 4, 1005, 423910, 5),
-(5807, 'NAICS', 1624, 54, 1, 1681, 541690, 5),
+(5807, 'NAICS', 1624, 54, 1, 1681, 541690, 5);
+
+
+INSERT INTO industry_level (industry_level_id, industry_classification, ancestor_id, ancestor_code, ancestor_depth, descendant_id, descendant_code, descendant_depth) VALUES
 (5808, 'SIC', 2798, 100, 2, 2822, 182, 4),
 (5809, 'SIC', 4307, 15, 1, 2940, 1520, 3),
 (5810, 'NAICS', 2, 111, 2, 21, 111211, 5),
@@ -11078,7 +11005,9 @@ INSERT INTO industry_level (industry_level_id, industry_classification, ancestor
 (6301, 'SIC', 2798, 100, 2, 2817, 174, 4),
 (6302, 'NAICS', 1480, 52, 1, 1540, 524114, 5),
 (6303, 'NAICS', 1015, 424, 2, 1020, 42412, 4),
-(6304, 'SIC', 4311, 52, 1, 3846, 5550, 3),
+(6304, 'SIC', 4311, 52, 1, 3846, 5550, 3);
+
+INSERT INTO industry_level (industry_level_id, industry_classification, ancestor_id, ancestor_code, ancestor_depth, descendant_id, descendant_code, descendant_depth) VALUES
 (6305, 'NAICS', 1569, 53, 1, 1598, 5322, 3),
 (6306, 'NAICS', 2150, 922, 2, 2154, 922120, 5),
 (6307, 'SIC', 2919, 1410, 3, 2920, 1411, 4),
@@ -11577,7 +11506,10 @@ INSERT INTO industry_level (industry_level_id, industry_classification, ancestor
 (6800, 'SIC', 4309, 40, 1, 3704, 4939, 4),
 (6801, 'SIC', 3917, 6000, 2, 3921, 6020, 3),
 (6802, 'SEC', 2791, 20, 1, 2277, 2420, 3),
-(6803, 'SEC', 2659, 6100, 2, 4323, 6189, 4),
+(6803, 'SEC', 2659, 6100, 2, 4323, 6189, 4);
+
+
+INSERT INTO industry_level (industry_level_id, industry_classification, ancestor_id, ancestor_code, ancestor_depth, descendant_id, descendant_code, descendant_depth) VALUES
 (6804, 'SIC', 3115, 2390, 3, 3123, 2399, 4),
 (6805, 'SEC', 2384, 3400, 2, 2386, 3411, 4),
 (6806, 'SEC', 2791, 20, 1, 2498, 3870, 3),
@@ -12073,7 +12005,9 @@ INSERT INTO industry_level (industry_level_id, industry_classification, ancestor
 (7296, 'NAICS', 1657, 5414, 3, 1665, 54149, 4),
 (7297, 'NAICS', 2137, 9211, 3, 2138, 921110, 5),
 (7298, 'SIC', 4308, 20, 1, 3575, 3873, 4),
-(7299, 'SIC', 4311, 52, 1, 3810, 5251, 4),
+(7299, 'SIC', 4311, 52, 1, 3810, 5251, 4);
+
+INSERT INTO industry_level (industry_level_id, industry_classification, ancestor_id, ancestor_code, ancestor_depth, descendant_id, descendant_code, descendant_depth) VALUES
 (7300, 'NAICS', 1725, 56, 1, 1766, 5616, 3),
 (7301, 'NAICS', 117, 115, 2, 119, 11511, 4),
 (7302, 'SEC', 2659, 6100, 2, 2668, 6162, 4),
@@ -12570,7 +12504,9 @@ INSERT INTO industry_level (industry_level_id, industry_classification, ancestor
 (7793, 'SIC', 4310, 50, 1, 3739, 5052, 4),
 (7794, 'SIC', 3958, 6300, 2, 3963, 6324, 4),
 (7795, 'SIC', 3252, 2900, 2, 3253, 2910, 3),
-(7796, 'SIC', 4313, 70, 1, 4190, 8290, 3),
+(7796, 'SIC', 4313, 70, 1, 4190, 8290, 3);
+
+INSERT INTO industry_level (industry_level_id, industry_classification, ancestor_id, ancestor_code, ancestor_depth, descendant_id, descendant_code, descendant_depth) VALUES
 (7797, 'SIC', 3667, 4700, 2, 3674, 4740, 3),
 (7798, 'NAICS', 2135, 92, 1, 2149, 92119, 4),
 (7799, 'SIC', 3886, 5900, 2, 3896, 5943, 4),
@@ -13069,7 +13005,9 @@ INSERT INTO industry_level (industry_level_id, industry_classification, ancestor
 (8292, 'SEC', 2791, 20, 1, 2264, 2211, 4),
 (8293, 'SEC', 2637, 5800, 2, 2639, 5812, 4),
 (8294, 'NAICS', 2107, 8132, 3, 2108, 81321, 4),
-(8295, 'SEC', 2503, 3930, 3, 2504, 3931, 4),
+(8295, 'SEC', 2503, 3930, 3, 2504, 3931, 4);
+
+INSERT INTO industry_level (industry_level_id, industry_classification, ancestor_id, ancestor_code, ancestor_depth, descendant_id, descendant_code, descendant_depth) VALUES
 (8296, 'NAICS', 1402, 51, 1, 1460, 517410, 5),
 (8297, 'SIC', 4248, 9110, 3, 4249, 9111, 4),
 (8298, 'NAICS', 1890, 62191, 4, 1889, 621910, 5),
@@ -13567,7 +13505,9 @@ INSERT INTO industry_level (industry_level_id, industry_classification, ancestor
 (8790, 'NAICS', 1847, 6117, 3, 1848, 611710, 5),
 (8791, 'SEC', 2403, 3500, 2, 2407, 3524, 4),
 (8792, 'SIC', 4308, 20, 1, 3302, 3210, 3),
-(8793, 'SEC', 2649, 6000, 2, 2656, 6036, 4),
+(8793, 'SEC', 2649, 6000, 2, 2656, 6036, 4);
+
+INSERT INTO industry_level (industry_level_id, industry_classification, ancestor_id, ancestor_code, ancestor_depth, descendant_id, descendant_code, descendant_depth) VALUES
 (8794, 'SEC', 2791, 20, 1, 2480, 3821, 4),
 (8795, 'SIC', 2982, 2000, 2, 2989, 2022, 4),
 (8796, 'NAICS', 1920, 624, 2, 1935, 62423, 4),
@@ -14065,7 +14005,10 @@ INSERT INTO industry_level (industry_level_id, industry_classification, ancestor
 (9288, 'SEC', 2794, 52, 1, 2634, 5731, 4),
 (9289, 'NAICS', 56, 112, 2, 97, 11299, 4),
 (9290, 'SEC', 2539, 4800, 2, 2544, 4822, 4),
-(9291, 'SEC', 2796, 70, 1, 2731, 7380, 3),
+(9291, 'SEC', 2796, 70, 1, 2731, 7380, 3);
+
+
+INSERT INTO industry_level (industry_level_id, industry_classification, ancestor_id, ancestor_code, ancestor_depth, descendant_id, descendant_code, descendant_depth) VALUES
 (9292, 'NAICS', 235, 238, 2, 276, 238990, 5),
 (9293, 'SIC', 4277, 9500, 2, 4283, 9532, 4),
 (9294, 'SIC', 4208, 8600, 2, 4217, 8650, 3),
@@ -14100,16 +14043,7 @@ INSERT INTO industry_level (industry_level_id, industry_classification, ancestor
 (9323, 'NAICS', 1624, 54, 1, 1717, 54199, 4),
 (9324, 'NAICS', 2037, 81, 1, 2082, 81221, 4),
 (9325, 'NAICS', 2037, 81, 1, 2078, 812191, 5),
-(9326, 'SIC', 3681, 4810, 3, 3682, 4812, 4)
-;
-
-CREATE TABLE industry_structure (
-    industry_structure_id bigint,
-    industry_classification varchar(8) NOT NULL,
-    depth integer NOT NULL,
-    level_name varchar(32),
-    PRIMARY KEY (industry_structure_id)
-);
+(9326, 'SIC', 3681, 4810, 3, 3682, 4812, 4;
 
 INSERT INTO industry_structure (industry_structure_id, industry_classification, depth, level_name) VALUES
 (1, 'SIC', 1, 'Division'),
@@ -14124,6 +14058,5 @@ INSERT INTO industry_structure (industry_structure_id, industry_classification, 
 (50, 'NAICS', 2, 'Subsector'),
 (51, 'NAICS', 3, 'Industry Group'),
 (52, 'NAICS', 4, 'NAICS Industry'),
-(53, 'NAICS', 5, 'National Industry')
-;
+(53, 'NAICS', 5, 'National Industry');
 
