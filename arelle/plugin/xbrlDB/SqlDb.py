@@ -11,8 +11,8 @@ from arelle.ModelValue import dateTime
 import socket
 
 TRACESQLFILE = None
-#TRACESQLFILE = r"c:\temp\sqltrace.log"  # uncomment to trace SQL on connection (very big file!!!)
-#TRACESQLFILE = "/Users/hermf/temp/sqltrace.log"  # uncomment to trace SQL on connection (very big file!!!)
+#TRACESQLFILE = r"z:\temp\sqltraceWin.log"  # uncomment to trace SQL on connection (very big file!!!)
+#TRACESQLFILE = "/Users/hermf/temp/sqltraceUnx.log"  # uncomment to trace SQL on connection (very big file!!!)
 
 def noop(*args, **kwargs): return 
 class NoopException(Exception):
@@ -87,6 +87,7 @@ try:
     import sqlite3
     hasSQLite = True
     sqliteConnect = sqlite3.connect
+    sqliteParseDecltypes = sqlite3.PARSE_DECLTYPES
     sqliteOperationalError = sqlite3.OperationalError
     sqliteProgrammingError = sqlite3.ProgrammingError
     sqliteInterfaceError = sqlite3.InterfaceError
@@ -96,6 +97,7 @@ try:
 except ImportError:
     hasSQLite = False
     sqliteConnect = noop
+    sqliteParseDecltypes = None
     sqliteOperationalError = sqliteProgrammingError = sqliteInterfaceError = sqliteInternalError = \
         sqliteDataError = sqliteIntegrityError = NoopException
 
@@ -119,10 +121,10 @@ def isSqlConnection(host, port, timeout=10, product=None):
                 mssqlConnect(user='', host=host, socket_timeout=t)
             elif product == "sqlite" and hasSQLite:
                 sqliteConnect("", t) # needs a database specified for this test
-        except (pgProgrammingError, mysqlProgrammingError, oracleDatabaseError, sqliteDatabaseError):
+        except (pgProgrammingError, mysqlProgrammingError, oracleDatabaseError, sqliteProgrammingError):
             return True # success, this is really a postgres socket, wants user name
         except (pgInterfaceError, mysqlInterfaceError, oracleInterfaceError, 
-                mssqlOperationalError, mssqlInterfaceError, sqliteInterfaceError):
+                mssqlOperationalError, mssqlInterfaceError, sqliteOperationalError, sqliteInterfaceError):
             return False # something is there but not postgres
         except socket.timeout:
             t = t + 2  # relax - try again with longer timeout
@@ -173,7 +175,7 @@ class SqlDbConnection():
             if not hasMSSql:
                 raise XPDBException("xpgDB:MissingMSSQLInterface",
                                     _("MSSQL server interface is not installed")) 
-            self.conn = mssqlConnect('DRIVER={{SQL Server}};SERVER={2};DATABASE={3};UID={0};PWD={1};CHARSET=UTF8'
+            self.conn = mssqlConnect('DRIVER={{SQL Server Native Client 11.0}};SERVER={2};DATABASE={3};UID={0};PWD={1};CHARSET=UTF8'
                                       .format(user,
                                               password, 
                                               host, # e.g., localhost\\SQLEXPRESS
@@ -183,7 +185,7 @@ class SqlDbConnection():
             if not hasSQLite:
                 raise XPDBException("xpgDB:MissingSQLiteInterface",
                                     _("SQLite interface is not installed")) 
-            self.conn = sqliteConnect(database, (timeout or 60))
+            self.conn = sqliteConnect(database, (timeout or 60), detect_types=sqliteParseDecltypes)
             self.product = product
             self.syncSequences = False # for object_id coordination of autoincrement values
         else:
@@ -318,6 +320,7 @@ class SqlDbConnection():
                 oracleDatabaseError,
                 mssqlOperationalError, mssqlInterfaceError, mssqlDataError,
                 mssqlProgrammingError, mssqlIntegrityError,
+                sqliteOperationalError, sqliteInterfaceError, sqliteDataError,
                 socket.timeout) as ex:  # something wrong with SQL
             if TRACESQLFILE:
                 with io.open(TRACESQLFILE, "a", encoding='utf-8') as fh:
@@ -477,6 +480,8 @@ class SqlDbConnection():
                 for name, fulltype, characterMaxLength in colTypesResult:
                     name = name.lower()
                     if fulltype in ("char", "varchar", "nvarchar"):
+                        if characterMaxLength == -1: 
+                            characterMaxLength = "max"
                         colDecl = "{}({})".format(fulltype, characterMaxLength)
                     else:
                         colDecl = fulltype
@@ -532,9 +537,11 @@ class SqlDbConnection():
         isMSSql = self.product == "mssql"
         isPostgres = self.product == "postgres"
         isSQLite = self.product == "sqlite"
+        newCols = [newCol.lower() for newCol in newCols]
+        matchCols = [matchCol.lower() for matchCol in matchCols]
         returningCols = []
         if idCol: # idCol is the first returned column if present
-            returningCols.append(idCol)
+            returningCols.append(idCol.lower())
         for matchCol in matchCols:
             if matchCol not in returningCols: # allow idCol to be specified or default assigned
                 returningCols.append(matchCol)
@@ -683,7 +690,7 @@ WITH row_values (%(newCols)s) AS (
                          "inputCols": ', '.join('{0} {1}'.format(newCol, colDeclarations[newCol])
                                                 for newCol in newCols)}, None, False)]
             # break values insertion into 1000's each
-            def insertOrclRows(i, j, params):
+            def insertMSSqlRows(i, j, params):
                 sql.append(("INSERT INTO #%(inputTable)s ( %(newCols)s ) VALUES %(values)s;" %     
                         {"inputTable": _inputTableName,
                          "newCols": ', '.join(newCols),
@@ -694,12 +701,12 @@ WITH row_values (%(newCols)s) AS (
                 for j in range(i, min(i+1000, iMax)):
                     if rowLongValues[j] is not None:
                         if j > i:
-                            insertOrclRows(i, j, None)
-                        insertOrclRows(j, j+1, rowLongValues[j])
+                            insertMSSqlRows(i, j, None)
+                        insertMSSqlRows(j, j+1, rowLongValues[j])
                         i = j + 1
                         break
                 if i < j+1 and i < iMax:
-                    insertOrclRows(i, j+1, None)
+                    insertMSSqlRows(i, j+1, None)
                     i = j+1
             if insertIfNotMatched:
                 sql.append(("MERGE INTO %(table)s USING #%(inputTable)s ON (%(match)s) "

@@ -28,6 +28,10 @@ if __name__ == "__main__":
 
     with open("arelle/Version.py", "w") as fh:
         fh.write(versionPy)
+        
+    with open("version.txt", "w") as fh:
+        fh.write(timestamp.strftime("%Y-%m-%d %H:%M UTC"))
+        
 
     distFileDate = timestamp.strftime("%Y-%m-%d")
     if sys.platform == "darwin":
@@ -37,8 +41,13 @@ if __name__ == "__main__":
         with open("buildRenameLinux-x86_64.sh", "w") as fh:
             fh.write("mv dist/exe.linux-x86_64-3.2.tar.gz dist/arelle-linux-x86_64-{}.tar.gz\n".format(distFileDate))
     elif sys.platform == "linux": # python 3.3
+        if len(sys.argv) > 0 and sys.argv[1]:
+            sysName = sys.argv[1]
+        else:
+            sysName = "linux"
         with open("buildRenameLinux-x86_64.sh", "w") as fh:
-            fh.write("mv dist/exe.linux-x86_64-3.3.tar.gz dist/arelle-linux-x86_64-{}.tar.gz\n".format(distFileDate))
+            fh.write("mv dist/exe.linux-x86_64-3.3.tar.gz dist/arelle-{}-x86_64-{}.tar.gz\n"
+                     .format(sysName, distFileDate))
     elif sys.platform == "sunos5":
         with open("buildRenameSol10Sun4.sh", "w") as fh:
             fh.write("mv dist/exe.solaris-2.10-sun4v{0}-{1}.tar.gz dist/arelle-solaris10-sun4{0}-{2}.tar.gz\n"
@@ -53,3 +62,5 @@ if __name__ == "__main__":
             fh.write("rename dist\\arelle-win-x64.exe arelle-win-x64-{}.exe\n".format(distFileDate))
         with open("buildRenameSvr27.bat", "w") as fh:
             fh.write("rename dist\\arelle-svr-2.7.zip arelle-svr-2.7-{}.zip\n".format(distFileDate))
+        with open("buildRenameZip32.bat", "w") as fh:
+            fh.write("rename dist\\arelle-cmd32.zip arelle-cmd32-{}.zip\n".format(distFileDate))

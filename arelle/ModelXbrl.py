@@ -235,6 +235,7 @@ class ModelXbrl:
 
     def __init__(self, modelManager, errorCaptureLevel=None):
         self.modelManager = modelManager
+        self.skipDTS = modelManager.skipDTS
         self.init(errorCaptureLevel=errorCaptureLevel)
 
     def init(self, keepViews=False, errorCaptureLevel=None):
@@ -435,7 +436,21 @@ class ModelXbrl:
         self.modelDocument.save(overrideFilepath)
         with open( (overrideFilepath or self.modelDocument.filepath), "w", encoding='utf-8') as fh:
             XmlUtil.writexml(fh, self.modelDocument.xmlDocument, encoding="utf-8")
-
+            
+    @property    
+    def prefixedNamespaces(self):
+        """Dict of prefixes for namespaces defined in DTS
+        """
+        prefixedNamespaces = {}
+        for nsDocs in self.namespaceDocs.values():
+            for nsDoc in nsDocs:
+                ns = nsDoc.targetNamespace
+                if ns:
+                    prefix = XmlUtil.xmlnsprefix(nsDoc.xmlRootElement, ns)
+                    if prefix and prefix not in prefixedNamespaces:
+                        prefixedNamespaces[prefix] = ns
+        return prefixedNamespaces 
+    
     def matchContext(self, entityIdentScheme, entityIdentValue, periodType, periodStart, periodEndInstant, dims, segOCCs, scenOCCs):
         """Finds matching context, by aspects, as in formula usage, if any
         
@@ -467,20 +482,20 @@ class ModelXbrl:
                 ((c.isInstantPeriod and periodType == "instant" and dateUnionEqual(c.instantDatetime, periodEndInstant, instantEndDate=True)) or
                  (c.isStartEndPeriod and periodType == "duration" and dateUnionEqual(c.startDatetime, periodStart) and dateUnionEqual(c.endDatetime, periodEndInstant, instantEndDate=True)) or
                  (c.isForeverPeriod and periodType == "forever")) and
-                # dimensions match if dimensional model
-                (dims is None or (
+                 # dimensions match if dimensional model
+                 (dims is None or (
                     (c.qnameDims.keys() == dims.keys()) and
-                    all([cDim.isEqualTo(dims[cDimQn]) for cDimQn, cDim in c.qnameDims.items()]))) and
-                # OCCs match for either dimensional or non-dimensional modle
-                all(
-                    all([sEqual(self, cOCCs[i], mOCCs[i]) for i in range(len(mOCCs))])
-                    if len(cOCCs) == len(mOCCs) else False
+                        all([cDim.isEqualTo(dims[cDimQn]) for cDimQn, cDim in c.qnameDims.items()]))) and
+                 # OCCs match for either dimensional or non-dimensional modle
+                 all(
+                   all([sEqual(self, cOCCs[i], mOCCs[i]) for i in range(len(mOCCs))])
+                     if len(cOCCs) == len(mOCCs) else False
                         for cOCCs,mOCCs in ((c.nonDimValues(segAspect),segOCCs),
                                             (c.nonDimValues(scenAspect),scenOCCs)))
                 ):
-                return c
+                    return c
         return None
-
+                 
     def createContext(self, entityIdentScheme, entityIdentValue, periodType, periodStart, periodEndInstant, priItem, dims, segOCCs, scenOCCs,
                       afterSibling=None, beforeSibling=None, id=None):
         """Creates a new ModelContext and validates (integrates into modelDocument object model).
@@ -571,11 +586,10 @@ class ModelXbrl:
                         _("Create context, %(dimension)s, cannot determine context element, either no all relationship or validation issue"),
                         modelObject=self, dimension=dimQname),
                     continue
-                dimConcept = self.qnameConcepts[dimQname]
-                dimAttr = ("dimension", XmlUtil.addQnameValue(xbrlElt, dimConcept.qname))
-                if dimConcept.isTypedDimension:
-                    dimElt = XmlUtil.addChild(contextElt, XbrlConst.xbrldi, "xbrldi:typedMember",
-                        attributes=dimAttr)
+                dimAttr = ("dimension", XmlUtil.addQnameValue(xbrlElt, dimQname))
+                if dimValue.isTyped:
+                    dimElt = XmlUtil.addChild(contextElt, XbrlConst.xbrldi, "xbrldi:typedMember", 
+                                              attributes=dimAttr)
                     if isinstance(dimValue, (ModelDimensionValue, DimValuePrototype)) and dimValue.isTyped:
                         XmlUtil.copyNodes(dimElt, dimValue.typedMember)
                 elif dimMemberQname:
@@ -744,20 +758,21 @@ class ModelXbrl:
                     else: # default typed dimension
                         fbdq[DEFAULT].add(fact)
             return fbdq[memQname]
-
-    def matchFact(self, otherFact, unmatchedFactsStack=None):
+        
+    def matchFact(self, otherFact, unmatchedFactsStack=None, deemP0inf=False):
         """Finds matching fact, by XBRL 2.1 duplicate definition (if tuple), or by
         QName and VEquality (if an item), lang and accuracy equality, as in formula and test case usage
         
         :param otherFact: Fact to match
         :type otherFact: ModelFact
+        :deemP0inf: boolean for formula validation to deem P0 facts to be VEqual as if they were P=INF
         :returns: ModelFact -- Matching fact or None
         """
         for fact in self.facts:
             if (fact.isTuple):
                 if otherFact.isDuplicateOf(fact, unmatchedFactsStack=unmatchedFactsStack):
                     return fact
-            elif (fact.qname == otherFact.qname and fact.isVEqualTo(otherFact)):
+            elif (fact.qname == otherFact.qname and fact.isVEqualTo(otherFact, deemP0inf=deemP0inf)):
                 if not fact.isNumeric:
                     if fact.xmlLang == otherFact.xmlLang:
                         return fact
@@ -825,6 +840,38 @@ class ModelXbrl:
                 modelObject,
                 err, traceback.format_tb(sys.exc_info()[2])))
 
+    def effectiveMessageCode(self, messageCodes):        
+        effectiveMessageCode = None
+        for argCode in messageCodes if isinstance(messageCodes,tuple) else (messageCodes,):
+            if (isinstance(argCode, ModelValue.QName) or
+                (self.modelManager.disclosureSystem.EFM and argCode.startswith("EFM")) or
+                (self.modelManager.disclosureSystem.GFM and argCode.startswith("GFM")) or
+                (self.modelManager.disclosureSystem.HMRC and argCode.startswith("HMRC")) or
+                (self.modelManager.disclosureSystem.SBRNL and argCode.startswith("SBR.NL")) or
+                argCode[0:3] not in ("EFM", "GFM", "HMR", "SBR")):
+                effectiveMessageCode = argCode
+                break
+        return effectiveMessageCode
+
+    # isLoggingEffectiveFor( messageCodes= messageCode= level= )
+    def isLoggingEffectiveFor(self, **kwargs): # args can be messageCode(s) and level
+        logger = self.logger
+        if "messageCodes" in kwargs or "messageCode" in kwargs:
+            if "messageCodes" in kwargs:
+                messageCodes = kwargs["messageCodes"]
+            else:
+                messageCodes = kwargs["messageCode"]
+            messageCode = self.effectiveMessageCode(messageCodes)
+            codeEffective = (messageCode and
+                             (not logger.messageCodeFilter or logger.messageCodeFilter.match(messageCode))) 
+        else:
+            codeEffective = True
+        if "level" in kwargs and logger.messageLevelFilter:
+            levelEffective = logger.messageLevelFilter.match(kwargs["level"].lower())
+        else:
+            levelEffective = True
+        return codeEffective and levelEffective
+
     def logArguments(self, codes, msg, codedArgs):
         """ Prepares arguments for logger function as per info() below.
         
@@ -835,18 +882,9 @@ class ModelXbrl:
             # deref objects in properties
             return [(p[0],str(p[1])) if len(p) == 2 else (p[0],str(p[1]),propValues(p[2]))
                     for p in properties if 2 <= len(p) <= 3]
-            # determine logCode
-        messageCode = None
-        for argCode in codes if isinstance(codes,tuple) else (codes,):
-            if (isinstance(argCode, ModelValue.QName) or
-                (self.modelManager.disclosureSystem.EFM and argCode.startswith("EFM")) or
-                (self.modelManager.disclosureSystem.GFM and argCode.startswith("GFM")) or
-                (self.modelManager.disclosureSystem.HMRC and argCode.startswith("HMRC")) or
-                (self.modelManager.disclosureSystem.SBRNL and argCode.startswith("SBR.NL")) or
-                argCode[0:3] not in ("EFM", "GFM", "HMR", "SBR")):
-                messageCode = argCode
-                break
-
+        # determine logCode
+        messageCode = self.effectiveMessageCode(codes)
+        
         # determine message and extra arguments
         fmtArgs = {}
         extras = {"messageCode":messageCode}

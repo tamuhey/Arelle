@@ -4,7 +4,11 @@ Created on Oct 22, 2010
 @author: Mark V Systems Limited
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
-import re, datetime
+import datetime
+try:
+    import regex as re
+except ImportError:
+    import re
 from lxml import etree
 from arelle import XbrlConst
 from arelle.ModelObject import ModelObject, ModelComment
@@ -14,7 +18,7 @@ datetimePattern = re.compile(r"\s*([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([
                              r"\s*([0-9]{4})-([0-9]{2})-([0-9]{2})\s*")
 xmlEncodingPattern = re.compile(r"\s*<\?xml\s.*encoding=['\"]([^'\"]*)['\"].*\?>")
 xpointerFragmentIdentifierPattern = re.compile(r"([\w.]+)(\(([^)]*)\))?")
-xmlnsStripPattern = re.compile(r'\s*xmlns(:\w+)?="[^"]*"')
+xmlnsStripPattern = re.compile(r'\s*xmlns(:[\w.]+)?="[^"]*"')
 nonSpacePattern = re.compile(r"\S+")
 
 def xmlns(element, prefix):
@@ -229,12 +233,11 @@ def hasAncestor(element, ancestorNamespaceURI, ancestorLocalNames):
 def ancestor(element, ancestorNamespaceURI, ancestorLocalNames):
     treeElt = element.getparent()
     wildNamespaceURI = not ancestorNamespaceURI or ancestorNamespaceURI == '*'
+    if not isinstance(ancestorLocalNames,tuple): ancestorLocalNames = (ancestorLocalNames ,)
+    wildLocalName = ancestorLocalNames == ('*',)
     while isinstance(treeElt,ModelObject):
         if wildNamespaceURI or treeElt.elementNamespaceURI == ancestorNamespaceURI:
-            if isinstance(ancestorLocalNames,tuple):
-                if treeElt.localName in ancestorLocalNames:
-                    return treeElt
-            elif treeElt.localName == ancestorLocalNames:
+            if treeElt.localName in ancestorLocalNames or wildLocalName:
                 return treeElt
         treeElt = treeElt.getparent()
     return None
@@ -467,7 +470,7 @@ def emptyContentModel(element):
 
 # call with parent, childNamespaceURI, childLocalName, or just childQName object
 # attributes can be (localName, value) or (QName, value)
-def addChild(parent, childName1, childName2=None, attributes=None, text=None, afterSibling=None, beforeSibling=None):
+def addChild(parent, childName1, childName2=None, attributes=None, text=None, afterSibling=None, beforeSibling=None, appendChild=True):
     from arelle.FunctionXs import xsString
     modelDocument = parent.modelDocument
                     
@@ -487,7 +490,7 @@ def addChild(parent, childName1, childName2=None, attributes=None, text=None, af
         afterSibling.addnext(child)
     elif beforeSibling is not None and beforeSibling.getparent() == parent:  # sibling is a hint, parent prevails
         beforeSibling.addprevious(child)
-    else:
+    elif appendChild:
         parent.append(child)
     if attributes:
         for name, value in (attributes.items() if isinstance(attributes, dict) else
@@ -544,6 +547,13 @@ def addComment(parent, commentText):
         comment = comment.replace('--', '- -').replace('--', '- -')
     child = etree.Comment( comment )
     parent.append(child)
+    
+def addProcessingInstruction(parent, piTarget, piText):
+    i = 0 # find position to insert after other comments and PIs but before any element
+    for i, child in enumerate(parent):
+        if not isinstance(child, (etree._Comment, etree._ProcessingInstruction)):
+            break
+    parent.insert(i, etree.ProcessingInstruction(piTarget, piText))
     
 def addQnameValue(modelDocument, qnameValue):
     if not isinstance(qnameValue, QName):
@@ -728,6 +738,21 @@ def elementFragmentIdentifier(element):
             element = element.getparent()
         location = "/".join(childSequence)
         return "element({0})".format(location)
+    
+def elementChildSequence(element):
+    childSequence = [""] # "" represents document element for / (root) on the join below
+    while element is not None:
+        if isinstance(element,etree.ElementBase):
+            try:
+                siblingPosition = element._elementSequence # set by loader in some element hierarchies
+            except AttributeError:
+                siblingPosition = 1
+                for sibling in element.itersiblings(preceding=True):
+                    if isinstance(sibling,etree.ElementBase):
+                        siblingPosition += 1
+            childSequence.insert(1, str(siblingPosition))
+        element = element.getparent()
+    return "/".join(childSequence)
                         
 def xmlstring(elt, stripXmlns=False, prettyPrint=False, contentsOnly=False):
     if contentsOnly:
@@ -757,6 +782,8 @@ def writexml(writer, node, encoding=None, indent='', xmlcharrefreplace=False, pa
                 writexml(writer, child, indent=indent, xmlcharrefreplace=xmlcharrefreplace, parentNsmap={})
     elif isinstance(node,etree._Comment): # ok to use minidom implementation
         writer.write(indent+"<!--" + node.text + "-->\n")
+    elif isinstance(node,etree._ProcessingInstruction): # ok to use minidom implementation
+        writer.write(indent + str(node) + "\n")
     elif isinstance(node,etree._Element):
         if parentNsmap is None: 
             parent = node.getparent()

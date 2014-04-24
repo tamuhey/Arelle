@@ -343,9 +343,10 @@ class ModelFact(ModelObject):
             if concept.isNumeric:
                 val = self.value
                 try:
-                    num = float(val)
+                    # num = float(val)
                     dec = self.decimals
-                    if dec is None or dec == "INF":
+                    num = roundValue(val, self.precision, dec) # round using reported decimals
+                    if dec is None or dec == "INF":  # show using decimals or reported format
                         dec = len(val.partition(".")[2])
                     else: # max decimals at 28
                         dec = max( min(int(dec), 28), -28) # 2.7 wants short int, 3.2 takes regular int, don't use _INT here
@@ -363,7 +364,7 @@ class ModelFact(ModelObject):
             return float(self.value)
         return self.value
     
-    def isVEqualTo(self, other, deemP0Equal=False):
+    def isVEqualTo(self, other, deemP0Equal=False, deemP0inf=False):
         """(bool) -- v-equality of two facts
         
         Note that facts may be in different instances
@@ -382,14 +383,17 @@ class ModelFact(ModelObject):
                     return False
                 if self.modelXbrl.modelManager.validateInferDecimals:
                     d = min((inferredDecimals(self), inferredDecimals(other))); p = None
-                    if isnan(d) and deemP0Equal:
-                        return True
+                    if isnan(d):
+                        if deemP0Equal:
+                            return True
+                        elif deemP0inf: # for test cases deem P0 as INF comparison
+                            return self.xValue == other.xValue
                 else:
                     d = None; p = min((inferredPrecision(self), inferredPrecision(other)))
                     if p == 0:
                         if deemP0Equal:
                             return True
-                        else: # for test cases treat as INF comparison
+                        elif deemP0inf: # for test cases deem P0 as INF comparison
                             return self.xValue == other.xValue
                 return roundValue(self.value,precision=p,decimals=d) == roundValue(other.value,precision=p,decimals=d)
             else:
@@ -811,7 +815,7 @@ class ModelContext(ModelObject):
         except AttributeError:
             eiElt = self.entityIdentifierElement
             if eiElt is not None:
-                self._entityIdentifier = (eiElt.get("scheme"), eiElt.xValue)
+                self._entityIdentifier = (eiElt.get("scheme"), eiElt.xValue or eiElt.textValue) # no xValue if --skipDTS
             else:
                 self._entityIdentifier = ("(Error)", "(Error)")
             return self._entityIdentifier
@@ -1097,7 +1101,7 @@ class ModelDimensionValue(ModelObject):
     def dimensionQname(self):
         """(QName) -- QName of the dimension concept"""
         dimAttr = self.xAttributes.get("dimension", None)
-        if dimAttr is not None and dimAttr.xValid >= XmlValidate.VALID:
+        if dimAttr is not None and dimAttr.xValid >= 4:
             return dimAttr.xValue
         return None
         #return self.prefixedNameQname(self.get("dimension"))
@@ -1138,7 +1142,7 @@ class ModelDimensionValue(ModelObject):
         try:
             return self._memberQname
         except AttributeError:
-            if self.isExplicit and self.xValid >= XmlValidate.VALID:
+            if self.isExplicit and self.xValid >= 4:
                 self._memberQname = self.xValue
             else:
                 self._memberQname = None
@@ -1181,7 +1185,11 @@ class ModelDimensionValue(ModelObject):
             return (str(self.dimensionQname), XmlUtil.xmlstring( XmlUtil.child(self), stripXmlns=True, prettyPrint=True ) )
         
 def measuresOf(parent):
-    return sorted([m.xValue for m in parent.iterchildren(tag="{http://www.xbrl.org/2003/instance}measure") if isinstance(m, ModelObject) and m.xValue])
+    if parent.xValid >= 4: # has DTS and is validated
+        return sorted([m.xValue for m in parent.iterchildren(tag="{http://www.xbrl.org/2003/instance}measure") if isinstance(m, ModelObject) and m.xValue])
+    else:  # probably skipDTS
+        return sorted([m.prefixedNameQname(m.textValue)
+                       for m in parent.iterchildren(tag="{http://www.xbrl.org/2003/instance}measure") if isinstance(m, ModelObject)])
 
 def measuresStr(m):
     return m.localName if m.namespaceURI in (XbrlConst.xbrli, XbrlConst.iso4217) else str(m)
