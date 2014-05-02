@@ -9,7 +9,7 @@ This module is Arelle's controller in windowing interactive UI mode
 from arelle import PythonUtil # define 2.x or 3.x string types
 import os, sys, subprocess, pickle, time, locale, re
 from tkinter import (Tk, TclError, Toplevel, Menu, PhotoImage, StringVar, BooleanVar, N, S, E, W, EW, 
-                     HORIZONTAL, VERTICAL, END)
+                     HORIZONTAL, VERTICAL, END, font as tkFont)
 try:
     from tkinter.ttk import Frame, Button, Label, Combobox, Separator, PanedWindow, Notebook
 except ImportError:  # 3.0 versions of tkinter
@@ -58,6 +58,16 @@ class CntlrWinMain (Cntlr.Cntlr):
         overrideLang = self.config.get("labelLangOverride")
         self.labelLang = overrideLang if overrideLang else self.modelManager.defaultLang
         self.data = {}
+
+        if self.isMac: # mac Python fonts bigger than other apps (terminal, text edit, Word), and to windows Arelle
+            _defaultFont = tkFont.nametofont("TkDefaultFont") # label, status bar, treegrid
+            _defaultFont.configure(size=11)
+            _textFont = tkFont.nametofont("TkTextFont") # entry widget and combobox entry field
+            _textFont.configure(size=11)
+            #parent.option_add("*Font", _defaultFont) # would be needed if not using defaulted font
+            toolbarButtonPadding = 1
+        else:
+            toolbarButtonPadding = 4
 
         tkinter.CallWrapper = TkinterCallWrapper 
 
@@ -247,7 +257,7 @@ class CntlrWinMain (Cntlr.Cntlr):
                 try:
                     image = PhotoImage(file=image)
                     self.toolbar_images.append(image)
-                    tbControl = Button(toolbar, image=image, command=command, style="Toolbutton")
+                    tbControl = Button(toolbar, image=image, command=command, style="Toolbutton", padding=toolbarButtonPadding)
                     tbControl.grid(row=0, column=menubarColumn)
                 except TclError as err:
                     print(err)
@@ -1162,6 +1172,10 @@ class CntlrWinMain (Cntlr.Cntlr):
 
     # worker threads addToLog        
     def addToLog(self, message, messageCode="", messageArgs=None, file="", level=logging.INFO):
+        if messageCode and messageCode not in message: # prepend message code
+            message = "[{}] {}".format(messageCode, message)
+        if isinstance(messageArgs, dict):
+            message = message % messageArgs
         self.uiThreadQueue.put((self.uiAddToLog, [message]))
         
     # ui thread addToLog

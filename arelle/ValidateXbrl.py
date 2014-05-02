@@ -4,7 +4,10 @@ Created on Oct 17, 2010
 @author: Mark V Systems Limited
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
-import re
+try:
+    import regex as re
+except ImportError:
+    import re
 from arelle import (ModelDocument, XmlUtil, XbrlUtil, XbrlConst, 
                 ValidateXbrlCalcs, ValidateXbrlDimensions, ValidateXbrlDTS, ValidateFormula, ValidateUtr)
 from arelle import FunctionIxt
@@ -719,7 +722,7 @@ class ValidateXbrl:
                         #        self.modelXbrl.error("arelle:info",
                         #            _("Fact %(fact)s value %(value)s context %(contextID)s rounding exception %(error)s"),
                         #            modelObject=f, fact=f.qname, value=f.value, contextID=f.contextID, error = err)
-                    if self.validateEnum and concept.isEnumeration and getattr(f,"xValid", 0) == 4:
+                    if self.validateEnum and concept.isEnumeration and getattr(f,"xValid", 0) == 4 and not f.isNil:
                         memConcept = self.modelXbrl.qnameConcepts.get(f.xValue)
                         if not ValidateXbrlDimensions.enumerationMemberUsable(self, concept, memConcept):
                             self.modelXbrl.error("enumie:InvalidFactValue",

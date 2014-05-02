@@ -4,7 +4,10 @@ Created on Feb 02, 2014
 @author: Mark V Systems Limited
 (c) Copyright 2014 Mark V Systems Limited, All rights reserved.
 '''
-import re
+try:
+    import regex as re
+except ImportError:
+    import re
 from arelle import XbrlConst
 
 # regular expression components
@@ -94,6 +97,9 @@ EFMtableCodes = [
     ("EQP", RE(STMT, notDET, isPAR, r"(?=.*reserve).*trust"), None),
     ("LC", RE(STMT, notDET, notPAR, r"(?=.*activities).*liquidati"), None),
     ("EQP", RE(STMT, notDET, isPAR, r".*def[ei][cs]it"), None),
+    ("BSV", RE(STMT, notDET,notPAR, r".*net\W+asset\W+value"), None), 
+    ("CFS", RE(STMT, notDET,notPAR, r".*cash\W*flows\W+supplemental"), None),
+    ("LAP", RE(STMT, notDET, isPAR, r".*(?!.*changes)(?=.*assets).*liquidati"), None)
     ]
 HMRCtableCodes = [
     # ELRs are parsed for these patterns in sort order until there is one match per code

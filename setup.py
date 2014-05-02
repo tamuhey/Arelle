@@ -186,7 +186,8 @@ if sys.platform in ('darwin', 'linux2', 'linux', 'sunos5'): # works on ubuntu wi
         from setuptools import setup
         cx_FreezeExecutables = []
 
-    packages = find_packages('.') 
+    packages = find_packages('.', # note that new setuptools finds plugin and lib unwanted stuff
+                             exclude=['*.plugin.*', '*.lib.*'])
     dataFiles = None 
     includeFiles = [('arelle/config','config'), 
                     ('arelle/doc','doc'), 
@@ -209,7 +210,12 @@ if sys.platform in ('darwin', 'linux2', 'linux', 'sunos5'): # works on ubuntu wi
             includeFiles.append(('/usr/local/lib/libxml2.so', 'libxml2.so'))
             includeFiles.append(('/usr/local/lib/libxslt.so', 'libxslt.so'))
             includeFiles.append(('/usr/local/lib/libz.so', 'libz.so'))
-    includeLibs = ['lxml', 'lxml.etree', 'lxml._elementpath', 'pg8000', 'pymysql', 
+            
+    if os.path.exists("version.txt"):
+        includeFiles.append(('version.txt', 'version.txt'))
+        
+    includeLibs = ['lxml', 'lxml.etree', 'lxml._elementpath', 'lxml.html', 
+                   'pg8000', 'pymysql', 'sqlite3',
                     # note cx_Oracle isn't here because it is version and machine specific, ubuntu not likely working
                     'rdflib', 'rdflib.extras', 'rdflib.tools', 
                     # more rdflib plugin modules may need to be added later
@@ -245,6 +251,7 @@ elif sys.platform == 'win32':
     # setup_requires.append('py2exe')
     # FIXME: this should use the entry_points mechanism
     packages = find_packages('.')
+    print("packages={}".format(packages))
     dataFiles = None
     win32includeFiles = [('arelle\\config','config'),
                          ('arelle\\doc','doc'),
@@ -257,6 +264,10 @@ elif sys.platform == 'win32':
                          ('arelle\\scripts-windows','scripts')]
     if 'arelle.webserver' in packages:
         win32includeFiles.append('QuickBooks.qwc')
+
+    if os.path.exists("version.txt"):
+        win32includeFiles.append('version.txt')
+        
     options = dict( build_exe =  {
         "include_files": win32includeFiles,
         "include_msvcr": True, # include MSVCR100
@@ -265,7 +276,8 @@ elif sys.platform == 'win32':
         #
         # rdflib & isodate egg files: rename .zip cpy lib & egg-info subdirectories to site-packages directory
         #
-        "includes": ['lxml', 'lxml.etree', 'lxml._elementpath', 'pg8000', 'pymysql', 'cx_Oracle', 'pyodbc',
+        "includes": ['lxml', 'lxml.etree', 'lxml._elementpath', 'lxml.html',
+                     'pg8000', 'pymysql', 'cx_Oracle', 'pyodbc', 'sqlite3',
                      'rdflib', 'rdflib.extras', 'rdflib.tools', 
                      # more rdflib plugin modules may need to be added later
                      'rdflib.plugins', 'rdflib.plugins.memory', 
@@ -290,7 +302,8 @@ else:
     #print("Your platform {0} isn't supported".format(sys.platform)) 
     #sys.exit(1) 
     from setuptools import os, setup, find_packages
-    packages = find_packages('.')
+    packages = find_packages('.', # note that new setuptools finds plugin and lib unwanted stuff
+                             exclude=['*.plugin.*', '*.lib.*'])
     dataFiles = [        
         ('config',['arelle/config/' + f for f in os.listdir('arelle/config')]),
         ]

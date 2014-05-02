@@ -174,7 +174,7 @@ class gridHdr(Label):
   
 class gridCell(Entry): 
     def __init__(self, master, x, y, value="", width=None, justify=None, objectId=None, onClick=None): 
-        Entry.__init__(self, master=master) 
+        Entry.__init__(self, master=master)
         self.valueVar = StringVar() 
         self.valueVar.trace('w', self.valueChanged)
         self.config(textvariable=self.valueVar,
@@ -507,12 +507,13 @@ class scrolledHeaderedFrame(Frame):
         interiorW = self.rowHdrInterior.winfo_reqwidth()
         interiorH = self.rowHdrInterior.winfo_reqheight()
         # width doesn't set wide enough when first expanding, force by setting wider before scroll region
-        widenWidth = interiorW != self.rowHdrCanvas.winfo_width()
+        widenWidth = interiorW != self.rowHdrCanvas.winfo_width() and interiorW != 1 # 1 means nothing set yet
         # tkinter bug?  right side of row headers is clipped without setting it 1 pixel wider below
         # and then back on next configure event.  Would like to remove first config of width.
         # also: mac won't display at all without this trick
         self.rowHdrCanvas.config(width=interiorW, scrollregion=(0,0,interiorW,interiorH))
         if widenWidth: # update the canvas's width to fit the inner frame
+            
             self.rowHdrCanvas.config(width=interiorW + 1) # remove if tkinter issue gets solved
         #if interiorW != self.tblHdrInterior.winfo_width() or \
         #   interiorW != self.tblHdrInterior.tk.call( ('grid', 'columnconfigure', self.tblHdrInterior._w, 1, '-minsize' ) ):

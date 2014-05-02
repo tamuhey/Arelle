@@ -15,7 +15,7 @@ from arelle.ModelValue import qname
 from arelle.ModelDtsObject import ModelLink, ModelResource, ModelRelationship
 from arelle.ModelInstanceObject import ModelFact
 from arelle.ModelObjectFactory import parser
-from arelle.PrototypeDtsObject import LinkPrototype, LocPrototype, ArcPrototype
+from arelle.PrototypeDtsObject import LinkPrototype, LocPrototype, ArcPrototype, DocumentPrototype
 from arelle.PluginManager import pluginClassMethods
 creationSoftwareNames = None
 
@@ -542,6 +542,7 @@ class ModelDocument:
     
     def __init__(self, modelXbrl, type, uri, filepath, xmlDocument):
         self.modelXbrl = modelXbrl
+        self.skipDTS = modelXbrl.skipDTS
         self.type = type
         self.uri = uri
         self.filepath = filepath
@@ -558,6 +559,7 @@ class ModelDocument:
         self.referencedNamespaces = set()
         self.inDTS = False
         self.definesUTR = False
+
 
     def objectId(self,refId=""):
         return "_{0}_{1}".format(refId, self.objectIndex)
@@ -670,7 +672,7 @@ class ModelDocument:
                              'rt', encoding='utf-8') as f:
                     for key, pattern in json.load(f):
                         if key != "_description_":
-                            creationSoftwareNames.append( (key, re.compile(pattern)) )
+                            creationSoftwareNames.append( (key, re.compile(pattern, re.IGNORECASE)) )
             except Exception as ex:
                 self.modelXbrl.error("arelle:creationSoftwareNamesTable",
                                      _("Error loading creation software names table %(error)s"),
@@ -824,6 +826,8 @@ class ModelDocument:
 
     def loadSchemalocatedSchemas(self):
         # schemaLocation requires loaded schemas for validation
+        if self.skipDTS:
+            return
         for elt in self.schemaLocationElements:
             schemaLocation = elt.get("{http://www.w3.org/2001/XMLSchema-instance}schemaLocation")
             if schemaLocation:
@@ -954,12 +958,16 @@ class ModelDocument:
                 doc = self
             else:
                 # href discovery only can happein within a DTS
-                doc = load(self.modelXbrl, url, isDiscovered=not nonDTS, base=self.baseForElement(element), referringElement=element)
+                if self.skipDTS: # no discovery
+                    _newDoc = DocumentPrototype
+                else:
+                    _newDoc = load
+                doc = _newDoc(self.modelXbrl, url, isDiscovered=not nonDTS, base=self.baseForElement(element), referringElement=element)
                 if not nonDTS and doc is not None and doc not in self.referencesDocument:
                     self.referencesDocument[doc] = ModelDocumentReference("href", element)
                     if not doc.inDTS and doc.type > Type.UnknownTypes:    # non-XBRL document is not in DTS
                         doc.inDTS = True    # now known to be discovered
-                        if doc.type == Type.SCHEMA: # schema coming newly into DTS
+                        if doc.type == Type.SCHEMA and not self.skipDTS: # schema coming newly into DTS
                             doc.schemaDiscoverChildElements(doc.xmlRootElement)
             href = (element, doc, id if len(id) > 0 else None)
             if doc is not None:  # if none, an error would have already been reported, don't multiply report it
@@ -969,8 +977,9 @@ class ModelDocument:
     
     def instanceDiscover(self, xbrlElement):
         self.schemaLinkbaseRefsDiscover(xbrlElement)
-        self.linkbaseDiscover(xbrlElement,inInstance=True) # for role/arcroleRefs and footnoteLinks
-        XmlValidate.validate(self.modelXbrl, xbrlElement) # validate instance elements
+        if not self.skipDTS:
+            self.linkbaseDiscover(xbrlElement,inInstance=True) # for role/arcroleRefs and footnoteLinks
+        XmlValidate.validate(self.modelXbrl, xbrlElement) # validate instance elements (xValid may be UNKNOWN if skipDTS)
         self.instanceContentsDiscover(xbrlElement)
 
     def instanceContentsDiscover(self,xbrlElement):
@@ -999,7 +1008,8 @@ class ModelDocument:
                     elements=", ".join(sorted(set(str(f.prefixedName) for f in undefFacts))))
                     
     def contextDiscover(self, modelContext):
-        XmlValidate.validate(self.modelXbrl, modelContext) # validation may have not completed due to errors elsewhere
+        if not self.skipDTS:
+            XmlValidate.validate(self.modelXbrl, modelContext) # validation may have not completed due to errors elsewhere
         id = modelContext.id
         self.modelXbrl.contexts[id] = modelContext
         for container in (("{http://www.xbrl.org/2003/instance}segment", modelContext.segDimValues, modelContext.segNonDimValues),
@@ -1010,17 +1020,19 @@ class ModelDocument:
                     if isinstance(sElt,ModelObject):
                         if sElt.namespaceURI == XbrlConst.xbrldi and sElt.localName in ("explicitMember","typedMember"):
                             #XmlValidate.validate(self.modelXbrl, sElt)
-                            dimension = sElt.dimension
-                            if dimension is not None and dimension not in containerDimValues:
-                                containerDimValues[dimension] = sElt
-                                modelContext.qnameDims[sElt.dimensionQname] = sElt # both seg and scen
-                            else:
-                                modelContext.errorDimValues.append(sElt)
+                            modelContext.qnameDims[sElt.dimensionQname] = sElt # both seg and scen
+                            if not self.skipDTS:
+                                dimension = sElt.dimension
+                                if dimension is not None and dimension not in containerDimValues:
+                                    containerDimValues[dimension] = sElt
+                                else:
+                                    modelContext.errorDimValues.append(sElt)
                         else:
                             containerNonDimValues.append(sElt)
                             
     def unitDiscover(self, unitElement):
-        XmlValidate.validate(self.modelXbrl, unitElement) # validation may have not completed due to errors elsewhere
+        if not self.skipDTS:
+            XmlValidate.validate(self.modelXbrl, unitElement) # validation may have not completed due to errors elsewhere
         self.modelXbrl.units[unitElement.id] = unitElement
                 
     def inlineXbrlDiscover(self, htmlElement):

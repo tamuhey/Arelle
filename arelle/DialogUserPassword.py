@@ -11,7 +11,11 @@ except ImportError:
     from ttk import Frame, Button, Label, Entry
 from arelle.CntlrWinTooltip import ToolTip
 from arelle.UiUtil import checkbox, gridCombobox
-import re, sys
+import sys
+try:
+    import regex as re
+except ImportError:
+    import re
 
 '''
 caller checks accepted, if True, caller retrieves url
@@ -46,13 +50,14 @@ def askSmtp(parent, priorSmtpSettings):
     return None
 
 DBTypes = ("postgres", "mssqlSemantic", "mysqlSemantic", "orclSemantic",
-           "pgSemantic", "sqliteSemantic", "rexster", "rdfDB", "json")
+           "pgSemantic", "sqliteSemantic", "sqliteDpmDB", "rexster", "rdfDB", "json")
 DBDescriptions = ("XBRL-US Postgres SQL",
                   "Semantic MSSQL SQL",
                   "Semantic MySQL SQL",
                   "Semantic Oracle SQL",
                   "Semantic Postgres SQL",
                   "Semantic SQLite SQL",
+                  "DPM SQLite SQL",
                   "Rexter (Titan Cassandra)",
                   "RDF (Turtle, NanoSparqlServer)",
                   "JSON (JSON, MongoDB)")

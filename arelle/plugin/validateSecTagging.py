@@ -1,7 +1,10 @@
 from arelle import PluginManager
 from arelle.ModelValue import qname
 from arelle import XbrlConst
-import re
+try:
+    import regex as re
+except ImportError:
+    import re
 from collections import defaultdict
 
 def compile(list, traceRows):
@@ -17,6 +20,8 @@ def compile(list, traceRows):
                           re.IGNORECASE)
     
 def setup(val, traceRows=False):
+    if not val.validateLoggingSemantic:  # all checks herein are SEMANTIC
+        return
     # determiniation of two way concept label based on pattern
     # definitions (from documentation label) are used if present, otherwise standard label for these tests
     val.twoWayPriItemDefLabelPattern = compile([
@@ -141,6 +146,8 @@ def schedules(val, concept):
     
 
 def factCheck(val, fact):
+    if not val.validateLoggingSemantic:  # all checks herein are SEMANTIC
+        return
     concept = fact.concept
     context = fact.context
     stdLabel = concept.label(lang="en-US", fallbackToQname=False)
@@ -202,6 +209,8 @@ def factCheck(val, fact):
             value=fact.effectiveValue, elrTypes=schedules(val,fact))
 
 def final(val, conceptsUsed):
+    if not val.validateLoggingSemantic:  # all checks herein are SEMANTIC
+        return
     del val.twoWayPriItemDefLabelPattern
     del val.twoWayPriItemStdLabelPattern
     del val.oneWayPriItemStdLabelPattern

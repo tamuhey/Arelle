@@ -3,10 +3,10 @@ XbrlSemanticSqlDB.py implements an SQL database interface for Arelle, based
 on a concrete realization of the Abstract Model PWD 2.0 layer.  This is a semantic 
 representation of XBRL information. 
 
-This module may save directly to a Postgres, MySQL, MSSQL, or Oracle server.
+This module may save directly to a Postgres, MySQL, SQLite, MSSQL, or Oracle server.
 
 This module provides the execution context for saving a dts and instances in 
-XBRL JSON graph.  It may be loaded by Arelle's RSS feed, or by individual
+XBRL SQL database.  It may be loaded by Arelle's RSS feed, or by individual
 DTS and instances opened by interactive or command line/web service mode.
 
 Example dialog or command line parameters for operation:
@@ -45,7 +45,7 @@ from arelle.ModelDocument import ModelDocument
 from arelle.ModelValue import qname
 from arelle.ValidateXbrlCalcs import roundValue
 from arelle.XmlValidate import UNVALIDATED, VALID
-from arelle.XmlUtil import elementFragmentIdentifier
+from arelle.XmlUtil import elementChildSequence
 from arelle import XbrlConst
 from arelle.UrlUtil import ensureUrl
 from .SqlDb import XPDBException, isSqlConnection, SqlDbConnection
@@ -56,12 +56,15 @@ from collections import defaultdict
 
 def insertIntoDB(modelXbrl, 
                  user=None, password=None, host=None, port=None, database=None, timeout=None,
-                 product=None, rssItem=None):
+                 product=None, rssItem=None, **kwargs):
     xbrlDbConn = None
     try:
         xbrlDbConn = XbrlSqlDatabaseConnection(modelXbrl, user, password, host, port, database, timeout, product)
-        xbrlDbConn.verifyTables()
-        xbrlDbConn.insertXbrl(rssItem=rssItem)
+        if "rssObject" in kwargs: # initialize batch
+            xbrlDbConn.initializeBatch(kwargs["rssObject"])
+        else:
+            xbrlDbConn.verifyTables()
+            xbrlDbConn.insertXbrl(rssItem=rssItem)
         xbrlDbConn.close()
     except Exception as ex:
         if xbrlDbConn is not None:
@@ -70,7 +73,7 @@ def insertIntoDB(modelXbrl,
             except Exception as ex2:
                 pass
         raise # reraise original exception with original traceback    
-    
+        
 def isDBPort(host, port, timeout=10, product="postgres"):
     return isSqlConnection(host, port, timeout)
 
@@ -93,6 +96,7 @@ class XbrlSqlDatabaseConnection(SqlDbConnection):
         if missingTables == XBRLDBTABLES:
             self.create({"mssql": "xbrlSemanticMSSqlDB.sql",
                          "mysql": "xbrlSemanticMySqlDB.ddl",
+                         "sqlite": "xbrlSemanticSQLiteDB.ddl",
                          "orcl": "xbrlSemanticOracleDB.sql",
                          "postgres": "xbrlSemanticPostgresDB.ddl"}[self.product])
             missingTables = XBRLDBTABLES - self.tablesInDB()
@@ -151,13 +155,13 @@ class XbrlSqlDatabaseConnection(SqlDbConnection):
             self.insertResources()
             self.modelXbrl.profileStat(_("XbrlSqlDB: Resources insertion"), time.time() - startedAt)
             startedAt = time.time()
-            self.insertRelationships()
-            self.modelXbrl.profileStat(_("XbrlSqlDB: Relationships insertion"), time.time() - startedAt)
-            startedAt = time.time()
             # self.modelXbrl.profileStat(_("XbrlSqlDB: DTS insertion"), time.time() - startedAt)
             startedAt = time.time()
             self.insertDataPoints()
             self.modelXbrl.profileStat(_("XbrlSqlDB: instance insertion"), time.time() - startedAt)
+            startedAt = time.time()
+            self.insertRelationships() # must follow data points for footnote relationships
+            self.modelXbrl.profileStat(_("XbrlSqlDB: Relationships insertion"), time.time() - startedAt)
             startedAt = time.time()
             self.insertValidationResults()
             self.modelXbrl.profileStat(_("XbrlSqlDB: Validation results insertion"), time.time() - startedAt)
@@ -221,6 +225,16 @@ class XbrlSqlDatabaseConnection(SqlDbConnection):
                         break;
                 self.arcroleInInstance[arcrole] = inInstance
                 self.arcroleHasResource[arcrole] = hasResource
+                
+    def initializeBatch(self, rssObject):
+        results = self.execute("SELECT filing_number, accepted_timestamp FROM filing")
+        existingFilings = dict((filingNumber, timestamp) 
+                               for filingNumber, timestamp in results) # timestamp is a string
+        for rssItem in rssObject.rssItems:
+            if (rssItem.accessionNumber in existingFilings and
+                rssItem.acceptanceDatetime == existingFilings[rssItem.accessionNumber]):
+                rssItem.skipRssItem = True
+        
                                      
     def insertFiling(self, rssItem):
         self.showStatus("insert filing")
@@ -392,7 +406,7 @@ class XbrlSqlDatabaseConnection(SqlDbConnection):
                               ('document_url', 'document_type', 'namespace'), 
                               ('document_url',), 
                               set((ensureUrl(docUrl),
-                                   mdlDoc.type,
+                                   Type.typeName[mdlDoc.type],
                                    mdlDoc.targetNamespace) 
                                   for docUrl, mdlDoc in self.modelXbrl.urlDocs.items()
                                   if mdlDoc not in self.existingDocumentIds and 
@@ -462,11 +476,12 @@ class XbrlSqlDatabaseConnection(SqlDbConnection):
                 self.typeQnameId[qname(qn)] = typeId
         
         table = self.getTable('data_type', 'data_type_id', 
-                              ('document_id', 'xml_id',
+                              ('document_id', 'xml_id', 'xml_child_seq',
                                'qname', 'name', 'base_type', 'derived_from_type_id'), 
                               ('document_id', 'qname',), 
                               tuple((self.documentIds[modelType.modelDocument],
-                                     elementFragmentIdentifier(modelType),
+                                     modelType.id,
+                                     elementChildSequence(modelType),
                                      modelType.qname.clarkNotation,
                                      modelType.name,
                                      modelType.baseXsdType,
@@ -519,7 +534,8 @@ class XbrlSqlDatabaseConnection(SqlDbConnection):
                 niceType = niceType[:128]
             if concept.modelDocument in self.documentIds:
                 aspects.append((self.documentIds[concept.modelDocument],
-                                 elementFragmentIdentifier(concept),
+                                 concept.id,
+                                 elementChildSequence(concept),
                                  concept.qname.clarkNotation,
                                  concept.name,
                                  self.typeQnameId.get(concept.typeQname),
@@ -533,7 +549,7 @@ class XbrlSqlDatabaseConnection(SqlDbConnection):
                                  concept.isMonetary,
                                  concept.isTextBlock))
         table = self.getTable('aspect', 'aspect_id', 
-                              ('document_id', 'xml_id',
+                              ('document_id', 'xml_id', 'xml_child_seq',
                                'qname', 'name', 'datatype_id', 'base_type', 'substitution_group_aspect_id',  
                                'balance', 'period_type', 'abstract', 'nillable',
                                'is_numeric', 'is_monetary', 'is_text_block'), 
@@ -586,10 +602,11 @@ class XbrlSqlDatabaseConnection(SqlDbConnection):
                                  for arcroleType in arcroleTypes
                                  if arcroleType.modelDocument not in self.existingDocumentIds)
         table = self.getTable('arcrole_type', 'arcrole_type_id', 
-                              ('document_id', 'xml_id', 'arcrole_uri', 'cycles_allowed', 'definition'), 
+                              ('document_id', 'xml_id', 'xml_child_seq', 'arcrole_uri', 'cycles_allowed', 'definition'), 
                               ('document_id', 'arcrole_uri'), 
                               tuple((arcroleTypeIDs[0], # doc Id
-                                     elementFragmentIdentifier(arcroleType),
+                                     arcroleType.id,
+                                     elementChildSequence(arcroleType),
                                      arcroleType.arcroleURI,
                                      arcroleType.cyclesAllowed,
                                      arcroleType.definition)
@@ -638,10 +655,11 @@ class XbrlSqlDatabaseConnection(SqlDbConnection):
                               for roleType in roleTypes
                               if roleType.modelDocument not in self.existingDocumentIds)
         table = self.getTable('role_type', 'role_type_id', 
-                              ('document_id', 'xml_id', 'role_uri', 'definition'), 
+                              ('document_id', 'xml_id', 'xml_child_seq', 'role_uri', 'definition'), 
                               ('document_id', 'role_uri'), 
                               tuple((roleTypeIDs[0], # doc Id
-                                     elementFragmentIdentifier(roleType),
+                                     roleType.id,
+                                     elementChildSequence(roleType),
                                      roleTypeIDs[1], # uri Id
                                      roleType.definition) 
                                     for roleTypeIDs, roleType in roleTypesByIds.items()))
@@ -678,18 +696,19 @@ class XbrlSqlDatabaseConnection(SqlDbConnection):
                                for resource in (rel.fromModelObject, rel.toModelObject)
                                if isinstance(resource, ModelResource))
         table = self.getTable('resource', 'resource_id', 
-                              ('document_id', 'xml_id', 'qname', 'role', 'value', 'xml_lang'), 
-                              ('document_id', 'xml_id'), 
+                              ('document_id', 'xml_id', 'xml_child_seq', 'qname', 'role', 'value', 'xml_lang'), 
+                              ('document_id', 'xml_child_seq'), 
                               tuple((self.documentIds[resource.modelDocument],
-                                     elementFragmentIdentifier(resource),
+                                     resource.id,
+                                     elementChildSequence(resource),
                                      resource.qname.clarkNotation,
                                      resource.role,
                                      resource.textValue,
                                      resource.xmlLang)
                                     for resource in uniqueResources.values()),
                               checkIfExisting=True)
-        self.resourceId = dict(((docId, xml_id), id)
-                               for id, docId, xml_id in table)
+        self.resourceId = dict(((docId, xml_child_seq), id)
+                               for id, docId, xml_child_seq in table)
         uniqueResources.clear()
         
                 
@@ -700,7 +719,10 @@ class XbrlSqlDatabaseConnection(SqlDbConnection):
             return self.aspectTypeIds.get(modelObject.qname)
         elif isinstance(modelObject, ModelResource):
             return self.resourceId.get((self.documentIds[modelObject.modelDocument],
-                                        elementFragmentIdentifier(modelObject)))
+                                        elementChildSequence(modelObject)))
+        elif isinstance(modelObject, ModelFact):
+            return self.factDataPointId.get((self.documentIds[modelObject.modelDocument],
+                                             elementChildSequence(modelObject)))
         else:
             return None 
     
@@ -754,13 +776,14 @@ class XbrlSqlDatabaseConnection(SqlDbConnection):
                 return None     
         
         table = self.getTable('relationship', 'relationship_id', 
-                              ('document_id', 'xml_id', 
+                              ('document_id', 'xml_id', 'xml_child_seq', 
                                'relationship_set_id', 'reln_order', 
                                'from_id', 'to_id', 'calculation_weight', 
                                'tree_sequence', 'tree_depth', 'preferred_label_role'), 
-                              ('relationship_set_id', 'document_id', 'xml_id'), 
+                              ('relationship_set_id', 'document_id', 'xml_child_seq'), 
                               tuple((self.documentIds[rel.modelDocument],
-                                     elementFragmentIdentifier(rel.arcElement),
+                                     rel.id,
+                                     elementChildSequence(rel.arcElement),
                                      relSetId,
                                      self.dbNum(rel.order),
                                      self.modelObjectId(rel.fromModelObject),
@@ -771,14 +794,14 @@ class XbrlSqlDatabaseConnection(SqlDbConnection):
                                      rel.preferredLabel)
                                     for rel, sequence, depth, relSetId in dbRels
                                     if rel.fromModelObject is not None and rel.toModelObject is not None))
-        self.relationshipId = dict(((docId,xmlId), relationshipId)
-                                   for relationshipId, relSetId, docId, xmlId in table)
+        self.relationshipId = dict(((docId,xml_child_seq), relationshipId)
+                                   for relationshipId, relSetId, docId, xml_child_seq in table)
         table = self.getTable('root', None, 
                               ('relationship_set_id', 'relationship_id'), 
                               ('relationship_set_id', 'relationship_id'), 
                               tuple((relSetId,
                                      self.relationshipId[self.documentIds[rel.modelDocument],
-                                                         elementFragmentIdentifier(rel.arcElement)])
+                                                         elementChildSequence(rel.arcElement)])
                                     for rel, sequence, depth, relSetId in dbRels
                                     if depth == 1 and
                                        rel.fromModelObject is not None and rel.toModelObject is not None))
@@ -824,10 +847,11 @@ class XbrlSqlDatabaseConnection(SqlDbConnection):
         self.showStatus("insert data points")
         # units
         table = self.getTable('unit', 'unit_id', 
-                              ('report_id', 'xml_id', 'measures_hash'), 
+                              ('report_id', 'xml_id', 'xml_child_seq', 'measures_hash'), 
                               ('report_id', 'measures_hash'), 
                               tuple((reportId,
                                      unit.id,
+                                     elementChildSequence(unit),
                                      unit.md5hash)
                                     for unit in dict((unit.md5hash,unit) # deduplicate by md5hash
                                                      for unit in self.modelXbrl.units.values()).values()))
@@ -919,7 +943,8 @@ class XbrlSqlDatabaseConnection(SqlDbConnection):
                     documentId = self.documentIds[fact.modelDocument]
                     facts.append((reportId,
                                   documentId,
-                                  elementFragmentIdentifier(fact),
+                                  fact.id,
+                                  elementChildSequence(fact),
                                   fact.sourceline,
                                   parentDatapointId, # parent ID
                                   self.aspectQnameId.get(fact.qname),
@@ -940,22 +965,22 @@ class XbrlSqlDatabaseConnection(SqlDbConnection):
                                   fact.value
                                   ))
             table = self.getTable('data_point', 'datapoint_id', 
-                                  ('report_id', 'document_id', 'xml_id', 'source_line', 
+                                  ('report_id', 'document_id', 'xml_id', 'xml_child_seq', 'source_line', 
                                    'parent_datapoint_id',  # tuple
                                    'aspect_id',
-                                   'context_xml_id', 'entity_id', 'period_id', 'aspect_value_selections_id', 'unit_id',
+                                   'context_xml_id', 'entity_id', 'period_id', 'aspect_value_selection_id', 'unit_id',
                                    'is_nil', 'precision_value', 'decimals_value', 'effective_value', 'value'), 
-                                  ('document_id', 'xml_id'), 
+                                  ('document_id', 'xml_child_seq'), 
                                   facts)
-            xmlIdDataPointId = dict(((docId, xmlId), datapointId)
-                                    for datapointId, docId, xmlId in table)
+            xmlIdDataPointId = dict(((docId, xml_child_seq), datapointId)
+                                    for datapointId, docId, xml_child_seq in table)
             self.factDataPointId.update(xmlIdDataPointId)
             for fact in modelFacts:
                 if fact.isTuple:
                     try:
                         insertFactSet(fact.modelTupleFacts, 
                                       xmlIdDataPointId[(self.documentIds[fact.modelDocument],
-                                                        elementFragmentIdentifier(fact))])
+                                                        elementChildSequence(fact))])
                     except KeyError:
                         print ("\n\n*****no tuple datapoint {} ******\n\n".format(fact.qname))
                         self.modelXbrl.info("xpDB:warning",
@@ -974,7 +999,7 @@ class XbrlSqlDatabaseConnection(SqlDbConnection):
                                                               roleType.roleURI)],
                                             tableCode,
                                             self.factDataPointId[(self.documentIds[fact.modelDocument],
-                                                                  elementFragmentIdentifier(fact))]))
+                                                                  elementChildSequence(fact))]))
                 except KeyError:
                     # print ("missing table data points role or data point")
                     pass
@@ -1009,7 +1034,7 @@ class XbrlSqlDatabaseConnection(SqlDbConnection):
                 objectId = None
                 if isinstance(modelObject, ModelFact):
                     objectId = self.factDataPointId.get((self.documentIds.get(modelObject.modelDocument),
-                                                         elementFragmentIdentifier(modelObject)))
+                                                         elementChildSequence(modelObject)))
                 elif isinstance(modelObject, ModelRelationship):
                     objectId = self.relSetId.get((modelObject.linkrole,
                                                   modelObject.arcrole,
