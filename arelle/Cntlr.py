@@ -169,7 +169,7 @@ class Cntlr:
             self.isMSW = True
             if self.hasFileSystem and not configHomeDir:
                 tempDir = tempfile.gettempdir()
-                if tempDir.endswith('local\\temp'):
+                if tempDir.lower().endswith('local\\temp'):
                     impliedAppDir = tempDir[:-10] + 'local'
                 else:
                     impliedAppDir = tempDir
@@ -302,14 +302,15 @@ class Cntlr:
         else:
             self.logger = None
         if self.logger:
-            if logLevel and logLevel.upper() not in logging._levelNames.keys():
+            try:
+                self.logger.setLevel((logLevel or "debug").upper())
+            except ValueError:
+                loggingLevelNums = logging._levelNames if sys.version < '3.4' else logging._levelToName
                 self.addToLog(_("Unknown log level name: {0}, please choose from {1}").format(
                     logLevel, ', '.join(logging.getLevelName(l).lower()
-                                        for l in sorted([i for i in logging._levelNames.keys()
+                                        for l in sorted([i for i in logging.loggingLevelNums.keys()
                                                          if isinstance(i,_INT_TYPES) and i > 0]))),
                               level=logging.ERROR, messageCode="arelle:logLevel")
-            else:
-                self.logger.setLevel(logging.getLevelName((logLevel or "debug").upper()))
             self.logger.messageCodeFilter = None
             self.logger.messageLevelFilter = None
                 
@@ -575,14 +576,16 @@ class LogHandlerWithXml(logging.Handler):
         super(LogHandlerWithXml, self).__init__()
         
     def recordToXml(self, logRec):
-        def entityEncode(arg):  # be sure it's a string, vs int, etc, and encode &, <, ".
-            return str(arg).replace("&","&amp;").replace("<","&lt;").replace('"','&quot;')
+        def entityEncode(arg, truncateAt=32767):  # be sure it's a string, vs int, etc, and encode &, <, ".
+            s = str(arg)
+            s = s if len(s) <= truncateAt else s[:truncateAt] + '...'
+            return s.replace("&","&amp;").replace("<","&lt;").replace('"','&quot;')
         
         def propElts(properties, indent):
             nestedIndent = indent + ' '
             return indent.join('<property name="{0}" value="{1}"{2}>'.format(
                                     entityEncode(p[0]),
-                                    entityEncode(p[1]),
+                                    entityEncode(p[1], truncateAt=128),
                                     '/' if len(p) == 2 
                                     else '>' + nestedIndent + propElts(p[2],nestedIndent) + indent + '</property')
                                 for p in properties 
@@ -590,7 +593,7 @@ class LogHandlerWithXml(logging.Handler):
         
         msg = self.format(logRec)
         if logRec.args:
-            args = "".join([' {0}="{1}"'.format(n, entityEncode(v)) 
+            args = "".join([' {0}="{1}"'.format(n, entityEncode(v, truncateAt=128)) 
                             for n, v in logRec.args.items()])
         else:
             args = ""

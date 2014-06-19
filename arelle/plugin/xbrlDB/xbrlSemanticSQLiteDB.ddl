@@ -4,6 +4,8 @@
 -- Mark V copyright applies to this software, which is licensed according to the terms of Arelle(r).
 
 -- drop tables and sequences
+DROP TABLE IF EXISTS entity;
+DROP TABLE IF EXISTS former_entity;
 DROP TABLE IF EXISTS filing;
 DROP TABLE IF EXISTS report;
 DROP TABLE IF EXISTS document;
@@ -18,7 +20,7 @@ DROP TABLE IF EXISTS relationship_set;
 DROP TABLE IF EXISTS relationship;
 DROP TABLE IF EXISTS root;
 DROP TABLE IF EXISTS data_point;
-DROP TABLE IF EXISTS entity;
+DROP TABLE IF EXISTS entity_identifier;
 DROP TABLE IF EXISTS period;
 DROP TABLE IF EXISTS unit;
 DROP TABLE IF EXISTS unit_measure;
@@ -36,18 +38,55 @@ DROP TABLE IF EXISTS industry_structure;
 --
 -- note that dropping table also drops the indexes and triggers
 --
+CREATE TABLE entity (
+    entity_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    legal_entity_number TEXT, -- LEI
+    file_number TEXT, -- authority internal number
+    reference_number TEXT, -- external code, e.g. CIK
+    tax_number TEXT,
+    standard_industry_code INTEGER DEFAULT (-1) NOT NULL,
+    name TEXT,
+    legal_state TEXT,
+    phone TEXT,
+    phys_addr1 TEXT, -- physical (real) address
+    phys_addr2 TEXT,
+    phys_city TEXT,
+    phys_state TEXT,
+    phys_zip TEXT,
+    phys_country TEXT,
+    mail_addr1 TEXT, -- mailing (postal) address
+    mail_addr2 TEXT,
+    mail_city TEXT,
+    mail_state TEXT,
+    mail_zip TEXT,
+    mail_country TEXT,
+    fiscal_year_end TEXT,
+    filer_category TEXT,
+    public_float double precision,
+    trading_symbol TEXT
+);
+CREATE INDEX entity_index02 ON entity (file_number);
+CREATE INDEX entity_index03 ON entity (reference_number);
+CREATE INDEX entity_index04 ON entity (legal_entity_number);
+CREATE INDEX entity_index05 ON entity (legal_entity_number, file_number);
+
+CREATE TABLE former_entity (
+    entity_id INTEGER NOT NULL,
+    date_changed DATE,
+    former_name TEXT
+);
+CREATE INDEX former_entity_index02 ON former_entity (entity_id);
+
 CREATE TABLE filing (
     filing_id INTEGER PRIMARY KEY AUTOINCREMENT,
     filing_number TEXT NOT NULL,
-    reference_number TEXT,
     form_type TEXT,
+    entity_id INTEGER NOT NULL,
+    reference_number TEXT, -- external code, e.g. CIK
     accepted_timestamp DATE DEFAULT (datetime('now','localtime')),
     is_most_current BOOLEAN DEFAULT false NOT NULL,
     filing_date DATE NOT NULL,
-    entity_id INTEGER NOT NULL,
-    entity_name TEXT,
     creation_software TEXT,
-    standard_industry_code integer DEFAULT (-1) NOT NULL,
     authority_html_url TEXT,
     entry_url TEXT
 );
@@ -55,7 +94,11 @@ CREATE UNIQUE INDEX filing_index02 ON filing  (filing_number);
 
 CREATE TABLE report (
     report_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    filing_id INTEGER NOT NULL
+    filing_id INTEGER NOT NULL,
+    report_data_doc_id INTEGER,  -- instance or primary inline document
+    report_schema_doc_id INTEGER,  -- extension schema of the report (primary)
+    agency_schema_doc_id INTEGER,  -- agency schema (receiving authority)
+    standard_schema_doc_id INTEGER  -- e.g., IFRS, XBRL-US, or EDInet schema
 );
 CREATE INDEX report_index02 ON report(filing_id);
 
@@ -140,12 +183,14 @@ CREATE TABLE resource (
     resource_id INTEGER PRIMARY KEY AUTOINCREMENT,
     document_id INTEGER NOT NULL,
     xml_id TEXT,  -- xml id or element pointer (do we need this?)
+    xml_child_seq TEXT,
     qname TEXT NOT NULL,  -- clark notation qname (do we need this?)
     role TEXT NOT NULL,
     value TEXT,
     xml_lang TEXT
 );
-CREATE INDEX resource_index02 ON resource  (document_id, xml_id);
+CREATE INDEX resource_index02 ON resource  (resource_id);
+CREATE INDEX resource_index02 ON resource  (document_id, xml_child_seq);
 
 CREATE TABLE relationship_set (
     relationship_set_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -168,7 +213,8 @@ CREATE INDEX root_index01 ON root  (relationship_set_id);
 CREATE TABLE relationship (
     relationship_id INTEGER PRIMARY KEY AUTOINCREMENT,
     document_id INTEGER NOT NULL,
-    xml_id TEXT,  -- xml id or element pointer (do we need this?)
+    xml_id TEXT,
+    xml_child_seq TEXT,
     relationship_set_id INTEGER NOT NULL,
     reln_order double precision,
     from_id INTEGER,
@@ -180,13 +226,15 @@ CREATE TABLE relationship (
 );
 CREATE INDEX relationship_index02 ON relationship  (relationship_set_id); 
 CREATE INDEX relationship_index03 ON relationship  (relationship_set_id, tree_depth); 
-CREATE INDEX relationship_index04 ON relationship  (relationship_set_id, document_id, xml_id);
+CREATE INDEX relationship_index04 ON relationship  (relationship_set_id, document_id, xml_child_seq);
+CREATE INDEX relationship_index02 ON relationship  (from_id); 
 
 CREATE TABLE data_point (
     datapoint_id INTEGER PRIMARY KEY AUTOINCREMENT,
     report_id INTEGER,
     document_id INTEGER NOT NULL,  -- multiple inline documents are sources of data points
-    xml_id TEXT,  -- xml id or element pointer (do we need this?)
+    xml_id TEXT,
+    xml_child_seq TEXT,
     source_line integer,
     parent_datapoint_id INTEGER, -- id of tuple parent
     aspect_id INTEGER NOT NULL,
@@ -201,17 +249,17 @@ CREATE TABLE data_point (
     effective_value double precision,
     value TEXT
 );
-CREATE INDEX data_point_index02 ON data_point  (document_id, xml_id);
+CREATE INDEX data_point_index02 ON data_point  (document_id, xml_child_seq);
 CREATE INDEX data_point_index03 ON data_point  (report_id);
 CREATE INDEX data_point_index04 ON data_point  (aspect_id);
 
-CREATE TABLE entity (
-    entity_id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE entity_identifier (
+    entity_identifier_id INTEGER PRIMARY KEY AUTOINCREMENT,
     report_id INTEGER,
-    entity_scheme TEXT NOT NULL,
-    entity_identifier TEXT NOT NULL
+    scheme TEXT NOT NULL,
+    identifier TEXT NOT NULL
 );
-CREATE INDEX entity_index02 ON entity  (report_id, entity_identifier);
+CREATE INDEX entity_identifier_index02 ON entity_identifier (report_id, identifier);
 
 CREATE TABLE period (
     period_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -265,6 +313,7 @@ CREATE TABLE table_data_points(
 );
 CREATE INDEX table_data_points_index01 ON table_data_points  (report_id);
 CREATE INDEX table_data_points_index02 ON table_data_points  (table_code);
+CREATE INDEX table_data_points_index03 ON table_data_points  (datapoint_id);
 
 CREATE TABLE message (
     message_id INTEGER PRIMARY KEY AUTOINCREMENT,
