@@ -242,7 +242,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                                     "scenario": ("{http://www.xbrl.org/2003/instance}scenario",),
                                     "either": ("{http://www.xbrl.org/2003/instance}segment","{http://www.xbrl.org/2003/instance}scenario"),
                                     "both": ("{http://www.xbrl.org/2003/instance}segment","{http://www.xbrl.org/2003/instance}scenario"),
-                                    "none": [],
+                                    "none": [], None:[]
                                     }[disclosureSystem.contextElement]:
                     for segScenElt in context.iterdescendants(contextName):
                         if isinstance(segScenElt,ModelObject):
@@ -450,6 +450,7 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
     
             #6.5.9, .10 start-end durations
             if disclosureSystem.GFM or \
+               disclosureSystemVersion[0] >= 27 or \
                documentType in {
                         '20-F', '40-F', '10-Q', '10-QT', '10-K', '10-KT', '10', 'N-CSR', 'N-CSRS', 'N-Q',
                         '20-F/A', '40-F/A', '10-Q/A', '10-QT/A', '10-K/A', '10-KT/A', '10/A', 'N-CSR/A', 'N-CSRS/A', 'N-Q/A'}:
@@ -486,12 +487,13 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                     end = cntx.endDatetime
                     if end is not None:
                         if cntx.isStartEndPeriod:
+                            thisStart = cntx.startDatetime
                             for otherStart, otherCntxs in durationCntxStartDatetimes.items():
                                 duration = end - otherStart
                                 if duration > datetime.timedelta(0) and duration <= datetime.timedelta(1):
                                     if disclosureSystemVersion[0] < 27:
                                         probCntxs |= otherCntxs - {cntx}
-                                    else:
+                                    elif thisStart is not None and end - thisStart > datetime.timedelta(1):
                                         for otherCntx in otherCntxs:
                                             if otherCntx is not cntx and otherCntx.endDatetime != end and otherStart != cntx.startDatetime:
                                                 probCntxs.add(otherCntx)
@@ -587,10 +589,11 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                     if f1.isNumeric and f1.decimals and f1.decimals != "INF" and not f1.isNil and getattr(f1,"xValid", 0) == 4:
                         try:
                             insignificance = insignificantDigits(f1.xValue, decimals=f1.decimals)
-                            if insignificance: 
+                            if insignificance: # if not None, returns (truncatedDigits, insiginficantDigits)
                                 modelXbrl.error(("EFM.6.05.37", "GFM.1.02.26"),
-                                    _("Fact %(fact)s of context %(contextID)s decimals %(decimals)s value %(value)s has nonzero digits in insignificant portion %(value2)s."),
-                                    modelObject=f1, fact=f1.qname, contextID=f1.contextID, decimals=f1.decimals, value=f1.xValue, value2=insignificance)
+                                    _("Fact %(fact)s of context %(contextID)s decimals %(decimals)s value %(value)s has nonzero digits in insignificant portion %(insignificantDigits)s."),
+                                    modelObject=f1, fact=f1.qname, contextID=f1.contextID, decimals=f1.decimals, 
+                                    value=f1.xValue, truncatedDigits=insignificance[0], insignificantDigits=insignificance[1])
                         except (ValueError,TypeError):
                             modelXbrl.error(("EFM.6.05.37", "GFM.1.02.26"),
                                 _("Fact %(fact)s of context %(contextID)s decimals %(decimals)s value %(value)s causes Value Error exception."),
@@ -640,7 +643,8 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                 ValidateFilingText.validateTextBlockFacts(modelXbrl)
             
                 if amendmentFlag is None:
-                    modelXbrl.error(("EFM.6.05.20.missingAmendmentFlag", "GFM.3.02.01"),
+                    modelXbrl.log("WARNING" if validateEFMpragmatic else "ERROR",
+                                  ("EFM.6.05.20.missingAmendmentFlag", "GFM.3.02.01"),
                         _("%(elementName)s is not found in the default context"),
                         modelXbrl=modelXbrl, elementName=disclosureSystem.deiAmendmentFlagElement)
         
@@ -659,12 +663,14 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
     
             if self.validateEFM:
                 if amendmentFlag == "true" and amendmentDescription is None:
-                    modelXbrl.error("EFM.6.05.20.missingAmendmentDescription",
+                    modelXbrl.log("WARNING" if validateEFMpragmatic else "ERROR",
+                                  "EFM.6.05.20.missingAmendmentDescription",
                         _("AmendmentFlag is true in context %(contextID)s so AmendmentDescription is also required"),
                         modelObject=amendmentFlagFact, contextID=amendmentFlagFact.contextID if amendmentFlagFact is not None else "unknown")
         
                 if amendmentDescription is not None and amendmentFlag != "true":
-                    modelXbrl.error("EFM.6.05.20.extraneous",
+                    modelXbrl.log("WARNING" if validateEFMpragmatic else "ERROR",
+                                  "EFM.6.05.20.extraneous",
                         _("AmendmentDescription can not be provided when AmendmentFlag is not true in context %(contextID)s"),
                         modelObject=amendmentDescriptionFact, contextID=amendmentDescriptionFact.contextID)
                     

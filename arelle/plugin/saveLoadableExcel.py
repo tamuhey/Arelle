@@ -15,11 +15,12 @@ headerWidths = {
         "prefix": 20,
         "name": 36,
         "type": 24,
-        "abstract": 10,
+        "abstract": 6,
+        "nillable": 6,
         "substitutionGroup": 30,
-        "periodType": 10,
-        "balance": 10,
-        "depth": 6,
+        "periodType": 8,
+        "balance": 8,
+        "depth": 5,
         "preferredLabel": 16,
         "calculationParent": 20,
         "calculationWeight": 12
@@ -40,6 +41,7 @@ headersStyles = (
         ("periodType", "periodType"),
         ("balance", "balance"),
         ("abstract", "abstract"),
+        ("nillable", "nillable"),
         ("depth", "depth"),
         ("preferred label", "preferredLabel"),
         ("calculation parent", "calculationParent"), # qname
@@ -47,7 +49,9 @@ headersStyles = (
         )),
     (r"http://[^/]+/us-gaap/", "font: name Calibri, height 180; ", (
         ("label", "label", XbrlConst.standardLabel, "en-US", "indented"),
+        ("label, standard", "label", XbrlConst.standardLabel, "en-US", "overridePreferred"),
         ("label, terse", "label", XbrlConst.terseLabel, "en-US"),
+        ("label, verbose", "label", XbrlConst.verboseLabel, "en-US"),
         ("prefix", "prefix"),
         ("name", "name"),
         ("type", "type"),
@@ -55,6 +59,7 @@ headersStyles = (
         ("periodType", "periodType"),
         ("balance", "balance"),
         ("abstract", "abstract"),
+        ("nillable", "nillable"),
         ("depth", "depth"),
         ("preferred label", "preferredLabel"),
         ("calculation parent", "calculationParent"), # qname
@@ -70,6 +75,7 @@ headersStyles = (
         ("periodType", "periodType"),
         ("balance", "balance"),
         ("abstract", "abstract"),
+        ("nillable", "nillable"),
         ("depth", "depth"),
         ("preferred label", "preferredLabel"),
         ("calculation parent", "calculationParent"), # qname
@@ -220,6 +226,9 @@ def saveLoadableExcel(dts, excelFile):
                     value = str(concept.substitutionGroupQname)
                 elif colType == "abstract":
                     value = "true" if concept.isAbstract else "false"
+                elif colType == "nillable":
+                    if concept.isNillable:
+                        value = "true"
                 elif colType == "periodType":
                     value = concept.periodType
                 elif colType == "balance":
@@ -227,9 +236,23 @@ def saveLoadableExcel(dts, excelFile):
                 elif colType == "label":
                     role = hdr[2]
                     lang = hdr[3]
-                    value = concept.label(preferredLabel if role == XbrlConst.standardLabel else role,
-                                          linkroleHint=preRelSet.linkrole,
-                                          lang=lang)
+                    if role == XbrlConst.standardLabel:
+                        if "indented" in hdr:
+                            roleUri = preferredLabel
+                        elif "overridePreferred" in hdr:
+                            if preferredLabel and preferredLabel != XbrlConst.standardLabel:
+                                roleUri = role
+                            else:
+                                roleUri = "**no value**" # skip putting a value in this column
+                        else:
+                            roleUri = role
+                    else:
+                        roleUri = role
+                    if roleUri != "**no value**":
+                        value = concept.label(roleUri,
+                                              linkroleHint=preRelSet.linkrole,
+                                              lang=lang,
+                                              fallbackToQname=(role == XbrlConst.standardLabel))
                 elif colType == "preferredLabel" and preferredLabel:
                     if preferredLabel.startswith("http://www.xbrl.org/2003/role/"):
                         value = os.path.basename(preferredLabel)

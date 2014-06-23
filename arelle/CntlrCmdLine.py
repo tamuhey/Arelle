@@ -86,7 +86,7 @@ def parseAndRun(args):
                              "file type.  If an XBRL file, it is validated "
                              "according to XBRL validation 2.1, calculation linkbase validation "
                              "if either --calcDecimals or --calcPrecision are specified, and "
-                             "SEC Edgar Filing Manual (if --efm selected) or Global Filer Manual "
+                             "SEC EDGAR Filing Manual (if --efm selected) or Global Filer Manual "
                              "disclosure system validation (if --gfm=XXX selected). "
                              "If a test suite or testcase, the test case variations "
                              "are individually so validated. "
@@ -300,7 +300,9 @@ def parseAndRun(args):
                 cmd = pluginCmd.strip()
                 if cmd not in ("show", "temp") and len(cmd) > 0 and cmd[0] not in ('-', '~', '+'):
                     moduleInfo = PluginManager.addPluginModule(cmd)
-                    PluginManager.reset()
+                    if moduleInfo:
+                        cntlr.preloadedPlugins[cmd] = moduleInfo
+                        PluginManager.reset()
             break
     # add plug-in options
     for optionsExtender in pluginClassMethods("CntlrCmdLine.Options"):
@@ -405,6 +407,7 @@ class CntlrCmdLine(Cntlr.Cntlr):
 
     def __init__(self, logFileName=None):
         super(CntlrCmdLine, self).__init__(hasGui=False)
+        self.preloadedPlugins =  {}
         
     def run(self, options, sourceZipStream=None):
         """Process command line arguments or web service request, such as to load and validate an XBRL document, or start web server.
@@ -417,7 +420,6 @@ class CntlrCmdLine(Cntlr.Cntlr):
         """
         
         if options.statusPipe:
-            print("statusPipe=" + options.statusPipe + "\n", file=sys.stderr)
             try:
                 global win32file
                 import win32file, pywintypes
@@ -491,11 +493,15 @@ class CntlrCmdLine(Cntlr.Cntlr):
                         self.addToLog(_("Unable to delete plug-in."), messageCode="info", file=cmd[1:])
                 else: # assume it is a module or package (may also have been loaded before for option parsing)
                     savePluginChanges = False
-                    moduleInfo = PluginManager.addPluginModule(cmd)
-                    if moduleInfo:
+                    if cmd in self.preloadedPlugins:
+                        moduleInfo =  self.preloadedPlugins[cmd] # already loaded, add activation message to log below
+                    else:
+                        moduleInfo = PluginManager.addPluginModule(cmd)
+                        if moduleInfo:
+                            resetPlugins = True
+                    if moduleInfo: 
                         self.addToLog(_("Activation of plug-in {0} successful.").format(moduleInfo.get("name")), 
                                       messageCode="info", file=moduleInfo.get("moduleURL"))
-                        resetPlugins = True
                     else:
                         self.addToLog(_("Unable to load {0} as a plug-in or {0} is not recognized as a command. ").format(cmd), messageCode="info", file=cmd)
                 if resetPlugins:

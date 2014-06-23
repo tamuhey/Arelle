@@ -117,11 +117,23 @@ def validate(modelXbrl, elt, recurse=True, attrQname=None, ixFacts=False):
         else:
             baseXsdType = None
             type = None
-            isNillable = False
-        isNil = isNillable and elt.get("{http://www.w3.org/2001/XMLSchema-instance}nil") == "true"
+            isNillable = True # allow nil if no schema definition
+        isNil = elt.get("{http://www.w3.org/2001/XMLSchema-instance}nil") in ("true", "1")
         if attrQname is None:
+            if isNil and not isNillable:
+                if ModelInlineValueObject is not None and isinstance(elt, ModelInlineValueObject):
+                    errElt = "{0} fact {1}".format(elt.elementQname, elt.qname)
+                else:
+                    errElt = elt.elementQname
+                modelXbrl.error("xmlValidation:nilNonNillableElement",
+                    _("Element %(element)s fact %(fact)s type %(typeName)s is nil but element has not been defined nillable"),
+                    modelObject=elt, element=errElt, fact=elt.qname, transform=elt.format,
+                    typeName=modelConcept.baseXsdType if modelConcept is not None else "unknown",
+                    value=XmlUtil.innerText(elt, ixExclude=True))
             try:
-                if baseXsdType == "noContent":
+                if isNil:
+                    text = ""
+                elif baseXsdType == "noContent":
                     text = elt.textValue # no descendant text nodes
                 else:
                     text = elt.stringValue # include descendant text nodes
@@ -332,15 +344,15 @@ def validateValue(modelXbrl, elt, attrTag, baseXsdType, value, isNillable=False,
                     xValue = anyURI(UrlUtil.anyUriQuoteForPSVI(value))
                     sValue = value
                 elif baseXsdType in ("decimal", "float", "double"):
-                    sValue = float(value) # s-value uses Number (float) representation, tested before decimal is tested
                     if baseXsdType == "decimal":
                         if decimalPattern.match(value) is None:
                             raise ValueError("lexical pattern mismatch")
                         xValue = Decimal(value)
+                        sValue = float(value) # s-value uses Number (float) representation
                     else:
                         if floatPattern.match(value) is None:
                             raise ValueError("lexical pattern mismatch")
-                        xValue = sValue
+                        xValue = sValue = float(value)
                     if facets:
                         if "totalDigits" in facets and len(value.replace(".","")) > facets["totalDigits"]:
                             raise ValueError("totalDigits facet {0}".format(facets["totalDigits"]))
@@ -470,7 +482,7 @@ def validateValue(modelXbrl, elt, attrTag, baseXsdType, value, isNillable=False,
                     element=errElt,
                     attribute=XmlUtil.clarkNotationToPrefixedName(elt,attrTag,isAttribute=True),
                     typeName=baseXsdType,
-                    value=value,
+                    value=value if len(value) < 31 else value[:30] + '...',
                     error=err)
             else:
                 modelXbrl.error("xmlSchema:valueError",
@@ -478,7 +490,7 @@ def validateValue(modelXbrl, elt, attrTag, baseXsdType, value, isNillable=False,
                     modelObject=elt,
                     element=errElt,
                     typeName=baseXsdType,
-                    value=value,
+                    value=value if len(value) < 31 else value[:30] + '...',
                     error=err)
             xValue = None
             sValue = value
