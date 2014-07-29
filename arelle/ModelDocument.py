@@ -567,7 +567,15 @@ class ModelDocument:
     def objectId(self,refId=""):
         return "_{0}_{1}".format(refId, self.objectIndex)
     
-    
+    # qname of root element of the document so modelDocument can be treated uniformly as modelObject
+    @property
+    def qname(self):
+        try:
+            return self._xmlRootElementQname
+        except AttributeError:
+            self._xmlRootElementQname = qname(self.xmlRootElement)
+            return self._xmlRootElementQname
+
     def relativeUri(self, uri): # return uri relative to this modelDocument uri
         return UrlUtil.relativeUri(self.uri, uri)
         
@@ -764,7 +772,7 @@ class ModelDocument:
                 if self.modelXbrl.modelManager.validateDisclosureSystem:
                     self.modelXbrl.error(("EFM.6.03.11", "GFM.1.1.7", "EBA.2.1"),
                         _("Prohibited base attribute: %(attribute)s"),
-                        modelObejct=element, attribute=baseAttr, element=element.qname)
+                        modelObject=element, attribute=baseAttr, element=element.qname)
                 else:
                     if baseAttr.startswith("/"):
                         base = baseAttr
