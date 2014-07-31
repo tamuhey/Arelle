@@ -952,7 +952,7 @@ class ModelXbrl:
                                 ref["href"] = file + "#" + XmlUtil.elementFragmentIdentifier(arg)
                                 ref["sourceLine"] = arg.sourceline
                                 ref["objectId"] = arg.objectId()
-                                if logRefObjectProperties:
+                                if self.logRefObjectProperties:
                                     try:
                                         ref["properties"] = propValues(arg.propertyView)
                                     except AttributeError:
