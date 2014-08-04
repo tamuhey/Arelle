@@ -95,7 +95,7 @@ def loadEntityInformation(dts, rssItem):
                 try:
                     filePath = dts.modelManager.cntlr.webCache.getfilename(normalizedUrl)
                     if filePath:
-                        with open(filePath) as fh:
+                        with open(filePath, encoding='utf-8') as fh:
                             txtSgml = fh.read()
                         # remove from cache, very large file
                         os.remove(filePath)
@@ -139,8 +139,8 @@ def loadEntityInformation(dts, rssItem):
                         if factName in ("EntityPublicFloat",):
                             entityInformation[entityField] = roundValue(fact.value, fact.precision, fact.decimals) if fact.isNumeric and not fact.isNil else None
                         else:
-                            entityInformation[entityField] = fact.value
+                            entityInformation[entityField] = fact.value.strip() # may have white space
                         break
             except IndexError:
                 pass
-        return entityInformation
+    return entityInformation
