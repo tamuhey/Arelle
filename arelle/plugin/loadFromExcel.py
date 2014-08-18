@@ -421,11 +421,11 @@ def loadFromExcel(cntlr, excelFile):
     # label linkbase
     for lang, filename in labelLinkbases:
         lbDoc = ModelDocument.create(dts, ModelDocument.Type.LINKBASE, filename, base="", initialXml="""
-        <link:linkbase 
+        <linkbase 
+            xmlns="http://www.xbrl.org/2003/linkbase" 
             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
             xsi:schemaLocation="http://www.xbrl.org/2003/linkbase 
             http://www.xbrl.org/2003/xbrl-linkbase-2003-12-31.xsd" 
-            xmlns:link="http://www.xbrl.org/2003/linkbase" 
             xmlns:xlink="http://www.w3.org/1999/xlink" 
             xmlns:xbrli="http://www.xbrl.org/2003/instance"/>
         """)
@@ -464,9 +464,12 @@ def loadFromExcel(cntlr, excelFile):
                                              ("{http://www.w3.org/1999/xlink}role", role),
                                              ("{http://www.w3.org/XML/1998/namespace}lang", lang)),
                                  text=text)
-                if role and role in dts.roleTypes:
-                    roleType = dts.roleTypes[role][0]
-                    roleRefs.add(("roleRef", role, roleType.modelDocument.uri + "#" + roleType.id))
+                if role:
+                    if role in dts.roleTypes:
+                        roleType = dts.roleTypes[role][0]
+                        roleRefs.add(("roleRef", role, roleType.modelDocument.uri + "#" + roleType.id))
+                    elif role.startswith("http://www.xbrl.org/2009/role/negated"):
+                        roleRefs.add(("roleRef", role, "http://www.xbrl.org/lrr/role/negated-2009-12-16.xsd#" + role.rpartition("/")[2]))
         # add arcrole references
         for roleref, roleURI, href in roleRefs:
             XmlUtil.addChild(lbElt,
@@ -572,11 +575,11 @@ def loadFromExcel(cntlr, excelFile):
                 if lbType == lbRefType:
                     # output presentation linkbase
                     lbDoc = ModelDocument.create(dts, ModelDocument.Type.LINKBASE, filename, base='', initialXml="""
-                    <link:linkbase 
+                    <linkbase 
+                        xmlns="http://www.xbrl.org/2003/linkbase" 
                         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
                         xsi:schemaLocation="http://www.xbrl.org/2003/linkbase 
                         http://www.xbrl.org/2003/xbrl-linkbase-2003-12-31.xsd" 
-                        xmlns:link="http://www.xbrl.org/2003/linkbase" 
                         xmlns:xlink="http://www.w3.org/1999/xlink" 
                         xmlns:xbrli="http://www.xbrl.org/2003/instance"/>
                     """)
