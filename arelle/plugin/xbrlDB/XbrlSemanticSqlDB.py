@@ -134,7 +134,8 @@ class XbrlSqlDatabaseConnection(SqlDbConnection):
                         
             # at this point we determine what's in the database and provide new tables
             # requires locking most of the table structure
-            self.lockTables(('entity', 'filing', 'report', 'document', 'referenced_documents'))
+            self.lockTables(('entity', 'filing', 'report', 'document', 'referenced_documents'),
+                            isSessionTransaction=True) # lock for whole transaction
             
             # find pre-existing documents in server database
             self.identifyPreexistingDocuments()
@@ -249,6 +250,7 @@ class XbrlSqlDatabaseConnection(SqlDbConnection):
             return None
         self.showStatus("insert entity")
         LEI = None
+        entity_comparator = ('legal_entity_number', 'file_number') if LEI else ('file_number',)
         table = self.getTable('entity', 'entity_id', 
                               ('legal_entity_number',
                                'file_number',
@@ -264,7 +266,7 @@ class XbrlSqlDatabaseConnection(SqlDbConnection):
                                'filer_category',
                                'public_float',
                                'trading_symbol'), 
-                              ('legal_entity_number', 'file_number'), 
+                              entity_comparator, # cannot compare None = None if LEI is absent, always False
                               ((LEI, 
                                 rssItemGet("fileNumber") or entityInfo.get("file-number")  or str(int(time.time())),
                                 rssItemGet("cikNumber") or entityInfo.get("cik"),
@@ -292,10 +294,16 @@ class XbrlSqlDatabaseConnection(SqlDbConnection):
                                 ),),
                               checkIfExisting=True,
                               returnExistenceStatus=True)
-        for id, _LEI, filing_number, existenceStatus in table:
-            self.entityId = id
-            self.entityPreviouslyInDB = existenceStatus
-            break
+        if LEI:
+            for id, _LEI, filing_number, existenceStatus in table:
+                self.entityId = id
+                self.entityPreviouslyInDB = existenceStatus
+                break
+        else:
+            for id, filing_number, existenceStatus in table:
+                self.entityId = id
+                self.entityPreviouslyInDB = existenceStatus
+                break
         if any ('former-conformed-name' in key for key in entityInfo.keys()):
             self.getTable('former_entity', None, 
                           ('entity_id', 'former_name', 'date_changed'),
@@ -317,9 +325,9 @@ class XbrlSqlDatabaseConnection(SqlDbConnection):
                                 rssItemGet("formType") or entityInfo.get("form-type"),
                                 self.entityId,
                                 rssItemGet("cikNumber") or entityInfo.get("cik"),
-                                rssItemGet("acceptanceDatetime") or entityInfo.get("acceptance-datetime"),
+                                rssItemGet("acceptanceDatetime") or entityInfo.get("acceptance-datetime") or now,
                                 True,
-                                rssItemGet("filingDate") or entityInfo.get("filing-date") or datetime.datetime.min,  # NOT NULL
+                                rssItemGet("filingDate") or entityInfo.get("filing-date") or now,  # NOT NULL
                                 self.modelXbrl.modelDocument.creationSoftware,
                                 rssItemGet("htmlUrl") or entityInfo.get("primary-document-url"),
                                 rssItemGet("url") or entityInfo.get("instance-url")
@@ -893,6 +901,9 @@ class XbrlSqlDatabaseConnection(SqlDbConnection):
         if self.filingPreviouslyInDB:
             self.showStatus("deleting prior data points of this report")
             # remove prior facts
+            self.lockTables(("data_point", "entity_identifier", "period", "aspect_value_selection",
+                             "aspect_value_selection_set", "unit_measure", "unit",
+                             "table_data_points"))
             self.execute("DELETE FROM {0} WHERE {0}.report_id = {1}"
                          .format( self.dbTableName("data_point"), reportId), 
                          close=False, fetch=False)
@@ -986,6 +997,7 @@ class XbrlSqlDatabaseConnection(SqlDbConnection):
         aspectValueSelections = set(aspectValueSelectionSet
                                     for cntx, aspectValueSelectionSet in cntxAspectValueSelectionSet.items()
                                     if aspectValueSelectionSet)
+        self.lockTables(("aspect_value_selection_set",))
         self.execute("DELETE FROM {0} WHERE report_id = {1}"
                      .format(self.dbTableName("aspect_value_selection_set"), reportId), 
                      close=False, fetch=False)
@@ -1063,7 +1075,6 @@ class XbrlSqlDatabaseConnection(SqlDbConnection):
                                       xmlIdDataPointId[(self.documentIds[fact.modelDocument],
                                                         elementChildSequence(fact))])
                     except KeyError:
-                        print ("\n\n*****no tuple datapoint {} ******\n\n".format(fact.qname))
                         self.modelXbrl.info("xpDB:warning",
                                             _("Loading XBRL DB: tuple's datapoint not found: %(tuple)s"),
                                             modelObject=fact, tuple=fact.qname)
@@ -1095,6 +1106,7 @@ class XbrlSqlDatabaseConnection(SqlDbConnection):
         if self.filingPreviouslyInDB:
             self.showStatus("deleting prior messages of this report")
             # remove prior messages for this report
+            self.lockTables(("message", "message_reference"))
             self.execute("DELETE from {0} "
                          "USING {1} "
                          "WHERE {1}.report_id = {2} AND {1}.message_id = {0}.message_id"

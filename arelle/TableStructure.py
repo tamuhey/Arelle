@@ -183,7 +183,7 @@ def evaluateTableIndex(modelXbrl):
         firstDocumentLinkroleURI = None
         sortedRoleTypes = sorted(definitionElrs.items(), key=lambda item: item[0])
         for roleDefinition, roleType in sortedRoleTypes:
-            match = roleDefinitionPattern.match(roleDefinition)
+            match = roleDefinitionPattern.match(roleDefinition) if roleDefinition else None
             if not match: 
                 roleType._tableIndex = (UNCATEG, roleType.roleURI)
                 continue
@@ -245,13 +245,25 @@ def evaluateTableIndex(modelXbrl):
             if "-Q" in fact.xValue:
                 # need quarterly and yr to date durations
                 endDatetime = fact.context.endDatetime
+                # if within 2 days of end of month use last day of month
+                endDatetimeMonth = endDatetime.month
+                if (endDatetime + timedelta(2)).month != endDatetimeMonth:
+                    # near end of month
+                    endOfMonth = True
+                    while endDatetime.month == endDatetimeMonth:
+                        endDatetime += timedelta(1) # go forward to next month
+                else:
+                    endOfMonth = False
                 startYr = endDatetime.year
                 startMo = endDatetime.month - 3
                 if startMo < 0:
                     startMo += 12
                     startYr -= 1
-                reportingPeriods.add((datetime(startYr, startMo, endDatetime.day, endDatetime.hour, endDatetime.minute, endDatetime.second),
-                                      endDatetime))
+                startDatetime = datetime(startYr, startMo, endDatetime.day, endDatetime.hour, endDatetime.minute, endDatetime.second)
+                if endOfMonth:
+                    startDatetime -= timedelta(1)
+                    endDatetime -= timedelta(1)
+                reportingPeriods.add((startDatetime, endDatetime))
                 duration = 91
         # find preceding compatible default context periods
         while (nextEnd is not None):
@@ -271,8 +283,6 @@ def evaluateTableIndex(modelXbrl):
         stmtReportingPeriods = set(reportingPeriods)       
 
         for roleDefinition, roleType in reversed(sortedRoleTypes):
-            if roleType.definition.startswith('0025'):
-                pass
             # find defined non-default axes in pre hierarchy for table
             tableFacts = set()
             tableGroup = roleType._tableIndex[0]
