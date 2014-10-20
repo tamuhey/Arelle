@@ -925,6 +925,12 @@ class ModelXbrl:
                             ref["href"] = file + "#" + XmlUtil.elementFragmentIdentifier(_arg)
                             ref["sourceLine"] = _arg.sourceline
                             ref["objectId"] = _arg.objectId()
+                            if self.logRefHasPluginAttrs:
+                                refAttributes = {}
+                                for pluginXbrlMethod in pluginClassMethods("Logging.Ref.Attributes"):
+                                    pluginXbrlMethod(arg, refAttributes)
+                                if refAttributes:
+                                    ref["customAttributes"] = refAttributes
                             if self.logRefObjectProperties:
                                 try:
                                     ref["properties"] = propValues(arg.propertyView)
