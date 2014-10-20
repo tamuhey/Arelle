@@ -925,12 +925,6 @@ class ModelXbrl:
                             ref["href"] = file + "#" + XmlUtil.elementFragmentIdentifier(_arg)
                             ref["sourceLine"] = _arg.sourceline
                             ref["objectId"] = _arg.objectId()
-                            if self.logRefHasPluginAttrs:
-                                refAttributes = {}
-                                for pluginXbrlMethod in pluginClassMethods("Logging.Ref.Attributes"):
-                                    pluginXbrlMethod(arg, refAttributes)
-                                if refAttributes:
-                                    ref["customAttributes"] = refAttributes
                             if self.logRefObjectProperties:
                                 try:
                                     ref["properties"] = propValues(arg.propertyView)
@@ -939,7 +933,7 @@ class ModelXbrl:
                             if self.logRefHasPluginProperties:
                                 refProperties = ref.get("properties", {})
                                 for pluginXbrlMethod in pluginClassMethods("Logging.Ref.Properties"):
-                                    pluginXbrlMethod(arg, refProperties)
+                                    pluginXbrlMethod(arg, refProperties, codedArgs)
                                 if refProperties:
                                     ref["properties"] = refProperties
                                     # PATCHED CODE! Take care if this region conflicts during a merge!
@@ -965,9 +959,7 @@ class ModelXbrl:
                                 ref["sourceLine"] = arg.sourceline
                             except AttributeError:
                                 pass # arg may not have sourceline, ignore if so
-
-                        if ref is not None:
-                            refs.append(ref)
+                        refs.append(ref)
                 extras["refs"] = refs
             elif argName == "results":
                 extras["results"] = argValue
