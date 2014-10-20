@@ -965,7 +965,8 @@ class ModelXbrl:
                                 ref["sourceLine"] = arg.sourceline
                             except AttributeError:
                                 pass # arg may not have sourceline, ignore if so
-                        refs.append(ref)
+                        if ref is not None:
+                            refs.append(ref)
                 extras["refs"] = refs
             elif argName == "results":
                 extras["results"] = argValue
