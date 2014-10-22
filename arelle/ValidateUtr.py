@@ -19,7 +19,7 @@ class UtrEntry(): # use slotted class for execution efficiency
                                                for n in self.__slots__))
 
 def loadUtr(modelManager): # Build a dictionary of item types that are constrained by the UTR
-    utrItemTypeEntries = defaultdict(dict)
+    modelManager.disclosureSystem.utrItemTypeEntries = utrItemTypeEntries = defaultdict(dict)
     # print('UTR LOADED FROM '+utrUrl);
     modelManager.cntlr.showStatus(_("Loading Unit Type Registry"))
     file = None
@@ -43,7 +43,6 @@ def loadUtr(modelManager): # Build a dictionary of item types that are constrain
             u.symbol = unitElt.findtext("{http://www.xbrl.org/2009/utr}symbol")
             # TO DO: This indexing scheme assumes that there are no name clashes in item types of the registry.
             (utrItemTypeEntries[u.itemType])[u.id] = u
-        modelManager.disclosureSystem.utrItemTypeEntries = utrItemTypeEntries  
     except (EnvironmentError,
             etree.LxmlError) as err:
         modelManager.cntlr.addToLog("Unit Type Registry Import error: {0}".format(err))
@@ -81,7 +80,7 @@ def utrSymbol(modelType, unitMeasures):
 class ValidateUtr:
     def __init__(self, modelXbrl):
         self.modelXbrl = modelXbrl
-        if not hasattr(modelXbrl.modelManager.disclosureSystem, "utrItemTypeEntries"): 
+        if getattr(modelXbrl.modelManager.disclosureSystem, "utrItemTypeEntries", None) is None: 
             loadUtr(modelXbrl.modelManager)
         self.utrItemTypeEntries = modelXbrl.modelManager.disclosureSystem.utrItemTypeEntries
         
@@ -220,15 +219,19 @@ class ValidateUtr:
                     return self.modelXbrl.qnameConcepts[m].label(fallbackToQname=False) or m.localName
                 return m.localName # localName is last choice to use
         # otherwise generate compound symbol
-        def symbols(measures):
-            return " ".join(self.utrSymbol([measure], None)
-                            for measure in measures)
+        def symbols(measures, wrapMult=True):
+            measuresString = " ".join(self.utrSymbol([measure], None)
+                                                for measure in measures)
+            if len(measures) > 1 and wrapMult:
+                return "({})".format(measuresString)
+            return measuresString
+            
         if not multMeasures and divMeasures: 
             return "per " + symbols(divMeasures)
         elif multMeasures:
             if divMeasures:
-                return symbols(multMeasures) + "/" + symbols(divMeasures)
+                return symbols(multMeasures) + " / " + symbols(divMeasures)
             else:
-                return symbols(multMeasures)
+                return symbols(multMeasures, wrapMult=False)
         else:
             return ""

@@ -939,7 +939,7 @@ class ModelXbrl:
                             if self.logRefHasPluginProperties:
                                 refProperties = ref.get("properties", {})
                                 for pluginXbrlMethod in pluginClassMethods("Logging.Ref.Properties"):
-                                    pluginXbrlMethod(arg, refProperties)
+                                    pluginXbrlMethod(arg, refProperties, codedArgs)
                                 if refProperties:
                                     ref["properties"] = refProperties
                                     # PATCHED CODE! Take care if this region conflicts during a merge!
@@ -965,7 +965,6 @@ class ModelXbrl:
                                 ref["sourceLine"] = arg.sourceline
                             except AttributeError:
                                 pass # arg may not have sourceline, ignore if so
-
                         if ref is not None:
                             refs.append(ref)
                 extras["refs"] = refs
