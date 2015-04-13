@@ -1590,9 +1590,10 @@ class ValidateFiling(ValidateXbrl.ValidateXbrl):
                                 if len(usedCalcPairingsOfConcept & conceptsPresented) > 0:
                                     usedCalcPairingsOfConcept -= conceptsPresented
                         # 6.15.02, 6.15.03 semantics checks for totals and calc arcs (by tree walk)
-                        if validateLoggingSemantic:
-                            for rootConcept in parentChildRels.rootConcepts:
-                                self.checkCalcsTreeWalk(parentChildRels, rootConcept, isStatementSheet, False, conceptsUsed, set())
+                        # These are suppressed
+#                         if validateLoggingSemantic:
+#                             for rootConcept in parentChildRels.rootConcepts:
+#                                 self.checkCalcsTreeWalk(parentChildRels, rootConcept, isStatementSheet, False, conceptsUsed, set())
                     elif arcrole == XbrlConst.summationItem:
                         if self.validateEFMorGFM:
                             # 6.14.3 check for relation concept periods
