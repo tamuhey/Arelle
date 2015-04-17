@@ -1,0 +1,5 @@
+language: python
+runtime: 3.2
+
+requirements:
+  - lxml
