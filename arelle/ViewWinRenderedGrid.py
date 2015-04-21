@@ -310,6 +310,7 @@ class ViewRenderedGrid(ViewWinGrid.ViewGrid):
                              value=comboBoxValue,
                              selectindex=zStructuralNode.choiceNodeIndex if i >= 0 else None,
                              columnspan=2,
+                             state=["readonly"],
                              comboboxselected=self.onZComboBoxSelected)
                 combobox.zStructuralNode = zStructuralNode
                 combobox.zAxisIsOpenExplicitDimension = zAxisIsOpenExplicitDimension
@@ -1001,14 +1002,22 @@ class ViewRenderedGrid(ViewWinGrid.ViewGrid):
                                 if memConcept is not None and (not memberModel.axis or memberModel.axis.endswith('-self')):
                                     header = memConcept.label(lang=self.lang)
                                     valueHeaders.add(header)
-                                    headerValues[header] = memConcept
+                                    if rel.isUsable:
+                                        headerValues[header] = memQname
+                                    else:
+                                        headerValues[header] = memConcept
                                 elif memberModel.axis and memberModel.linkrole and memberModel.arcrole:
+                                    # merge of pull request 42 acsone:TABLE_Z_AXIS_DESCENDANT_OR_SELF
+                                    if memberModel.axis.endswith('-or-self'):
+                                        searchAxis = memberModel.axis[:len(memberModel.axis)-len('-or-self')]
+                                    else:
+                                        searchAxis = memberModel.axis
                                     relationships = concept_relationships(self.rendrCntx, 
                                                          None, 
                                                          (memQname,
                                                           memberModel.linkrole,
                                                           memberModel.arcrole,
-                                                          memberModel.axis),
+                                                          searchAxis),
                                                          False) # return flat list
                                     for rel in relationships:
                                         if rel.isUsable:
