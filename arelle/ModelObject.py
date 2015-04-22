@@ -97,7 +97,6 @@ class ModelObject(etree.ElementBase):
         self.modelDocument = modelDocument
         self.objectIndex = len(modelDocument.modelXbrl.modelObjects)
         modelDocument.modelXbrl.modelObjects.append(self)
-        modelDocument.modelObjects.append(self)
         id = self.get("id")
         if id:
             modelDocument.idObjects[id] = self
@@ -297,7 +296,7 @@ class ModelObject(etree.ElementBase):
                 from arelle.XmlUtil import xpointerElement
                 xpointedElement = xpointerElement(doc,id)
                 # find element
-                for docModelObject in doc.modelObjects:
+                for docModelObject in doc.xmlRootElement.iter():
                     if docModelObject == xpointedElement:
                         doc.idObjects[id] = docModelObject # cache for reuse
                         return docModelObject

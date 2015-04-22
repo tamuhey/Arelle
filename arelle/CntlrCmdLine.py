@@ -9,9 +9,9 @@ This module is Arelle's controller in command line non-interactive mode
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
 from arelle import PythonUtil # define 2.x or 3.x string types
-import gettext, time, datetime, os, shlex, sys, traceback
-from lxml import etree
+import gettext, time, datetime, os, shlex, sys, traceback, fnmatch
 from optparse import OptionParser, SUPPRESS_HELP
+import re
 from arelle import (Cntlr, FileSource, ModelDocument, XmlUtil, Version, 
                     ViewFileDTS, ViewFileFactList, ViewFileFactTable, ViewFileConcepts, 
                     ViewFileFormulae, ViewFileRelationshipSet, ViewFileTests, ViewFileRssFeed,
@@ -24,6 +24,7 @@ from arelle import PluginManager
 from arelle.PluginManager import pluginClassMethods
 from arelle.WebCache import proxyTuple
 import logging
+from lxml import etree
 win32file = None
 
 def main():
@@ -166,6 +167,9 @@ def parseAndRun(args):
     parser.add_option("--skipDTS", action="store_true", dest="skipDTS",
                       help=_("Skip DTS activities (loading, discovery, validation), useful when an instance needs only to be parsed."))
     parser.add_option("--skipdts", action="store_true", dest="skipDTS", help=SUPPRESS_HELP)
+    parser.add_option("--skipLoading", action="store", dest="skipLoading",
+                      help=_("Skip loading discovered or schemaLocated files matching pattern (unix-style file name patterns separated by '|'), useful when not all linkbases are needed."))
+    parser.add_option("--skiploading", action="store", dest="skipLoading", help=SUPPRESS_HELP)
     parser.add_option("--logFile", action="store", dest="logFile",
                       help=_("Write log messages into file, otherwise they go to standard output.  " 
                              "If file ends in .xml it is xml-formatted, otherwise it is text. "))
@@ -185,6 +189,8 @@ def parseAndRun(args):
                       help=_("Regular expression filter for log message code."))
     parser.add_option("--logcodefilter", action="store", dest="logCodeFilter", help=SUPPRESS_HELP)
     parser.add_option("--statusPipe", action="store", dest="statusPipe", help=SUPPRESS_HELP)
+    parser.add_option("--outputAttribution", action="store", dest="outputAttribution", help=SUPPRESS_HELP)
+    parser.add_option("--outputattribution", action="store", dest="outputAttribution", help=SUPPRESS_HELP)
     parser.add_option("--showOptions", action="store_true", dest="showOptions", help=SUPPRESS_HELP)
     parser.add_option("--parameters", action="store", dest="parameters", help=_("Specify parameters for formula and validation (name=value[,name=value])."))
     parser.add_option("--parameterSeparator", action="store", dest="parameterSeparator", help=_("Specify parameters separator string (if other than comma)."))
@@ -215,6 +221,12 @@ def parseAndRun(args):
     parser.add_option("--formulavarsettiming", action="store_true", dest="timeVariableSetEvaluation", help=SUPPRESS_HELP)
     parser.add_option("--formulaAsserResultCounts", action="store_true", dest="formulaAsserResultCounts", help=_("Specify formula tracing."))
     parser.add_option("--formulaasserresultcounts", action="store_true", dest="formulaAsserResultCounts", help=SUPPRESS_HELP)
+    parser.add_option("--formulaSatisfiedAsser", action="store_true", dest="formulaSatisfiedAsser", help=_("Specify formula tracing."))
+    parser.add_option("--formulasatisfiedasser", action="store_true", dest="formulaSatisfiedAsser", help=SUPPRESS_HELP)
+    parser.add_option("--formulaUnsatisfiedAsser", action="store_true", dest="formulaUnsatisfiedAsser", help=_("Specify formula tracing."))
+    parser.add_option("--formulaunsatisfiedasser", action="store_true", dest="formulaUnsatisfiedAsser", help=SUPPRESS_HELP)
+    parser.add_option("--formulaUnsatisfiedAsserError", action="store_true", dest="formulaUnsatisfiedAsserError", help=_("Specify formula tracing."))
+    parser.add_option("--formulaunsatisfiedassererror", action="store_true", dest="formulaUnsatisfiedAsserError", help=SUPPRESS_HELP)
     parser.add_option("--formulaFormulaRules", action="store_true", dest="formulaFormulaRules", help=_("Specify formula tracing."))
     parser.add_option("--formulaformularules", action="store_true", dest="formulaFormulaRules", help=SUPPRESS_HELP)
     parser.add_option("--formulaVarsOrder", action="store_true", dest="formulaVarsOrder", help=_("Specify formula tracing."))
@@ -319,7 +331,7 @@ def parseAndRun(args):
     
     if not args and cntlr.isGAE:
         args = ["--webserver=::gae"]
-    elif not args and cntlr.isCGI:
+    elif cntlr.isCGI:
         args = ["--webserver=::cgi"]
     elif cntlr.isMSW:
         # if called from java on Windows any empty-string arguments are lost, see:
@@ -346,7 +358,7 @@ def parseAndRun(args):
     if options.about:
         print(_("\narelle(r) {0}bit {1}\n\n"
                 "An open source XBRL platform\n"
-                "(c) 2010-2013 Mark V Systems Limited\n"
+                "(c) 2010-2015 Mark V Systems Limited\n"
                 "All rights reserved\nhttp://www.arelle.org\nsupport@arelle.org\n\n"
                 "Licensed under the Apache License, Version 2.0 (the \"License\"); "
                 "you may not \nuse this file except in compliance with the License.  "
@@ -373,7 +385,7 @@ def parseAndRun(args):
             print(text)
         except UnicodeEncodeError:
             print(text.encode("ascii", "replace").decode("ascii"))
-    elif len(leftoverArgs) != 0:
+    elif len(leftoverArgs) != 0 and (not hasWebServer or options.webserver is None):
         parser.error(_("unrecognized arguments: {}".format(', '.join(leftoverArgs))))
     elif (options.entrypointFile is None and 
           ((not options.proxy) and (not options.plugins) and
@@ -532,33 +544,37 @@ class CntlrCmdLine(Cntlr.Cntlr):
                 elif cmd == "temp":
                     savePackagesChanges = False
                 elif cmd.startswith("+"):
-                    packageInfo = PackageManager.addPackage(cmd[1:], options.packageManifestName)
+                    packageInfo = PackageManager.addPackage(self, cmd[1:], options.packageManifestName)
                     if packageInfo:
                         self.addToLog(_("Addition of package {0} successful.").format(packageInfo.get("name")), 
                                       messageCode="info", file=packageInfo.get("URL"))
                     else:
                         self.addToLog(_("Unable to load plug-in."), messageCode="info", file=cmd[1:])
                 elif cmd.startswith("~"):
-                    if PackageManager.reloadPackageModule(cmd[1:]):
+                    if PackageManager.reloadPackageModule(self, cmd[1:]):
                         self.addToLog(_("Reload of package successful."), messageCode="info", file=cmd[1:])
                     else:
                         self.addToLog(_("Unable to reload package."), messageCode="info", file=cmd[1:])
                 elif cmd.startswith("-"):
-                    if PackageManager.removePackageModule(cmd[1:]):
+                    if PackageManager.removePackageModule(self, cmd[1:]):
                         self.addToLog(_("Deletion of package successful."), messageCode="info", file=cmd[1:])
                     else:
                         self.addToLog(_("Unable to delete package."), messageCode="info", file=cmd[1:])
                 else: # assume it is a module or package
                     savePackagesChanges = False
-                    packageInfo = PackageManager.addPackage(cmd, options.packageManifestName)
+                    packageInfo = PackageManager.addPackage(self, cmd, options.packageManifestName)
                     if packageInfo:
                         self.addToLog(_("Activation of package {0} successful.").format(packageInfo.get("name")), 
                                       messageCode="info", file=packageInfo.get("URL"))
                         resetPlugins = True
                     else:
                         self.addToLog(_("Unable to load {0} as a package or {0} is not recognized as a command. ").format(cmd), messageCode="info", file=cmd)
+            if PackageManager.packagesConfigChanged:
+                PackageManager.rebuildRemappings(self)
             if savePackagesChanges:
                 PackageManager.save(self)
+            else:
+                PackageManager.packagesConfigChanged = False
             if showPackages:
                 self.addToLog(_("Taxonomy packages:"), messageCode="info")
                 for packageInfo in PackageManager.orderedPackagesConfig()["packages"]:
@@ -614,6 +630,9 @@ class CntlrCmdLine(Cntlr.Cntlr):
             # can be set now because the utr is first loaded at validation time 
         if options.skipDTS: # skip DTS loading, discovery, etc
             self.modelManager.skipDTS = True
+        if options.skipLoading: # skip loading matching files (list of unix patterns)
+            self.modelManager.skipLoading = re.compile(
+                '|'.join(fnmatch.translate(f) for f in options.skipLoading.split('|')))
             
         # disclosure system sets logging filters, override disclosure filters, if specified by command line
         if options.logLevelFilter:
@@ -637,6 +656,8 @@ class CntlrCmdLine(Cntlr.Cntlr):
             self.modelManager.abortOnMajorError = True
         if options.collectProfileStats:
             self.modelManager.collectProfileStats = True
+        if options.outputAttribution:
+            self.modelManager.outputAttribution = options.outputAttribution
         if options.internetConnectivity == "offline":
             self.webCache.workOffline = True
         elif options.internetConnectivity == "online":
@@ -669,6 +690,12 @@ class CntlrCmdLine(Cntlr.Cntlr):
             fo.traceVariableSetExpressionResult = True
         if options.formulaAsserResultCounts:
             fo.traceAssertionResultCounts = True
+        if options.formulaSatisfiedAsser:
+            fo.traceSatisfiedAssertions = True
+        if options.formulaUnsatisfiedAsser:
+            fo.traceUnsatisfiedAssertions = True
+        if options.formulaUnsatisfiedAsserError:
+            fo.errorUnsatisfiedAssertions = True
         if options.formulaFormulaRules:
             fo.traceFormulaRules = True
         if options.formulaVarsOrder:
@@ -835,12 +862,18 @@ class CntlrCmdLine(Cntlr.Cntlr):
                     pluginXbrlMethod(self, options, modelXbrl)
                                         
             except (IOError, EnvironmentError) as err:
-                self.addToLog(_("[IOError] Failed to save output:\n {0}").format(err))
+                self.addToLog(_("[IOError] Failed to save output:\n {0}").format(err),
+                              messageCode="IOError", 
+                              file=options.entrypointFile, 
+                              level=logging.CRITICAL)
                 success = False
             except Exception as err:
                 self.addToLog(_("[Exception] Failed to complete request: \n{0} \n{1}").format(
-                            err,
-                            traceback.format_tb(sys.exc_info()[2])))
+                                err,
+                                traceback.format_tb(sys.exc_info()[2])),
+                              messageCode=err.__class__.__name__, 
+                              file=options.entrypointFile, 
+                              level=logging.CRITICAL)
                 success = False
         if modelXbrl:
             modelXbrl.profileStat(_("total"), time.time() - firstStartedAt)

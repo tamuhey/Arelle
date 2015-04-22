@@ -377,7 +377,7 @@ class ViewRenderedGrid(ViewFile.View):
                                 etree.SubElement(aspElt, self.tableModelQName("value")
                                                  ).text = xsString(None,None,addQnameValue(self.xmlDoc, aspectValue))
                     if elt is not None:
-                        elt.text = label or "\u00A0" #produces &nbsp;
+                        elt.text = label if bool(label) and label != OPEN_ASPECT_ENTRY_SURROGATE else "\u00A0" #produces &nbsp;
                     if nonAbstract:
                         if columnspan > 1 and rowBelow > topRow:   # add spanned left leg portion one row down
                             if self.type == HTML:
@@ -722,6 +722,8 @@ class ViewRenderedGrid(ViewFile.View):
                                         value = fact.effectiveValue
                                     justify = "right" if fact.isNumeric else "left"
                                     break
+                        if justify is None:
+                            justify = "right" if fp.isNumeric else "left"
                         if conceptNotAbstract:
                             if self.type == XML:
                                 cellsParentElt.append(etree.Comment("Cell concept {0}: segDims {1}, scenDims {2}"

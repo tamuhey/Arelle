@@ -63,15 +63,15 @@ class DialogPackageManager(Toplevel):
         addLabel = Label(buttonFrame, text=_("Find taxonomy packages:"), wraplength=64, justify="center")
         addLocalButton = Button(buttonFrame, text=_("Locally"), command=self.findLocally)
         ToolTip(addLocalButton, text=_("File chooser allows selecting taxonomy packages to add (or reload), from the local file system.  "
-                                       "Select either a taxonomy package zip file, or a taxonomy manifest (.taxonomyPackage.xml) within an unzipped taxonomy package.  "), wraplength=240)
+                                       "Select either a PWD or prior taxonomy package zip file, or a taxonomy manifest (.taxonomyPackage.xml) within an unzipped taxonomy package.  "), wraplength=360)
         addWebButton = Button(buttonFrame, text=_("On Web"), command=self.findOnWeb)
         ToolTip(addWebButton, text=_("Dialog to enter URL full path to load (or reload) package, from the web or local file system.  "
-                                     "URL may be either a taxonomy package zip file, or a taxonomy manifest (.taxonomyPackage.xml) within an unzipped taxonomy package.  "), wraplength=240)
+                                     "URL may be either a PWD or prior taxonomy package zip file, or a taxonomy manifest (.taxonomyPackage.xml) within an unzipped taxonomy package.  "), wraplength=360)
         manifestNameButton = Button(buttonFrame, text=_("Manifest"), command=self.manifestName)
-        ToolTip(manifestNameButton, text=_("Provide non-standard archive manifest file name pattern (e.g., *taxonomyPackage.xml).  "
+        ToolTip(manifestNameButton, text=_("Provide pre-PWD non-standard archive manifest file name pattern (e.g., *taxonomyPackage.xml).  "
                                            "Uses unix file name pattern matching.  "
-                                           "Multiple manifest files are supported in archive (such as oasis catalogs).  "
-                                           "(Replaces search for either .taxonomyPackage.xml or catalog.xml).  "), wraplength=240)
+                                           "Multiple manifest files are supported in pre-PWD archives (such as oasis catalogs).  "
+                                           "(Replaces pre-PWD search for either .taxonomyPackage.xml or catalog.xml).  "), wraplength=480)
         self.manifestNamePattern = ""
         addLabel.grid(row=0, column=0, pady=4)
         addLocalButton.grid(row=1, column=0, pady=4)
@@ -183,6 +183,15 @@ class DialogPackageManager(Toplevel):
         ToolTip(cancelButton, text=_("Cancel changes (if any) and close dialog."), wraplength=240)
         okButton.grid(row=3, column=3, sticky=(S,E), pady=3)
         cancelButton.grid(row=3, column=4, sticky=(S,E), pady=3, padx=3)
+        
+        enableDisableFrame = Frame(frame)
+        enableDisableFrame.grid(row=3, column=1, sticky=(S,W), pady=3)
+        enableAllButton = Button(enableDisableFrame, text=_("Enable All"), command=self.enableAll)
+        ToolTip(enableAllButton, text=_("Enable all packages."), wraplength=240)
+        disableAllButton = Button(enableDisableFrame, text=_("Disable All"), command=self.disableAll)
+        ToolTip(disableAllButton, text=_("Disable all packages."), wraplength=240)
+        enableAllButton.grid(row=1, column=1)
+        disableAllButton.grid(row=1, column=2)
         
         self.loadTreeViews()
 
@@ -299,20 +308,21 @@ class DialogPackageManager(Toplevel):
                                            title=_("Choose taxonomy package file"),
                                            initialdir=initialdir,
                                            filetypes=[(_("Taxonomy package files (*.zip)"), "*.zip"),
-                                                      (_("Manifest (*.taxonomyPackage.xml)"), "*.taxonomyPackage.xml"),
-                                                      (_("Oasis Catalog (*catalog.xml)"), "*catalog.xml")],
+                                                      (_("PWD Manifest (taxonomyPackage.xml)"), "taxonomyPackage.xml"),
+                                                      (_("pre-PWD Manifest (*.taxonomyPackage.xml)"), "*.taxonomyPackage.xml"),
+                                                      (_("pre-PWD Oasis Catalog (*catalog.xml)"), "*catalog.xml")],
                                            defaultextension=".zip")
         if filename:
             # check if a package is selected (any file in a directory containing an __init__.py
             self.cntlr.config["packageOpenDir"] = os.path.dirname(filename)
-            packageInfo = PackageManager.packageInfo(filename, packageManifestName=self.manifestNamePattern)
+            packageInfo = PackageManager.packageInfo(self.cntlr, filename, packageManifestName=self.manifestNamePattern)
             self.loadFoundPackageInfo(packageInfo, filename)
                 
 
     def findOnWeb(self):
         url = DialogURL.askURL(self)
         if url:  # url is the in-cache or local file
-            packageInfo = PackageManager.packageInfo(url, packageManifestName=self.manifestNamePattern)
+            packageInfo = PackageManager.packageInfo(self.cntlr, url, packageManifestName=self.manifestNamePattern)
             self.cntlr.showStatus("") # clear web loading status
             self.loadFoundPackageInfo(packageInfo, url)
                 
@@ -354,7 +364,7 @@ class DialogPackageManager(Toplevel):
         self.removePackageInfo(name, version)  # remove any prior entry for this package
         self.packageNamesWithNewerFileDates.discard(name) # no longer has an update available
         self.packagesConfig["packages"].append(packageInfo)
-        PackageManager.rebuildRemappings()
+        PackageManager.rebuildRemappings(self.cntlr)
         self.packagesConfigChanged = True
 
     def packageEnable(self):
@@ -367,7 +377,7 @@ class DialogPackageManager(Toplevel):
                 packageInfo["status"] = "disabled"
                 self.packageEnableButton['text'] = self.ENABLE
             self.packagesConfigChanged = True
-            PackageManager.rebuildRemappings()
+            PackageManager.rebuildRemappings(self.cntlr)
             self.loadTreeViews()
             
     def packageMoveUp(self):
@@ -377,7 +387,7 @@ class DialogPackageManager(Toplevel):
             del packages[self.selectedPackageIndex]
             packages.insert(self.selectedPackageIndex -1, packageInfo)
             self.packagesConfigChanged = True
-            PackageManager.rebuildRemappings()
+            PackageManager.rebuildRemappings(self.cntlr)
             self.loadTreeViews()
             
     def packageMoveDown(self):
@@ -387,7 +397,7 @@ class DialogPackageManager(Toplevel):
             del packages[self.selectedPackageIndex]
             packages.insert(self.selectedPackageIndex + 1, packageInfo)
             self.packagesConfigChanged = True
-            PackageManager.rebuildRemappings()
+            PackageManager.rebuildRemappings(self.cntlr)
             self.loadTreeViews()
             
     def packageReload(self):
@@ -395,10 +405,10 @@ class DialogPackageManager(Toplevel):
             packageInfo = self.packagesConfig["packages"][self.selectedPackageIndex]
             url = packageInfo.get("URL")
             if url:
-                packageInfo = PackageManager.packageInfo(url, reload=True, packageManifestName=packageInfo.get("manifestName"))
+                packageInfo = PackageManager.packageInfo(self.cntlr, url, reload=True, packageManifestName=packageInfo.get("manifestName"))
                 if packageInfo:
                     self.addPackageInfo(packageInfo)
-                    PackageManager.rebuildRemappings()
+                    PackageManager.rebuildRemappings(self.cntlr)
                     self.loadTreeViews()
                     self.cntlr.showStatus(_("{0} reloaded").format(packageInfo.get("name")), clearAfter=5000)
                 else:
@@ -412,6 +422,25 @@ class DialogPackageManager(Toplevel):
             packageInfo = self.packagesConfig["packages"][self.selectedPackageIndex]
             self.removePackageInfo(packageInfo["name"], packageInfo["version"])
             self.packagesConfigChanged = True
-            PackageManager.rebuildRemappings()
+            PackageManager.rebuildRemappings(self.cntlr)
             self.loadTreeViews()
+            
+    def enableAll(self):
+        self.enableDisableAll(True)
                     
+    def disableAll(self):
+        self.enableDisableAll(False)
+                    
+    def enableDisableAll(self, doEnable):
+        for iPkg in range(len(self.packagesConfig["packages"])):
+            packageInfo = self.packagesConfig["packages"][iPkg]
+            if doEnable:
+                packageInfo["status"] = "enabled"
+                self.packageEnableButton['text'] = self.DISABLE
+            else:
+                packageInfo["status"] = "disabled"
+                self.packageEnableButton['text'] = self.ENABLE
+        self.packagesConfigChanged = True
+        PackageManager.rebuildRemappings(self.cntlr)
+        self.loadTreeViews()
+            

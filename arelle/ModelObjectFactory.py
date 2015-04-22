@@ -26,6 +26,9 @@ from arelle.ModelVersObject import (ModelAssignment, ModelAction, ModelNamespace
 
 def parser(modelXbrl, baseUrl, target=None):
     parser = etree.XMLParser(recover=True, huge_tree=True, target=target)
+    return setParserElementClassLookup(parser, modelXbrl, baseUrl)
+
+def setParserElementClassLookup(parser, modelXbrl, baseUrl=None):
     classLookup = DiscoveringClassLookup(modelXbrl, baseUrl)
     nsNameLookup = KnownNamespacesModelObjectClassLookup(modelXbrl, fallback=classLookup)
     parser.set_element_class_lookup(nsNameLookup)
@@ -120,12 +123,13 @@ class DiscoveringClassLookup(etree.PythonElementClassLookup):
     def __init__(self, modelXbrl, baseUrl, fallback=None):
         super(DiscoveringClassLookup, self).__init__(fallback)
         self.modelXbrl = modelXbrl
+        self.streamingOrSkipDTS = modelXbrl.skipDTS or getattr(modelXbrl, "isStreamingMode", False)
         self.baseUrl = baseUrl
         self.discoveryAttempts = set()
         global ModelFact, ModelDocument
         if ModelDocument is None:
             from arelle import ModelDocument
-        if modelXbrl.skipDTS and ModelFact is None:
+        if self.streamingOrSkipDTS and ModelFact is None:
             from arelle.ModelInstanceObject import ModelFact
         
     def lookup(self, document, proxyElement):
@@ -151,9 +155,10 @@ class DiscoveringClassLookup(etree.PythonElementClassLookup):
         
         if modelObjectClass is not None:
             return modelObjectClass
-        elif (self.modelXbrl.skipDTS and 
+        elif (self.streamingOrSkipDTS and 
               ns not in (XbrlConst.xbrli, XbrlConst.link)):
-            ancestor = proxyElement.getparent() or getattr(self.modelXbrl, "streamingParentModelObject", None)
+            # self.makeelementParentModelObject is set in streamingExtensions.py and ModelXbrl.createFact
+            ancestor = proxyElement.getparent() or getattr(self.modelXbrl, "makeelementParentModelObject", None)
             while ancestor is not None:
                 tag = ancestor.tag # not a modelObject yet, just parser prototype
                 if tag.startswith("{http://www.xbrl.org/2003/instance}") or tag.startswith("{http://www.xbrl.org/2003/linkbase}"):

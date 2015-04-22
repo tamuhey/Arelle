@@ -37,8 +37,10 @@ class Validate:
         if modelXbrl.modelManager.validateDisclosureSystem:
             if modelXbrl.modelManager.disclosureSystem.HMRC:
                 self.instValidator = ValidateHmrc.ValidateHmrc(modelXbrl)
-            else:
+            elif modelXbrl.modelManager.disclosureSystem.EFMorGFM or modelXbrl.modelManager.disclosureSystem.SBRNL:
                 self.instValidator = ValidateFiling.ValidateFiling(modelXbrl)
+            else: # custom validator, probably a plug-in
+                self.instValidator = ValidateXbrl.ValidateXbrl(modelXbrl)
             self.formulaValidator = ValidateXbrl.ValidateXbrl(modelXbrl)
         else:
             self.instValidator = ValidateXbrl.ValidateXbrl(modelXbrl)
@@ -373,6 +375,11 @@ class Validate:
                         break
             if expected == "EFM.6.03.02" or expected == "EFM.6.03.08": # 6.03.02 is not testable
                 status = "pass"
+            # check if expected is a whitespace separated list of error tokens
+            if status == "fail" and isinstance(expected,_STR_BASE) and ' ' in expected:
+                if all(any(testErr == e for testErr in modelUnderTest.errors)
+                       for e in expected.split()):
+                        status = "pass"
             if not modelUnderTest.errors and status == "fail":
                 if modelTestcaseVariation.assertions:
                     if modelTestcaseVariation.assertions == expected:

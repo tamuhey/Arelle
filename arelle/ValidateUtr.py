@@ -21,7 +21,8 @@ class UtrEntry(): # use slotted class for execution efficiency
 def loadUtr(modelManager): # Build a dictionary of item types that are constrained by the UTR
     modelManager.disclosureSystem.utrItemTypeEntries = utrItemTypeEntries = defaultdict(dict)
     # print('UTR LOADED FROM '+utrUrl);
-    modelManager.cntlr.showStatus(_("Loading Unit Type Registry"))
+    # skip status message as it hides prior activity during which this might have just obtained symbols
+    # modelManager.cntlr.showStatus(_("Loading Unit Type Registry"))
     file = None
     try:
         from arelle.FileSource import openXmlFileStream
@@ -78,8 +79,10 @@ def utrSymbol(modelType, unitMeasures):
     return ValidateUtr(modelType.modelXbrl).utrSymbol(unitMeasures[0], unitMeasures[1])
     
 class ValidateUtr:
-    def __init__(self, modelXbrl):
+    def __init__(self, modelXbrl, messageLevel="ERROR", messageCode="utre:error-NumericFactUtrInvalid"):
         self.modelXbrl = modelXbrl
+        self.messageLevel = messageLevel
+        self.messageCode = messageCode
         if getattr(modelXbrl.modelManager.disclosureSystem, "utrItemTypeEntries", None) is None: 
             loadUtr(modelXbrl.modelManager)
         self.utrItemTypeEntries = modelXbrl.modelManager.disclosureSystem.utrItemTypeEntries
@@ -121,9 +124,11 @@ class ValidateUtr:
                         utrInvalidFacts.append(f)
             # end for
             for fact in utrInvalidFacts:
-                modelXbrl.error("utre:error-NumericFactUtrInvalid",
-                                _("Unit %(unitID)s disallowed on fact %(element)s of type %(typeName)s"),
-                                modelObject=fact, unitID=fact.unitID, element=fact.qname, typeName=fact.concept.type.name)
+                modelXbrl.log(self.messageLevel,
+                              self.messageCode,
+                              _("Unit %(unitID)s disallowed on fact %(element)s of type %(typeName)s"),
+                              modelObject=fact, unitID=fact.unitID, element=fact.qname, typeName=fact.concept.type.name,
+                              messageCodes=("utre:error-NumericFactUtrInvalid",))
 
     def unitSatisfies(self, utrEntry, unit): # Return true if entry is satisfied by unit
         if utrEntry.isSimple: # Entry requires a measure

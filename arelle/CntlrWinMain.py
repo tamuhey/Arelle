@@ -113,6 +113,7 @@ class CntlrWinMain (Cntlr.Cntlr):
             elif label == "PLUG-IN":
                 for pluginMenuExtender in pluginClassMethods(command):
                     pluginMenuExtender(self, self.fileMenu)
+                    self.fileMenuLength += 1
             else:
                 self.fileMenu.add_command(label=label, underline=0, command=command, accelerator=shortcut_text)
                 self.parent.bind(shortcut, command)
@@ -1154,7 +1155,7 @@ class CntlrWinMain (Cntlr.Cntlr):
                           os.path.join(self.imagesDir, "arelle32.gif"),
                           _("arelle\u00ae {0} {1}bit {2}\n"
                               "An open source XBRL platform\n"
-                              "\u00a9 2010-2013 Mark V Systems Limited\n"
+                              "\u00a9 2010-2015 Mark V Systems Limited\n"
                               "All rights reserved\nhttp://www.arelle.org\nsupport@arelle.org\n\n"
                               "Licensed under the Apache License, Version 2.0 (the \"License\"); "
                               "you may not use this file except in compliance with the License.  "
@@ -1181,6 +1182,11 @@ class CntlrWinMain (Cntlr.Cntlr):
     def addToLog(self, message, messageCode="", messageArgs=None, file="", level=logging.INFO):
         if messageCode and messageCode not in message: # prepend message code
             message = "[{}] {}".format(messageCode, message)
+        if file:
+            if isinstance(file, (tuple,list,set)):
+                message += " - " + ", ".join(file)
+            elif isinstance(file, _STR_BASE):
+                message += " - " + file
         if isinstance(messageArgs, dict):
             message = message % messageArgs
         self.uiThreadQueue.put((self.uiAddToLog, [message]))

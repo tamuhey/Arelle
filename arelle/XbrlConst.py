@@ -7,6 +7,7 @@ qnXsdAppinfo = qname("{http://www.w3.org/2001/XMLSchema}xsd:appinfo")
 qnXsdDefaultType = qname("{http://www.w3.org/2001/XMLSchema}xsd:anyType")
 xsi = "http://www.w3.org/2001/XMLSchema-instance"
 qnXsiNil = qname(xsi,"xsi:nil") # need default prefix in qname
+qnXmlLang = qname("{http://www.w3.org/XML/1998/namespace}xml:lang")
 builtinAttributes = {qnXsiNil,
                      qname(xsi,"xsi:type"),
                      qname(xsi,"xsi:schemaLocation")
@@ -99,6 +100,8 @@ qnIXbrl11Fraction = qname("{http://www.xbrl.org/2013/inlineXBRL}fraction")
 qnIXbrl11Numerator = qname("{http://www.xbrl.org/2013/inlineXBRL}numerator")
 qnIXbrl11Denominator = qname("{http://www.xbrl.org/2013/inlineXBRL}denominator")
 qnIXbrl11Footnote = qname("{http://www.xbrl.org/2013/inlineXBRL}footnote")
+qnIXbrl11Relationship = qname("{http://www.xbrl.org/2013/inlineXBRL}relationship")
+qnIXbrl11Hidden = qname("{http://www.xbrl.org/2013/inlineXBRL}hidden")
 ixAttributes = set(qname(n, noPrefixIsNoNamespace=True)
                    for n in ("escape", "footnoteRefs", "format", "name", "order", "scale", "sign", 
                              "target", "tupleRef", "tupleID"))
@@ -160,11 +163,11 @@ verPrefixNS = {"ver":ver,
                }
 
 # extended enumeration spec
-enum = "http://xbrl.org/PR/2014-03-26/extensible-enumerations"
-qnEnumerationItemType = qname("{http://xbrl.org/PR/2014-03-26/extensible-enumerations}enum:enumerationItemType")
-attrEnumerationDomain = "{http://xbrl.org/PR/2014-03-26/extensible-enumerations}domain"
-attrEnumerationLinkrole = "{http://xbrl.org/PR/2014-03-26/extensible-enumerations}linkrole"
-attrEnumerationUsable = "{http://xbrl.org/PR/2014-03-26/extensible-enumerations}headUsable"
+enum = "http://xbrl.org/2014/extensible-enumerations"
+qnEnumerationItemType = qname("{http://xbrl.org/2014/extensible-enumerations}enum:enumerationItemType")
+attrEnumerationDomain = "{http://xbrl.org/2014/extensible-enumerations}domain"
+attrEnumerationLinkrole = "{http://xbrl.org/2014/extensible-enumerations}linkrole"
+attrEnumerationUsable = "{http://xbrl.org/2014/extensible-enumerations}headUsable"
 
 # formula specs
 variable = "http://xbrl.org/2008/variable"
@@ -473,8 +476,8 @@ errMsgPrefixNS = {
     "xbrlvarscopee": "http://xbrl.org/2010/variable/variables-scope/error",
     "xbrlte": "http://xbrl.org/PWD/2014-MM-DD/table/error",
     "utre": "http://www.xbrl.org/2009/utr/errors",
-    "enumte": "http://xbrl.org/PR/2014-03-26/extensible-enumerations/taxonomy-errors",
-    "enumie": "http://xbrl.org/PR/2014-03-26/extensible-enumerations/instance-errors",
+    "enumte": "http://xbrl.org/2014/extensible-enumerations/taxonomy-errors",
+    "enumie": "http://xbrl.org/2014/extensible-enumerations/instance-errors",
     "seve": "http://xbrl.org/2014/assertion-severity/error"
     }
 

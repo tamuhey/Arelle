@@ -7,8 +7,9 @@ Created on Oct 20, 2010
 import zipfile, tarfile, os, io, base64, gzip, zlib, re, struct, random, time
 from lxml import etree
 from arelle import XmlUtil
-from arelle.PackageManager import parsePackage
+from arelle import PackageManager
 from arelle.UrlUtil import isHttpUrl
+from operator import indexOf
 
 archivePathSeparators = (".zip" + os.sep, ".tar.gz" + os.sep, ".eis" + os.sep, ".xml" + os.sep, ".xfd" + os.sep, ".frm" + os.sep, '.taxonomyPackage.xml' + os.sep) + \
                         ((".zip/", ".tar.gz/", ".eis/", ".xml/", ".xfd/", ".frm/", '.taxonomyPackage.xml/') if os.sep != "/" else ()) #acomodate windows and http styles
@@ -18,7 +19,7 @@ SERVER_WEB_CACHE = os.sep + "_HTTP_CACHE"
 
 XMLdeclaration = re.compile(r"<\?xml[^><\?]*\?>", re.DOTALL)
 
-TAXONOMY_PACKAGE_FILE_NAMES = ('.taxonomyPackage.xml', 'catalog.xml')
+TAXONOMY_PACKAGE_FILE_NAMES = ('.taxonomyPackage.xml', 'catalog.xml') # pre-PWD packages
 
 def openFileSource(filename, cntlr=None, sourceZipStream=None, checkIfXmlIsEis=False):
     if sourceZipStream:
@@ -262,7 +263,7 @@ class FileSource:
                                       .format(', '.join(metadataFiles)))
                     # HF: this won't work, see DialogOpenArchive for correct code
                     # not sure if it is used
-                    taxonomyPackage = parsePackage(self.cntlr, self.url)
+                    taxonomyPackage = PackageManager.parsePackage(self.cntlr, self.url)
                     fileSourceDir = os.path.dirname(self.baseurl) + os.sep
                     self.mappedPaths = \
                         dict((prefix, 
@@ -320,6 +321,10 @@ class FileSource:
     
     @property
     def taxonomyPackageMetadataFiles(self):
+        _metaInfTxPkg = '{}/META-INF/taxonomyPackage.xml'.format(
+                        os.path.splitext(os.path.basename(self.basefile))[0])
+        if _metaInfTxPkg in self.dir:
+            return [_metaInfTxPkg]  # standard package
         return [f for f in (self.dir or []) if os.path.split(f)[-1] in TAXONOMY_PACKAGE_FILE_NAMES]
     
     def isInArchive(self,filepath):
@@ -366,7 +371,7 @@ class FileSource:
                     self.referencedFileSources[referencedArchiveFile] = referencedFileSource
         return None
     
-    def file(self, filepath, binary=False):
+    def file(self, filepath, binary=False, stripDeclaration=False, encoding=None):
         ''' 
             for text, return a tuple of (open file handle, encoding)
             for binary, return a tuple of (open file handle, )
@@ -382,7 +387,10 @@ class FileSource:
                     b = archiveFileSource.fs.read(archiveFileName.replace("\\","/"))
                     if binary:
                         return (io.BytesIO(b), )
-                    encoding = XmlUtil.encoding(b)
+                    if encoding is None:
+                        encoding = XmlUtil.encoding(b)
+                    if stripDeclaration:
+                        b = stripDeclarationBytes(b)
                     return (FileNamedTextIOWrapper(filepath, io.BytesIO(b), encoding=encoding), 
                             encoding)
                 except KeyError:
@@ -394,7 +402,10 @@ class FileSource:
                     fh.close() # doesn't seem to close properly using a with construct
                     if binary:
                         return (io.BytesIO(b), )
-                    encoding = XmlUtil.encoding(b)
+                    if encoding is None:
+                        encoding = XmlUtil.encoding(b)
+                    if stripDeclaration:
+                        b = stripDeclarationBytes(b)
                     return (FileNamedTextIOWrapper(filepath, io.BytesIO(b), encoding=encoding), 
                             encoding)
                 except KeyError:
@@ -416,7 +427,8 @@ class FileSource:
                                 length = len(b);
                             if binary:
                                 return (io.BytesIO(b), )
-                            encoding = XmlUtil.encoding(b, default="latin-1")
+                            if encoding is None:
+                                encoding = XmlUtil.encoding(b, default="latin-1")
                             return (io.TextIOWrapper(io.BytesIO(b), encoding=encoding), 
                                     encoding)
                 raise ArchiveFileIOError(self, archiveFileName)
@@ -437,7 +449,8 @@ class FileSource:
                                 length = len(b);
                             if binary:
                                 return (io.BytesIO(b), )
-                            encoding = XmlUtil.encoding(b, default="latin-1")
+                            if encoding is None:
+                                encoding = XmlUtil.encoding(b, default="latin-1")
                             return (io.TextIOWrapper(io.BytesIO(b), encoding=encoding), 
                                     encoding)
                 raise ArchiveFileIOError(self, archiveFileName)
@@ -452,7 +465,7 @@ class FileSource:
         if binary:
             return (openFileStream(self.cntlr, filepath, 'rb'), )
         else:
-            return openXmlFileStream(self.cntlr, filepath)
+            return openXmlFileStream(self.cntlr, filepath, stripDeclaration)
 
     
     @property
@@ -538,6 +551,12 @@ class FileSource:
             self.url = self.baseurl + os.sep + selection.replace("/", os.sep)
             
 def openFileStream(cntlr, filepath, mode='r', encoding=None):
+    if PackageManager.isMappedUrl(filepath):
+        filepath = PackageManager.mappedUrl(filepath)
+    else:
+        filepath = cntlr.modelManager.disclosureSystem.mappedUrl(filepath)
+    if archiveFilenameParts(filepath): # file is in an archive
+        return openFileSource(filepath, cntlr).file(filepath, binary='b' in mode, encoding=encoding)[0]
     if isHttpUrl(filepath) and cntlr:
         _cacheFilepath = cntlr.webCache.getfilename(filepath)
         if _cacheFilepath is None:
@@ -591,12 +610,22 @@ def openXmlFileStream(cntlr, filepath, stripDeclaration=False):
     if text is None:  # ok to read as utf-8
         return io.open(filepath, 'rt', encoding='utf-8'), encoding
     else:
-        # strip XML declaration
-        xmlDeclarationMatch = XMLdeclaration.search(text)
-        if xmlDeclarationMatch: # remove it for lxml
-            start,end = xmlDeclarationMatch.span()
-            text = text[0:start] + text[end:]
+        if stripDeclaration:
+            # strip XML declaration
+            xmlDeclarationMatch = XMLdeclaration.search(text)
+            if xmlDeclarationMatch: # remove it for lxml
+                start,end = xmlDeclarationMatch.span()
+                text = text[0:start] + text[end:]
         return (FileNamedStringIO(filepath, initial_value=text), encoding)
+    
+def stripDeclarationBytes(xml):
+    xmlStart = xml[0:120]
+    indexOfDeclaration = xmlStart.find(b"<?xml")
+    if indexOfDeclaration >= 0:
+        indexOfDeclarationEnd = xmlStart.find(b"?>", indexOfDeclaration)
+        if indexOfDeclarationEnd >= 0:
+            return xml[indexOfDeclarationEnd + 2:]
+    return xml
     
 def saveFile(cntlr, filepath, contents, encoding=None):
     if isHttpUrl(filepath):

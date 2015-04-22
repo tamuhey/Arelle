@@ -9,6 +9,7 @@ try:
 except ImportError:
     import re
 from collections import defaultdict
+import os, io, json
 from datetime import datetime, timedelta
 from arelle import XbrlConst
 from arelle.ModelDtsObject import ModelConcept
@@ -31,9 +32,11 @@ isCMPRH = r"(?=.*comprehensive)"
 use a regular expression that is forgiving on at least the above
 and doens't match variations of parent, transparent, etc.
 '''
-rePARENTHETICAL = r"pa?r[ae]ne?tht?[aei]+n?t?h?i?c"
+rePARENTHETICAL = r"pa?r[ae]ne?th\w?[aei]+\w?t?h?i?c"
 notPAR = "(?!.*" + rePARENTHETICAL + ")"
 isPAR = "(?=.*" + rePARENTHETICAL + ")"
+
+UGT_TOPICS = None
 
 def RE(*args):
     return re.compile(''.join(args), re.IGNORECASE)
@@ -183,9 +186,10 @@ def evaluateTableIndex(modelXbrl):
         firstDocumentLinkroleURI = None
         sortedRoleTypes = sorted(definitionElrs.items(), key=lambda item: item[0])
         for roleDefinition, roleType in sortedRoleTypes:
+            roleType._tableChildren = []
             match = roleDefinitionPattern.match(roleDefinition) if roleDefinition else None
             if not match: 
-                roleType._tableIndex = (UNCATEG, roleType.roleURI)
+                roleType._tableIndex = (UNCATEG, "", roleType.roleURI)
                 continue
             seq, tblType, tblName = match.groups()
             if isRR:
@@ -256,7 +260,7 @@ def evaluateTableIndex(modelXbrl):
                     endOfMonth = False
                 startYr = endDatetime.year
                 startMo = endDatetime.month - 3
-                if startMo < 0:
+                if startMo <= 0:
                     startMo += 12
                     startYr -= 1
                 startDatetime = datetime(startYr, startMo, endDatetime.day, endDatetime.hour, endDatetime.minute, endDatetime.second)
@@ -282,10 +286,12 @@ def evaluateTableIndex(modelXbrl):
                     reportingPeriods.add((None, cntx.endDatetime))
         stmtReportingPeriods = set(reportingPeriods)       
 
-        for roleDefinition, roleType in reversed(sortedRoleTypes):
+        sortedRoleTypes.reverse() # now in descending order
+        for i, roleTypes in enumerate(sortedRoleTypes):
+            roleDefinition, roleType = roleTypes
             # find defined non-default axes in pre hierarchy for table
             tableFacts = set()
-            tableGroup = roleType._tableIndex[0]
+            tableGroup, tableSeq, tableName = roleType._tableIndex
             roleURIdims, priItemQNames = EFMlinkRoleURIstructure(modelXbrl, roleType.roleURI)
             for priItemQName in priItemQNames:
                 for fact in factsByQname[priItemQName]:
@@ -309,8 +315,112 @@ def evaluateTableIndex(modelXbrl):
                             reportedFacts.add(fact)
             roleType._tableFacts = tableFacts
             
+            # find parent if any
+            closestParentType = None
+            closestParentMatchLength = 0
+            for _parentRoleDefinition, parentRoleType in sortedRoleTypes[i+1:]:
+                matchLen = parentNameMatchLen(tableName, parentRoleType)
+                if matchLen > closestParentMatchLength:
+                    closestParentMatchLength = matchLen
+                    closestParentType = parentRoleType
+            if closestParentType is not None:
+                closestParentType._tableChildren.insert(0, roleType)
+                
+            # remove lesser-matched children if there was a parent match
+            unmatchedChildRoles = set()
+            longestChildMatchLen = 0
+            numChildren = 0
+            for childRoleType in roleType._tableChildren:
+                matchLen = parentNameMatchLen(tableName, childRoleType)
+                if matchLen < closestParentMatchLength:
+                    unmatchedChildRoles.add(childRoleType)
+                elif matchLen > longestChildMatchLen:
+                    longestChildMatchLen = matchLen
+                    numChildren += 1
+            if numChildren > 1: 
+                # remove children that don't have the full match pattern length to parent
+                for childRoleType in roleType._tableChildren:
+                    if (childRoleType not in unmatchedChildRoles and 
+                        parentNameMatchLen(tableName, childRoleType) < longestChildMatchLen):
+                        unmatchedChildRoles.add(childRoleType)
+
+            for unmatchedChildRole in unmatchedChildRoles:
+                roleType._tableChildren.remove(unmatchedChildRole)
+
+            for childRoleType in roleType._tableChildren:
+                childRoleType._tableParent = roleType
+                
+            unmatchedChildRoles = None # dereference
+        
+        global UGT_TOPICS
+        if UGT_TOPICS is None:
+            try:
+                from arelle import FileSource
+                fh = FileSource.openFileStream(modelXbrl.modelManager.cntlr, 
+                                               os.path.join(modelXbrl.modelManager.cntlr.configDir, "ugt-topics.zip/ugt-topics.json"),
+                                               'r', 'utf-8')
+                UGT_TOPICS = json.load(fh)
+                fh.close()
+                for topic in UGT_TOPICS:
+                    topic[6] = set(topic[6]) # change concept abstracts list into concept abstracts set
+                    topic[7] = set(topic[7]) # change concept text blocks list into concept text blocks set
+                    topic[8] = set(topic[8]) # change concept names list into concept names set
+            except Exception as ex:
+                    UGT_TOPICS = None
+
+        if UGT_TOPICS is not None:
+            def roleUgtConcepts(roleType):
+                roleConcepts = set()
+                for rel in modelXbrl.relationshipSet(XbrlConst.parentChild, roleType.roleURI).modelRelationships:
+                    if rel.toModelObject is not None:
+                        roleConcepts.add(rel.toModelObject.name)
+                    if rel.fromModelObject is not None:
+                        roleConcepts.add(rel.fromModelObject.name)
+                if hasattr(roleType, "_tableChildren"):
+                    for _tableChild in roleType._tableChildren:
+                        roleConcepts |= roleUgtConcepts(_tableChild)
+                return roleConcepts
+            topicMatches = {} # topicNum: (best score, roleType)
+    
+            for roleDefinition, roleType in sortedRoleTypes:
+                roleTopicType = 'S' if roleDefinition.startswith('S') else 'D'
+                if getattr(roleType, "_tableParent", None) is None:                
+                    # rooted tables in reverse order
+                    concepts = roleUgtConcepts(roleType)
+                    for i, ugtTopic in enumerate(UGT_TOPICS):
+                        if ugtTopic[0] == roleTopicType:
+                            countAbstracts = len(concepts & ugtTopic[6])
+                            countTextBlocks = len(concepts & ugtTopic[7])
+                            countLineItems = len(concepts & ugtTopic[8])
+                            if countAbstracts or countTextBlocks or countLineItems:
+                                _score = (10 * countAbstracts +
+                                          1000 * countTextBlocks +
+                                          countLineItems / len(concepts))
+                                if i not in topicMatches or _score > topicMatches[i][0]:
+                                    topicMatches[i] = (_score, roleType)
+            for topicNum, scoredRoleType in topicMatches.items():
+                _score, roleType = scoredRoleType
+                if _score > getattr(roleType, "_tableTopicScore", 0):
+                    ugtTopic = UGT_TOPICS[topicNum]
+                    roleType._tableTopicScore = _score
+                    roleType._tableTopicType = ugtTopic[0]
+                    roleType._tableTopicName = ugtTopic[3]
+                    roleType._tableTopicCode = ugtTopic[4]
+                    # print ("Match score {:.2f} topic {} preGrp {}".format(_score, ugtTopic[3], roleType.definition))
         return firstTableLinkroleURI or firstDocumentLinkroleURI # did build _tableIndex attributes
     return None
+
+def parentNameMatchLen(tableName, parentRoleType):
+    lengthOfMatch = 0
+    parentName = parentRoleType._tableIndex[2]
+    parentNameLen = len(parentName.partition('(')[0])
+    fullWordFound = False
+    for c in tableName.partition('(')[0]:
+        fullWordFound |= c.isspace()
+        if lengthOfMatch >= parentNameLen or c != parentName[lengthOfMatch]:
+            break
+        lengthOfMatch += 1
+    return fullWordFound and lengthOfMatch
 
 def EFMlinkRoleURIstructure(modelXbrl, roleURI):
     relSet = modelXbrl.relationshipSet(XbrlConst.parentChild, roleURI)

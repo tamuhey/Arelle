@@ -69,6 +69,10 @@ def checkDTS(val, modelDocument, checkedModelDocuments):
     if modelDocument.type == ModelDocument.Type.VERSIONINGREPORT:
         return
     
+    # skip processing if skipDTS requested
+    if modelDocument.skipDTS:
+        return
+    
     # skip system schemas
     if modelDocument.type == ModelDocument.Type.SCHEMA:
         if XbrlConst.isStandardNamespace(modelDocument.targetNamespace):
@@ -93,7 +97,6 @@ def checkDTS(val, modelDocument, checkedModelDocuments):
         val.ixdsDocs.append(modelDocument)
         
     for hrefElt, hrefedDoc, hrefId in modelDocument.hrefObjects:
-        hrefedObj = None
         hrefedElt = None
         if hrefedDoc is None:
             val.modelXbrl.error("xbrl:hrefFileNotFound",
@@ -104,8 +107,7 @@ def checkDTS(val, modelDocument, checkedModelDocuments):
             if hrefedDoc.type != ModelDocument.Type.UnknownNonXML:
                 if hrefId:
                     if hrefId in hrefedDoc.idObjects:
-                        hrefedObj = hrefedDoc.idObjects[hrefId]
-                        hrefedElt = hrefedObj
+                        hrefedElt = hrefedDoc.idObjects[hrefId]
                     else:
                         hrefedElt = XmlUtil.xpointerElement(hrefedDoc,hrefId)
                         if hrefedElt is None:
@@ -113,15 +115,8 @@ def checkDTS(val, modelDocument, checkedModelDocuments):
                                 _("Href %(elementHref)s not located"),
                                 modelObject=hrefElt, 
                                 elementHref=hrefElt.get("{http://www.w3.org/1999/xlink}href"))
-                        else:
-                            # find hrefObj
-                            for docModelObject in hrefedDoc.modelObjects:
-                                if docModelObject == hrefedElt:
-                                    hrefedObj = docModelObject
-                                    break
                 else:
                     hrefedElt = hrefedDoc.xmlRootElement
-                    hrefedObj = hrefedDoc
                 
             if hrefId:  #check scheme regardless of whether document loaded 
                 # check all xpointer schemes
@@ -245,9 +240,11 @@ def checkDTS(val, modelDocument, checkedModelDocuments):
             
     # XML validation checks (remove if using validating XML)
     val.extendedElementName = None
+    isFilingDocument = False
     if (modelDocument.uri.startswith(val.modelXbrl.uriDir) and
         modelDocument.targetNamespace not in val.disclosureSystem.baseTaxonomyNamespaces and 
         modelDocument.xmlDocument):
+        isFilingDocument = True
         val.valUsedPrefixes = set()
         val.schemaRoleTypes = {}
         val.schemaArcroleTypes = {}
@@ -267,11 +264,11 @@ def checkDTS(val, modelDocument, checkedModelDocuments):
         if val.validateSBRNL:
             for pluginXbrlMethod in pluginClassMethods("Validate.SBRNL.DTS.document"):
                 pluginXbrlMethod(val, modelDocument)
-        for pluginXbrlMethod in pluginClassMethods("Validate.XBRL.DTS.document"):
-            pluginXbrlMethod(val, modelDocument)
         del val.valUsedPrefixes
         del val.schemaRoleTypes
         del val.schemaArcroleTypes
+    for pluginXbrlMethod in pluginClassMethods("Validate.XBRL.DTS.document"):
+        pluginXbrlMethod(val, modelDocument, isFilingDocument)
 
     val.roleRefURIs = None
     val.arcroleRefURIs = None

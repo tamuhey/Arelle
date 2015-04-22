@@ -16,6 +16,7 @@ from arelle.PrototypeInstanceObject import FactPrototype, DimValuePrototype
 from arelle.UrlUtil import isHttpUrl
 from arelle.ValidateXbrlDimensions import isFactDimensionallyValid
 ModelRelationshipSet = None # dynamic import
+ModelFact = None
 
 profileStatNumber = 0
 
@@ -66,7 +67,7 @@ def load(modelManager, url, nextaction=None, base=None, useFileSource=None, erro
     modelManager.showStatus(_("xbrl loading finished, {0}...").format(nextaction))
     return modelXbrl
 
-def create(modelManager, newDocumentType=None, url=None, schemaRefs=None, createModelDocument=True, isEntry=False, errorCaptureLevel=None, initialXml=None, base=None):
+def create(modelManager, newDocumentType=None, url=None, schemaRefs=None, createModelDocument=True, isEntry=False, errorCaptureLevel=None, initialXml=None, initialComment=None, base=None):
     from arelle import (ModelDocument, FileSource)
     modelXbrl = ModelXbrl(modelManager, errorCaptureLevel=errorCaptureLevel)
     modelXbrl.locale = modelManager.locale
@@ -74,7 +75,7 @@ def create(modelManager, newDocumentType=None, url=None, schemaRefs=None, create
         modelXbrl.fileSource = FileSource.FileSource(url, modelManager.cntlr) # url may be an open file handle, use str(url) below
         modelXbrl.closeFileSource= True
         if createModelDocument:
-            modelXbrl.modelDocument = ModelDocument.create(modelXbrl, newDocumentType, str(url), schemaRefs=schemaRefs, isEntry=isEntry, initialXml=initialXml, base=base)
+            modelXbrl.modelDocument = ModelDocument.create(modelXbrl, newDocumentType, str(url), schemaRefs=schemaRefs, isEntry=isEntry, initialXml=initialXml, initialComment=initialComment, base=base)
             if isEntry:
                 del modelXbrl.entryLoadingUrl
                 loadSchemalocatedSchemas(modelXbrl)
@@ -286,6 +287,9 @@ class ModelXbrl:
         self.profileStats = {}
         self.schemaDocsToValidate = set()
         self.modelXbrl = self # for consistency in addressing modelXbrl
+        for pluginXbrlMethod in pluginClassMethods("ModelXbrl.Init"):
+            pluginXbrlMethod(self)
+
 
     def close(self):
         """Closes any views, formula output instances, modelDocument(s), and dereferences all memory used 
@@ -438,8 +442,6 @@ class ModelXbrl:
         :param overrideFilepath: specify to override saving in instance's modelDocument.filepath
         """
         self.modelDocument.save(overrideFilepath)
-        with open( (overrideFilepath or self.modelDocument.filepath), "w", encoding='utf-8') as fh:
-            XmlUtil.writexml(fh, self.modelDocument.xmlDocument, encoding="utf-8")
             
     @property    
     def prefixedNamespaces(self):
@@ -746,8 +748,8 @@ class ModelXbrl:
             return self.factsByDimMemQname(dimQname, memQname)
         except KeyError:
             self._factsByDimQname[dimQname] = fbdq = defaultdict(set)
-            for fact in self.factsInInstance:
-                if fact.isItem:
+            for fact in self.factsInInstance: 
+                if fact.isItem and fact.context is not None:
                     dimValue = fact.context.dimValue(dimQname)
                     if isinstance(dimValue, ModelValue.QName):  # explicit dimension default value
                         fbdq[None].add(fact) # set of all facts that have default value for dimension
@@ -805,11 +807,30 @@ class ModelXbrl:
         :returns: ModelFact -- New fact object
         """
         if parent is None: parent = self.modelDocument.xmlRootElement
+        self.makeelementParentModelObject = parent
         newFact = XmlUtil.addChild(parent, conceptQname, attributes=attributes, text=text,
                                    afterSibling=afterSibling, beforeSibling=beforeSibling)
+        global ModelFact
+        if ModelFact is None:
+            from arelle.ModelInstanceObject import ModelFact
+        if not isinstance(newFact, ModelFact):
+            return None # unable to create fact for this concept
+        del self.makeelementParentModelObject
         if validate:
             XmlValidate.validate(self, newFact)
         self.modelDocument.factDiscover(newFact, parentElement=parent)
+        # update cached sets
+        if not newFact.isNil and hasattr(self, "_nonNilFactsInInstance"):
+            self._nonNilFactsInInstance.add(newFact)
+        if hasattr(self, "_factsByQname"):
+            self._factsByQname[newFact.qname].add(newFact)
+        if newFact.concept is not None:
+            if hasattr(self, "_factsByDatatype"):
+                del self._factsByDatatype # would need to iterate derived type ancestry to populate
+            if hasattr(self, "_factsByPeriodType"):
+                self._factsByPeriodType[newFact.concept.periodType].add(newFact)
+            if hasattr(self, "_factsByDimQname"):
+                del self._factsByDimQname
         return newFact    
         
     def modelObject(self, objectId):
@@ -849,12 +870,10 @@ class ModelXbrl:
 
     def effectiveMessageCode(self, messageCodes):        
         effectiveMessageCode = None
+        _validationType = self.modelManager.disclosureSystem.validationType
         for argCode in messageCodes if isinstance(messageCodes,tuple) else (messageCodes,):
             if (isinstance(argCode, ModelValue.QName) or
-                (self.modelManager.disclosureSystem.EFM and argCode.startswith("EFM")) or
-                (self.modelManager.disclosureSystem.GFM and argCode.startswith("GFM")) or
-                (self.modelManager.disclosureSystem.HMRC and argCode.startswith("HMRC")) or
-                (self.modelManager.disclosureSystem.SBRNL and argCode.startswith("SBR.NL")) or
+                (_validationType and argCode.startswith(_validationType)) or
                 argCode[0:3] not in ("EFM", "GFM", "HMR", "SBR")):
                 effectiveMessageCode = argCode
                 break

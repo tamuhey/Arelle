@@ -62,6 +62,10 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
             modelXbrl.urlUnloadableDocs[normalizedUri] = blocked
         if blocked:
             return None
+    
+    if modelXbrl.modelManager.skipLoading and modelXbrl.modelManager.skipLoading.match(normalizedUri):
+        return None
+    
     if modelXbrl.fileSource.isMappedUrl(normalizedUri):
         mappedUri = modelXbrl.fileSource.mappedUrl(normalizedUri)
     elif PackageManager.isMappedUrl(normalizedUri):
@@ -74,6 +78,9 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
         
     # don't try reloading if not loadable
     
+    if any(pluginMethod(modelXbrl, mappedUri, normalizedUri, isEntry=isEntry, namespace=namespace, **kwargs)
+           for pluginMethod in pluginClassMethods("ModelDocument.IsPullLoadable")):
+        filePath = normalizedUri
     if modelXbrl.fileSource.isInArchive(mappedUri):
         filepath = mappedUri
     else:
@@ -112,14 +119,14 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
     try:
         for pluginMethod in pluginClassMethods("ModelDocument.PullLoader"):
             # assumes not possible to check file in string format or not all available at once
-            modelDocument = pluginMethod(modelXbrl, mappedUri, filepath, **kwargs)
+            modelDocument = pluginMethod(modelXbrl, normalizedUri, filepath, isEntry=isEntry, namespace=namespace, **kwargs)
             if modelDocument is not None:
                 return modelDocument
         if (modelXbrl.modelManager.validateDisclosureSystem and 
             modelXbrl.modelManager.disclosureSystem.validateFileText):
             file, _encoding = ValidateFilingText.checkfile(modelXbrl,filepath)
         else:
-            file, _encoding = modelXbrl.fileSource.file(filepath)
+            file, _encoding = modelXbrl.fileSource.file(filepath, stripDeclaration=True)
         xmlDocument = None
         isPluginParserDocument = False
         for pluginMethod in pluginClassMethods("ModelDocument.CustomLoader"):
@@ -147,6 +154,8 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
                 _("%(fileName)s: file error: %(error)s \nLoading terminated."),
                 modelObject=referringElement, fileName=os.path.basename(uri), error=str(err))
             raise LoadingException()
+        #import traceback
+        #print("traceback {}".format(traceback.format_tb(sys.exc_info()[2])))
         modelXbrl.error("IOerror",
                 _("%(fileName)s: file error: %(error)s"),
                 modelObject=referringElement, fileName=os.path.basename(uri), error=str(err))
@@ -321,7 +330,7 @@ def loadSchemalocatedSchema(modelXbrl, element, relativeUrl, namespace, baseUrl)
             doc.inDTS = False
     return doc
             
-def create(modelXbrl, type, uri, schemaRefs=None, isEntry=False, initialXml=None, base=None):
+def create(modelXbrl, type, uri, schemaRefs=None, isEntry=False, initialXml=None, initialComment=None, base=None):
     """Returns a new modelDocument, created from scratch, with any necessary header elements 
     
     (such as the schema, instance, or RSS feed top level elements)
@@ -342,21 +351,23 @@ def create(modelXbrl, type, uri, schemaRefs=None, isEntry=False, initialXml=None
         for i in range(modelXbrl.modelManager.disclosureSystem.maxSubmissionSubdirectoryEntryNesting):
             modelXbrl.uriDir = os.path.dirname(modelXbrl.uriDir)
     filepath = modelXbrl.modelManager.cntlr.webCache.getfilename(normalizedUri, filenameOnly=True)
+    if initialComment:
+        initialComment = "<!--" + initialComment + "-->"
     # XML document has nsmap root element to replace nsmap as new xmlns entries are required
     if initialXml and type in (Type.INSTANCE, Type.SCHEMA, Type.LINKBASE, Type.RSSFEED):
         Xml = '<nsmap>{0}</nsmap>'.format(initialXml or '')
     elif type == Type.INSTANCE:
         # modelXbrl.uriDir = os.path.dirname(normalizedUri)
-        Xml = ('<nsmap>'
+        Xml = ('<nsmap>{}'
                '<xbrl xmlns="http://www.xbrl.org/2003/instance"'
                ' xmlns:link="http://www.xbrl.org/2003/linkbase"'
-               ' xmlns:xlink="http://www.w3.org/1999/xlink">')
+               ' xmlns:xlink="http://www.w3.org/1999/xlink">').format(initialComment)
         if schemaRefs:
             for schemaRef in schemaRefs:
                 Xml += '<link:schemaRef xlink:type="simple" xlink:href="{0}"/>'.format(schemaRef.replace("\\","/"))
         Xml += '</xbrl></nsmap>'
     elif type == Type.SCHEMA:
-        Xml = ('<nsmap><schema xmlns="http://www.w3.org/2001/XMLSchema" /></nsmap>')
+        Xml = ('<nsmap>{}<schema xmlns="http://www.w3.org/2001/XMLSchema" /></nsmap>').format(initialComment)
     elif type == Type.RSSFEED:
         Xml = '<nsmap><rss version="2.0" /></nsmap>'
     elif type == Type.DTSENTRIES:
@@ -522,10 +533,6 @@ class ModelDocument:
         
         Dict by id of modelObjects in document
 
-        .. attribute:: modelObjects
-        
-        List of modelObjects discovered in document in document order
-
         .. attribute:: hrefObjects
         
         List of (modelObject, modelDocument, id) for each xlink:href
@@ -556,7 +563,6 @@ class ModelDocument:
         modelXbrl.modelObjects.append(self)
         self.referencesDocument = {}
         self.idObjects = {}  # by id
-        self.modelObjects = [] # all model objects
         self.hrefObjects = []
         self.schemaLocationElements = set()
         self.referencedNamespaces = set()
@@ -629,13 +635,16 @@ class ModelDocument:
                     self.toDTS.close()
             urlDocs.pop(self.uri,None)
             xmlDocument = self.xmlDocument
-            parser = self.parser
-            for modelObject in self.modelObjects:
-                modelObject.clear() # clear children
+            dummyRootElement = self.parser.makeelement("{http://dummy}dummy") # may fail for streaming
+            for modelObject in self.xmlRootElement.iter():
+                modelObject.__dict__.clear() # clear python variables of modelObjects (not lxml)
+            self.xmlRootElement.clear() # clear entire lxml subtree
             self.parserLookupName.__dict__.clear()
             self.parserLookupClass.__dict__.clear()
             self.__dict__.clear() # dereference everything before clearing xml tree
-            xmlDocument._setroot(parser.makeelement("{http://dummy}dummy"))
+            if dummyRootElement is not None:
+                xmlDocument._setroot(dummyRootElement)
+            del dummyRootElement
         except AttributeError:
             pass    # maybe already cloased
         if len(visited) == 1:  # outer call
@@ -858,7 +867,7 @@ class ModelDocument:
                     self.schemaLinkbaseRefDiscover(element)
 
     def schemaLinkbaseRefDiscover(self, element):
-        return self.discoverHref(element)
+        return self.discoverHref(element, urlRewritePluginClass="ModelDocument.InstanceSchemaRefRewriter")
     
     def linkbasesDiscover(self, tree):
         for linkbaseElement in tree.iterdescendants(tag="{http://www.xbrl.org/2003/linkbase}linkbase"):
@@ -961,7 +970,7 @@ class ModelDocument:
                                 _("Linkbase extended link %(element)s missing schema definition"),
                                 modelObject=lbElement, element=lbElement.prefixedName)
                 
-    def discoverHref(self, element, nonDTS=False):
+    def discoverHref(self, element, nonDTS=False, urlRewritePluginClass=None):
         href = element.get("{http://www.w3.org/1999/xlink}href")
         if href:
             url, id = UrlUtil.splitDecodeFragment(href)
@@ -973,6 +982,9 @@ class ModelDocument:
                     _newDoc = DocumentPrototype
                 else:
                     _newDoc = load
+                if urlRewritePluginClass:
+                    for pluginMethod in pluginClassMethods(urlRewritePluginClass):
+                        url = pluginMethod(self, url)
                 doc = _newDoc(self.modelXbrl, url, isDiscovered=not nonDTS, base=self.baseForElement(element), referringElement=element)
                 if not nonDTS and doc is not None and doc not in self.referencesDocument:
                     self.referencesDocument[doc] = ModelDocumentReference("href", element)
@@ -1008,6 +1020,8 @@ class ModelDocument:
                     elif ln == "unit":
                         self.unitDiscover(instElement)
                 elif ns == XbrlConst.link:
+                    pass
+                elif ns in XbrlConst.ixbrlAll and ln=="relationship":
                     pass
                 else: # concept elements
                     self.factDiscover(instElement, self.modelXbrl.facts)
@@ -1064,7 +1078,7 @@ class ModelDocument:
                 elif ixNS != inlineElement.namespaceURI:
                     conflictingNSelts.append(inlineElement)
         if conflictingNSelts:
-            self.modelXbrl.error("ix.3.1:multipleIxNamespaces",
+            self.modelXbrl.error("ix:multipleIxNamespaces",
                     _("Multiple ix namespaces were found"),
                     modelObject=conflictingNSelts)
         self.ixNStag = ixNStag = "{" + ixNS + "}"
@@ -1256,7 +1270,7 @@ def inlineIxdsDiscover(modelXbrl):
     for htmlElement in modelXbrl.ixdsHtmlElements:  
         mdlDoc = htmlElement.modelDocument
         # inline 1.0 ixFootnotes, build resources (with ixContinuation)
-        for modelInlineFootnote in htmlElement.iterdescendants(tag="{http://www.xbrl.org/2008/inlineXBRL}footnote"):
+        for modelInlineFootnote in htmlElement.iterdescendants(tag=XbrlConst.qnIXbrlFootnote.clarkNotation):
             if isinstance(modelInlineFootnote,ModelObject):
                 # link
                 linkrole = modelInlineFootnote.get("footnoteLinkRole", XbrlConst.defaultLinkRole)
@@ -1288,7 +1302,7 @@ def inlineIxdsDiscover(modelXbrl):
                                                                 linkrole, arcrole))
                 
         # inline 1.1 ixRelationships and ixFootnotes
-        for modelInlineFootnote in htmlElement.iterdescendants(tag="{http://www.xbrl.org/CR-2013-08-21/inlineXBRL}footnote"):
+        for modelInlineFootnote in htmlElement.iterdescendants(tag=XbrlConst.qnIXbrl11Footnote.clarkNotation):
             if isinstance(modelInlineFootnote,ModelObject):
                 locateContinuation(modelInlineFootnote)
                 linkPrototype = LinkPrototype(mdlDoc, mdlDoc.xmlRootElement, XbrlConst.qnLinkFootnoteLink, XbrlConst.defaultLinkRole)
@@ -1296,7 +1310,7 @@ def inlineIxdsDiscover(modelXbrl):
                 modelXbrl.baseSets[baseSetKey].append(linkPrototype) # allows generating output instance with this loc
                 linkPrototype.childElements.append(modelInlineFootnote)
 
-        for modelInlineRel in htmlElement.iterdescendants(tag="{http://www.xbrl.org/CR-2013-08-21/inlineXBRL}relationship"):
+        for modelInlineRel in htmlElement.iterdescendants(tag=XbrlConst.qnIXbrl11Relationship.clarkNotation):
             if isinstance(modelInlineRel,ModelObject):
                 linkrole = modelInlineRel.get("linkRole", XbrlConst.defaultLinkRole)
                 arcrole = modelInlineRel.get("arcrole", XbrlConst.factFootnote)
