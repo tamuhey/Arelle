@@ -314,7 +314,7 @@ else:
 timestamp = datetime.datetime.utcnow()
 setup(name='Arelle',
       # for version use year.month.day.hour (in UTC timezone) - must be 4 integers for building
-      version=0.1.0.0,
+      version=0.2.0.0,
       description='An open source XBRL platform',
       long_description=open('README.md').read(),
       author='arelle.org',
