@@ -1,4 +1,4 @@
-include README.txt
+include README.md
 recursive-include arelle *.gif
 recursive-include arelle *.ico
 recursive-include arelle *.xbm
@@ -6,4 +6,3 @@ recursive-include arelle *.xsd
 recursive-include arelle *.xml
 recursive-include arelle *.pot
 include arelle/config/*
-
