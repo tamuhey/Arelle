@@ -1,0 +1,8 @@
+language: python
+runtime: 3.2
+
+requirements:
+  - Arelle.egg-info/requires.txt
+
+script:
+  - python setup.py sdist
