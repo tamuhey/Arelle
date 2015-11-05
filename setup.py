@@ -1,18 +1,18 @@
-'''
+"""
 Created on Jan 30, 2011
 
 @author: Mark V Systems Limited
 (c) Copyright 2011 Mark V Systems Limited, All rights reserved.
-'''
+"""
 import sys, os, datetime
 
-setup_requires = ['lxml']
+setup_requires = ['lxml==3.4.4']
 # install_requires specifies a list of package dependencies that are 
 # installed when 'python setup.py install' is run. On Linux/Mac systems 
 # this also allows installation directly from the github repository 
 # (using 'pip install -e git+git://github.com/rheimbuchArelle.git#egg=Arelle') 
 # and the install_requires packages are auto-installed as well.
-install_requires = ['lxml']
+install_requires = ['lxml==3.4.4']
 options = {}
 scripts = []
 cxFreezeExecutables = []
@@ -312,42 +312,45 @@ else:
     cx_FreezeExecutables = []
 
 timestamp = datetime.datetime.utcnow()
-setup(name='Arelle',
-      # for version use year.month.day.hour (in UTC timezone) - must be 4 integers for building
-      version=timestamp.strftime("%Y.%m.%d.%H"),
-      description='An open source XBRL platform',
-      long_description=open('README.md').read(),
-      author='arelle.org',
-      author_email='support@arelle.org',
-      url='http://www.arelle.org',
-      download_url='http://www.arelle.org/download',
-      cmdclass=cmdclass,
-      include_package_data = True,   # note: this uses MANIFEST.in
-      packages=packages,
-      data_files=dataFiles,
-      platforms = ['OS Independent'],
-      license = 'Apache-2',
-      keywords = ['xbrl'],
-      classifiers = [
-          'Development Status :: 1 - Active',
-          'Intended Audience :: End Users/Desktop',
-          'Intended Audience :: Developers',
-          'License :: OSI Approved :: Apache-2 License',
-          'Programming Language :: Python :: 3',
-          'Programming Language :: Python :: 3.3',
-          'Operating System :: OS Independent',
-          'Topic :: XBRL Validation and Versioning',
-          ],
-      scripts=scripts,
-      entry_points = {
-          'console_scripts': [
-              'arelle=arelle.CntlrCmdLine:main',
-              'arelle-gui=arelle.CntlrWinMain:main',
-          ]
-      },
-      setup_requires = setup_requires,
-      install_requires = install_requires,
-      options = options,
-      executables = cx_FreezeExecutables,
-     )
+setup_args = dict(
+    name='Arelle',
+    # for version use year.month.day.hour (in UTC timezone) - must be 4 integers for building
+    version=timestamp.strftime("%Y.%m.%d.%H"),
+    description='An open source XBRL platform',
+    long_description=open('README.md').read(),
+    author='arelle.org',
+    author_email='support@arelle.org',
+    url='http://www.arelle.org',
+    download_url='http://www.arelle.org/download',
+    cmdclass=cmdclass,
+    include_package_data=True,   # note: this uses MANIFEST.in
+    packages=packages,
+    data_files=dataFiles,
+    platforms=['OS Independent'],
+    license='Apache-2',
+    keywords=['xbrl'],
+    classifiers=[
+        'Development Status :: 1 - Active',
+        'Intended Audience :: End Users/Desktop',
+        'Intended Audience :: Developers',
+        'License :: OSI Approved :: Apache-2 License',
+        'Programming Language :: Python :: 3',
+        'Programming Language :: Python :: 3.4',
+        'Operating System :: OS Independent',
+        'Topic :: XBRL Validation and Versioning',
+    ],
+    scripts=scripts,
+    entry_points={
+        'console_scripts': [
+            'arelle=arelle.CntlrCmdLine:main',
+            'arelle-gui=arelle.CntlrWinMain:main',
+        ]
+    },
+    setup_requires=setup_requires,
+    install_requires=install_requires,
+    options=options,
+    executables=cx_FreezeExecutables,
+)
 
+if __name__ == '__main__':
+    setup(**setup_args)
