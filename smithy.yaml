@@ -9,8 +9,6 @@ env:
 script:
   - ./smithy_arelle.sh
 
-after_script:
-  -
 
 artifacts:
   pypi:
