@@ -1,6 +1,6 @@
 project: arelle
-language: arelle
-runner_image: docker.webfilings.org/devops/smithy-runner:python3.4
+language: wf_arelle
+runner_image: docker.webfilings.org/devops/smithy-runner:python34-326
 
 env:
   - PATH=/tmp/virtualenv/bin:$PATH
