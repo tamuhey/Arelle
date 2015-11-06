@@ -1,4 +1,4 @@
-include README.txt
+include README.md
 recursive-include arelle *.gif
 recursive-include arelle *.ico
 recursive-include arelle *.xbm
