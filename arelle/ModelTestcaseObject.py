@@ -272,6 +272,15 @@ class ModelTestcaseVariation(ModelObject):
         return None
     
     @property
+    def expectedCount(self):
+        for pluginXbrlMethod in pluginClassMethods("ModelTestcaseVariation.ExpectedCount"):
+            _count = pluginXbrlMethod(self)
+            if _count is not None: # ignore plug in if not a plug-in-recognized test case
+                return _count
+        return None
+        
+    
+    @property
     def severityLevel(self):
         for pluginXbrlMethod in pluginClassMethods("ModelTestcaseVariation.ExpectedSeverity"):
             severityLevelName = pluginXbrlMethod(self)
@@ -279,10 +288,15 @@ class ModelTestcaseVariation(ModelObject):
                 return logging._checkLevel(severityLevelName)
         # default behavior without plugins
         # SEC error cases have <assert severity={err|wrn}>...
-        if XmlUtil.descendant(self, None, "assert", attrName="severity", attrValue="wrn") is not None:
+        if (XmlUtil.descendant(self, None, "assert", attrName="severity", attrValue="wrn") is not None or
+            XmlUtil.descendant(self, None, "result", attrName="severity", attrValue="warning") is not None):
             return logging._checkLevel("WARNING")
         return logging._checkLevel("INCONSISTENCY")
 
+    @property
+    def blockedMessageCodes(self):
+        return XmlUtil.descendantAttr(self, None, "results", "blockedMessageCodes")
+    
     @property
     def expectedVersioningReport(self):
         XmlUtil.text(XmlUtil.text(XmlUtil.descendant(XmlUtil.descendant(self, None, "result"), None, "versioningReport")))

@@ -4,7 +4,7 @@ Created on Oct 5, 2010
 @author: Mark V Systems Limited
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
-import os, posixpath, sys, re, shutil, time, calendar, io, json, logging
+import os, posixpath, sys, re, shutil, time, calendar, io, json, logging, shutil
 if sys.version[0] >= '3':
     from urllib.parse import quote, unquote
     from urllib.error import URLError, HTTPError, ContentTooShortError
@@ -18,6 +18,7 @@ else: # python 2.7.2
     from urllib2 import URLError, HTTPError
     import urllib2 as proxyhandlers
 from arelle.FileSource import SERVER_WEB_CACHE
+from arelle.PluginManager import pluginClassMethods
 from arelle.UrlUtil import isHttpUrl
 addServerWebCache = None
     
@@ -154,18 +155,35 @@ class WebCache:
         self.cachedUrlCheckTimesModified = False
         
     def resetProxies(self, httpProxyTuple):
-        try:
-            from ntlm import HTTPNtlmAuthHandler
-            self.hasNTLM = True
-        except ImportError:
-            self.hasNTLM = False
-        self.proxy_handler = proxyhandlers.ProxyHandler(proxyDirFmt(httpProxyTuple))
-        self.proxy_auth_handler = proxyhandlers.ProxyBasicAuthHandler()
-        self.http_auth_handler = proxyhandlers.HTTPBasicAuthHandler()
-        if self.hasNTLM:
-            self.ntlm_auth_handler = HTTPNtlmAuthHandler.HTTPNtlmAuthHandler()            
-            self.opener = proxyhandlers.build_opener(self.proxy_handler, self.ntlm_auth_handler, self.proxy_auth_handler, self.http_auth_handler)
-        else:
+        # for ntlm user and password are required
+        self.hasNTLM = False
+        if isinstance(httpProxyTuple,(tuple,list)) and len(httpProxyTuple) == 5:
+            useOsProxy, _urlAddr, _urlPort, user, password = httpProxyTuple
+            _proxyDirFmt = proxyDirFmt(httpProxyTuple)
+            # only try ntlm if user and password are provided because passman is needed
+            if user and not useOsProxy:
+                for pluginXbrlMethod in pluginClassMethods("Proxy.HTTPNtlmAuthHandler"):
+                    HTTPNtlmAuthHandler = pluginXbrlMethod()
+                    if HTTPNtlmAuthHandler is not None:
+                        self.hasNTLM = True
+                if not self.hasNTLM: # try for python site-packages ntlm
+                    try:
+                        from ntlm import HTTPNtlmAuthHandler
+                        self.hasNTLM = True
+                    except ImportError:
+                        pass
+            if self.hasNTLM:    
+                pwrdmgr = proxyhandlers.HTTPPasswordMgrWithDefaultRealm()
+                pwrdmgr.add_password(None, _proxyDirFmt["http"], user, password)                
+                self.proxy_handler = proxyhandlers.ProxyHandler({})
+                self.proxy_auth_handler = proxyhandlers.ProxyBasicAuthHandler(pwrdmgr)
+                self.http_auth_handler = proxyhandlers.HTTPBasicAuthHandler(pwrdmgr)
+                self.ntlm_auth_handler = HTTPNtlmAuthHandler.HTTPNtlmAuthHandler(pwrdmgr)            
+                self.opener = proxyhandlers.build_opener(self.proxy_handler, self.ntlm_auth_handler, self.proxy_auth_handler, self.http_auth_handler)
+        if not self.hasNTLM:
+            self.proxy_handler = proxyhandlers.ProxyHandler(proxyDirFmt(httpProxyTuple))
+            self.proxy_auth_handler = proxyhandlers.ProxyBasicAuthHandler()
+            self.http_auth_handler = proxyhandlers.HTTPBasicAuthHandler()
             self.opener = proxyhandlers.build_opener(self.proxy_handler, self.proxy_auth_handler, self.http_auth_handler)
 
         #self.opener.close()
@@ -447,7 +465,10 @@ class WebCache:
                 # rename temporarily named downloaded file to desired name                
                 if os.path.exists(filepath):
                     try:
-                        os.remove(filepath)
+                        if os.path.isfile(filepath) or os.path.islink(filepath):
+                            os.remove(filepath)
+                        elif os.path.isdir(filepath):
+                            shutil.rmtree(filepath)
                     except Exception as err:
                         self.cntlr.addToLog(_("%(error)s \nUnsuccessful removal of prior file %(filepath)s \nPlease remove with file manager."),
                                             messageCode="webCache:cachedPriorFileLocked",

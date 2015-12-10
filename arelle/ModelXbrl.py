@@ -7,12 +7,14 @@ Created on Oct 3, 2010
 from collections import defaultdict
 import os, sys, traceback, uuid
 import logging
+from decimal import Decimal
 from arelle import UrlUtil, XmlUtil, ModelValue, XbrlConst, XmlValidate
 from arelle.FileSource import FileNamedStringIO
 from arelle.ModelObject import ModelObject, ObjectPropertyViewWrapper
 from arelle.Locale import format_string
 from arelle.PluginManager import pluginClassMethods
 from arelle.PrototypeInstanceObject import FactPrototype, DimValuePrototype
+from arelle.PythonUtil import flattenSequence
 from arelle.UrlUtil import isHttpUrl
 from arelle.ValidateXbrlDimensions import isFactDimensionallyValid
 ModelRelationshipSet = None # dynamic import
@@ -287,6 +289,7 @@ class ModelXbrl:
         self.profileStats = {}
         self.schemaDocsToValidate = set()
         self.modelXbrl = self # for consistency in addressing modelXbrl
+        self.arelleUnitTests = {} # unit test entries (usually from processing instructions
         for pluginXbrlMethod in pluginClassMethods("ModelXbrl.Init"):
             pluginXbrlMethod(self)
 
@@ -372,6 +375,14 @@ class ModelXbrl:
             return modelRoles[0].definition or roleURI
         return roleURI
     
+    def roleTypeName(self, roleURI):
+        # authority-specific role type name
+        for pluginXbrlMethod in pluginClassMethods("ModelXbrl.RoleTypeName"):
+            _roleTypeName = pluginXbrlMethod(self, roleURI)
+            if _roleTypeName:
+                return _roleTypeName
+        return self.roleTypeDefinition(roleURI)
+    
     def matchSubstitutionGroup(self, elementQname, subsGrpMatchTable):
         """Resolve a subsitutionGroup for the elementQname from the match table
         
@@ -436,12 +447,12 @@ class ModelXbrl:
             if isinstance(view, ViewWinDTS.ViewDTS):
                 self.modelManager.cntlr.uiThreadQueue.put((view.view, []))
                 
-    def saveInstance(self, overrideFilepath=None):
+    def saveInstance(self, overrideFilepath=None, outputZip=None):
         """Saves current instance document file.
         
         :param overrideFilepath: specify to override saving in instance's modelDocument.filepath
         """
-        self.modelDocument.save(overrideFilepath)
+        self.modelDocument.save(overrideFilepath=overrideFilepath, outputZip=outputZip)
             
     @property    
     def prefixedNamespaces(self):
@@ -690,7 +701,9 @@ class ModelXbrl:
             return self._factsByQname
         except AttributeError:
             self._factsByQname = fbqn = defaultdict(set)
-            for f in self.factsInInstance: fbqn[f.qname].add(f)
+            for f in self.factsInInstance: 
+                if f.qname is not None:
+                    fbqn[f.qname].add(f)
             return fbqn
         
     def factsByDatatype(self, notStrict, typeQname): # indexed by fact (concept) qname
@@ -871,10 +884,12 @@ class ModelXbrl:
     def effectiveMessageCode(self, messageCodes):        
         effectiveMessageCode = None
         _validationType = self.modelManager.disclosureSystem.validationType
+        _exclusiveTypesPattern = self.modelManager.disclosureSystem.exclusiveTypesPattern
+        
         for argCode in messageCodes if isinstance(messageCodes,tuple) else (messageCodes,):
             if (isinstance(argCode, ModelValue.QName) or
                 (_validationType and argCode.startswith(_validationType)) or
-                argCode[0:3] not in ("EFM", "GFM", "HMR", "SBR")):
+                (not _exclusiveTypesPattern or _exclusiveTypesPattern.match(argCode) == None)):
                 effectiveMessageCode = argCode
                 break
         return effectiveMessageCode
@@ -914,6 +929,7 @@ class ModelXbrl:
         # determine message and extra arguments
         fmtArgs = {}
         extras = {"messageCode":messageCode}
+        modelObjectArgs = ()
 
         for argName, argValue in codedArgs.items():
             if argName in ("modelObject", "modelXbrl", "modelDocument"):
@@ -925,7 +941,8 @@ class ModelXbrl:
                     except AttributeError:
                         entryUrl = self.fileSource.url
                 refs = []
-                for arg in (argValue if isinstance(argValue, (tuple,list,set)) else (argValue,)):
+                modelObjectArgs = argValue if isinstance(argValue, (tuple,list,set)) else (argValue,)
+                for arg in flattenSequence(modelObjectArgs):
                     if arg is not None:
                         if isinstance(arg, _STR_BASE):
                             objectUrl = arg
@@ -937,7 +954,10 @@ class ModelXbrl:
                                     objectUrl = self.modelDocument.uri
                                 except AttributeError:
                                     objectUrl = self.entryLoadingUrl
-                        file = UrlUtil.relativeUri(entryUrl, objectUrl)
+                        try:
+                            file = UrlUtil.relativeUri(entryUrl, objectUrl)
+                        except:
+                            file = ""
                         ref = {}
                         if isinstance(arg,(ModelObject, ObjectPropertyViewWrapper)):
                             _arg = arg.modelObject if isinstance(arg, ObjectPropertyViewWrapper) else arg
@@ -1005,11 +1025,11 @@ class ModelXbrl:
                 elif isinstance(argValue, _INT_TYPES):
                     # need locale-dependent formatting
                     fmtArgs[argName] = format_string(self.modelManager.locale, '%i', argValue)
-                elif isinstance(argValue,float):
+                elif isinstance(argValue,(float,Decimal)):
                     # need locale-dependent formatting
                     fmtArgs[argName] = format_string(self.modelManager.locale, '%f', argValue)
                 else:
-                    fmtArgs[argName] = argValue
+                    fmtArgs[argName] = str(argValue)
         if "refs" not in extras:
             try:
                 file = os.path.basename(self.modelDocument.uri)
@@ -1019,10 +1039,19 @@ class ModelXbrl:
                 except:
                     file = ""
             extras["refs"] = [{"href": file}]
+        for pluginXbrlMethod in pluginClassMethods("Logging.Message.Parameters"):
+            # plug in can rewrite msg string or return msg if not altering msg
+            msg = pluginXbrlMethod(messageCode, msg, modelObjectArgs, fmtArgs) or msg
         return (messageCode, 
                 (msg, fmtArgs) if fmtArgs else (msg,), 
                 extras)
 
+    def debug(self, codes, msg, **args):
+        """Same as error(), but as info
+        """
+        """@messageCatalog=[]"""
+        self.log('DEBUG', codes, msg, **args)
+                    
     def info(self, codes, msg, **args):
         """Same as error(), but as info
         """
@@ -1134,7 +1163,10 @@ class ModelXbrl:
             if activityCompleted:
                 timeTaken = time.time() - self._startedProfiledActivity
                 if timeTaken > minTimeToShow:
-                    self.modelManager.addToLog("{0} {1:.2f} secs".format(activityCompleted, timeTaken), messageCode="info:profileActivity")
+                    self.info("info:profileActivity",
+                            _("%(activity)s %(time)s secs\n"),
+                            modelObject=self.modelXbrl.modelDocument, activity=activityCompleted,
+                            time=format_string(self.modelManager.locale, "%.3f", timeTaken, grouping=True))
         except AttributeError:
             pass
         self._startedProfiledActivity = time.time()

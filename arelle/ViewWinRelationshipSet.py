@@ -11,6 +11,7 @@ from arelle.ModelRelationshipSet import ModelRelationshipSet
 from arelle.ModelDtsObject import ModelRelationship
 from arelle.ModelFormulaObject import ModelFilter
 from arelle.ViewUtil import viewReferences, groupRelationshipSet, groupRelationshipLabel
+from arelle.XbrlConst import conceptNameLabelRole
 
 def viewRelationshipSet(modelXbrl, tabWin, arcrole, 
                         linkrole=None, linkqname=None, arcqname=None, lang=None, 
@@ -155,13 +156,20 @@ class ViewRelationshipSet(ViewWinTree.ViewTree):
                 roleId = "node{0}".format(self.id)
             self.id += 1
             linkroleUris.append((roledefinition, linkroleUri, roleId))
-        linkroleUris.sort()
+        # entry may be ((table group, order, role definition), uri, id) or (str definition, uri, id)
+        linkroleUris.sort(key=lambda d:d[0] if isinstance(d[0],tuple) else ("9noTableKey",d[0],""))
         
         def insertLinkroleChildren(parentNode, childUris):
             for childUri in childUris:
                 for roledefinition, linkroleUri, roleId in linkroleUris:
-                    if childUri == linkroleUri and isinstance(roledefinition, tuple): # tableGroup
-                        _nextTableGroup, _order, roledefinition = roledefinition
+                    if childUri == linkroleUri: # and isinstance(roledefinition, tuple): # tableGroup
+                        if isinstance(roledefinition, tuple):
+                            _nextTableGroup, _order, roledefinition = roledefinition
+                        else:
+                            modelRoleTypes = self.modelXbrl.roleTypes.get(linkroleUri)
+                            roledefinition = (modelRoleTypes[0].genLabel(lang=self.lang, strip=True) or 
+                                              modelRoleTypes[0].definition or 
+                                              linkroleUri)
                         childId = "_{}{}".format(self.id, roleId)
                         self.id += 1
                         childNode = self.treeView.insert(parentNode, "end", childId, text=roledefinition, tags=("ELR",))
@@ -294,7 +302,8 @@ class ViewRelationshipSet(ViewWinTree.ViewTree):
                     if toConcept in visited:
                         childPrefix += "(loop)"
                     labelrole = modelRel.preferredLabel
-                    if not labelrole: labelrole = self.labelrole
+                    if not labelrole or self.labelrole == conceptNameLabelRole: 
+                        labelrole = self.labelrole
                     n += 1 # child has opposite row style of parent
                     self.viewConcept(toConcept, modelRel, childPrefix, labelrole, childnode, n, nestedRelationshipSet, visited)
                 visited.remove(concept)

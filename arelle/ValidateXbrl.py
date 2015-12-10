@@ -16,6 +16,7 @@ from arelle.ModelDtsObject import ModelConcept
 from arelle.ModelInstanceObject import ModelInlineFact
 from arelle.ModelValue import qname
 from arelle.PluginManager import pluginClassMethods
+from arelle.XbrlConst import ixbrlAll
 from arelle.XmlValidate import VALID
 from collections import defaultdict
 validateUniqueParticleAttribution = None # dynamic import
@@ -59,11 +60,12 @@ class ValidateXbrl:
         self.modelXbrl = modelXbrl
         self.validateDisclosureSystem = modelXbrl.modelManager.validateDisclosureSystem
         self.disclosureSystem = modelXbrl.modelManager.disclosureSystem
-        self.validateEFM = self.validateDisclosureSystem and self.disclosureSystem.EFM
+        self.validateEFM = self.validateDisclosureSystem and self.disclosureSystem.EFM  # deprecated non-plugin validators
         self.validateGFM = self.validateDisclosureSystem and self.disclosureSystem.GFM
         self.validateEFMorGFM = self.validateDisclosureSystem and self.disclosureSystem.EFMorGFM
         self.validateHMRC = self.validateDisclosureSystem and self.disclosureSystem.HMRC
         self.validateSBRNL = self.validateDisclosureSystem and self.disclosureSystem.SBRNL
+        self.validateEFMorGFMorSBRNL = self.validateEFMorGFM or self.validateSBRNL
         self.validateXmlLang = self.validateDisclosureSystem and self.disclosureSystem.xmlLangPattern
         self.validateCalcLB = modelXbrl.modelManager.validateCalcLB
         self.validateInferDecimals = modelXbrl.modelManager.validateInferDecimals
@@ -375,10 +377,11 @@ class ValidateXbrl:
             
         if self.validateIXDS:
             modelXbrl.modelManager.showStatus(_("Validating inline document set"))
+            _customTransforms = self.modelXbrl.modelManager.customTransforms or {}
             ixdsIdObjects = defaultdict(list)
             for ixdsDoc in self.ixdsDocs:
                 for idObject in ixdsDoc.idObjects.values():
-                    if idObject.namespaceURI in XbrlConst.ixbrlAll or idObject.elementQname in (XbrlConst.qnXbrliContext, XbrlConst.qnXbrliUnit):
+                    if idObject.namespaceURI in ixbrlAll or idObject.elementQname in (XbrlConst.qnXbrliContext, XbrlConst.qnXbrliUnit):
                         ixdsIdObjects[idObject.id].append(idObject)
             for _id, objs in ixdsIdObjects.items():
                 if len(objs) > 1:
@@ -410,11 +413,13 @@ class ValidateXbrl:
                             modelObject=f, fact=f.qname, unit=f.unitID)
                 fmt = f.format
                 if fmt:
-                    if fmt.namespaceURI not in FunctionIxt.ixtNamespaceURIs:
+                    if fmt in _customTransforms:
+                        pass
+                    elif fmt.namespaceURI not in FunctionIxt.ixtNamespaceFunctions:
                         self.modelXbrl.error("ix:invalidTransformation",
                             _("Fact %(fact)s has unrecognized transformation namespace %(namespace)s"),
                             modelObject=f, fact=f.qname, namespace=fmt.namespaceURI)
-                    elif fmt.localName not in FunctionIxt.ixtFunctions:
+                    elif fmt.localName not in FunctionIxt.ixtNamespaceFunctions[fmt.namespaceURI]:
                         self.modelXbrl.error("ix:invalidTransformation",
                             _("Fact %(fact)s has unrecognized transformation name %(name)s"),
                             modelObject=f, fact=f.qname, name=fmt.localName)
@@ -468,7 +473,7 @@ class ValidateXbrl:
             for ixRel in self.ixdsRelationships:
                 for fromRef in ixRel.get("fromRefs","").split():
                     refs = ixdsIdObjects.get(fromRef)
-                    if refs is None or refs[0].namespaceURI != ixRel or refs[0].localName not in ("fraction", "nonFraction", "nonNumeric", "tuple"):
+                    if refs is None or refs[0].namespaceURI not in ixbrlAll or refs[0].localName not in ("fraction", "nonFraction", "nonNumeric", "tuple"):
                         modelXbrl.error("ix:relationshipFromRef",
                             _("Inline XBRL fromRef %(ref)s is not a fraction, ix:nonFraction, ix:nonNumeric or ix:tuple."),
                             modelObject=ixRel, ref=fromRef)
@@ -476,7 +481,7 @@ class ValidateXbrl:
                 hasToRefMixture = False
                 for toRef in ixRel.get("toRefs","").split():
                     refs = ixdsIdObjects.get(fromRef)
-                    if refs is None or refs[0].namespaceURI != ixRel or refs[0].localName not in ("footnote", "fraction", "nonFraction", "nonNumeric", "tuple"):
+                    if refs is None or refs[0].namespaceURI not in ixbrlAll or refs[0].localName not in ("footnote", "fraction", "nonFraction", "nonNumeric", "tuple"):
                         modelXbrl.error("ix:relationshipToRef",
                             _("Inline XBRL fromRef %(ref)s is not a footnote, fraction, ix:nonFraction, ix:nonNumeric or ix:tuple."),
                             modelObject=ixRel, ref=fromRef)
@@ -581,7 +586,8 @@ class ValidateXbrl:
                             _("Footnote arc in extended link %(linkrole)s from %(xlinkLabelFrom)s to %(xlinkLabelTo)s \"from\" is not a loc"),
                             modelObject=arcElt, 
                             linkrole=modelLink.role, xlinkLabelFrom=fromLabel, xlinkLabelTo=toLabel)
-                    if toLabel not in resourceLabels or resourceLabels[toLabel].qname != XbrlConst.qnLinkFootnote:
+                    if not((toLabel in resourceLabels and resourceLabels[toLabel].qname == XbrlConst.qnLinkFootnote) or
+                           (toLabel in locLabels and locLabels[toLabel].dereference().qname == XbrlConst.qnLinkFootnote)):
                         self.modelXbrl.error("xbrl.4.11.1.3.1:factFootnoteArcTo",
                             _("Footnote arc in extended link %(linkrole)s from %(xlinkLabelFrom)s to %(xlinkLabelTo)s \"to\" is not a footnote resource"),
                             modelObject=arcElt, 
@@ -777,7 +783,7 @@ class ValidateXbrl:
                 
     def checkFactsDimensions(self, facts): # check fact dimensions in document order
         for f in facts:
-            if f.concept.isItem and f.context is not None:
+            if f.concept is not None and (f.concept.isItem and f.context is not None):
                 ValidateXbrlDimensions.checkFact(self, f)
             elif f.modelTupleFacts:
                 self.checkFactsDimensions(f.modelTupleFacts)

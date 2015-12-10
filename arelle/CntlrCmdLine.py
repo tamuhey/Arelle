@@ -9,7 +9,7 @@ This module is Arelle's controller in command line non-interactive mode
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
 from arelle import PythonUtil # define 2.x or 3.x string types
-import gettext, time, datetime, os, shlex, sys, traceback, fnmatch
+import gettext, time, datetime, os, shlex, sys, traceback, fnmatch, threading, json, logging
 from optparse import OptionParser, SUPPRESS_HELP
 import re
 from arelle import (Cntlr, FileSource, ModelDocument, XmlUtil, Version, 
@@ -22,10 +22,13 @@ from arelle.Locale import format_string
 from arelle.ModelFormulaObject import FormulaOptions
 from arelle import PluginManager
 from arelle.PluginManager import pluginClassMethods
+from arelle.UrlUtil import isHttpUrl
 from arelle.WebCache import proxyTuple
 import logging
 from lxml import etree
-win32file = None
+win32file = win32api = win32process = pywintypes = None
+STILL_ACTIVE = 259 # MS Windows process status constants
+PROCESS_QUERY_INFORMATION = 0x400
 
 def main():
     """Main program to initiate application from command line or as a separate process (e.g, java Runtime.getRuntime().exec).  May perform
@@ -65,7 +68,9 @@ def parseAndRun(args):
                              "an XBRL instance, schema, linkbase file, "
                              "inline XBRL instance, testcase file, "
                              "testcase index file.  FILENAME may be "
-                             "a local file or a URI to a web located file."))
+                             "a local file or a URI to a web located file.  "
+                             "For multiple instance filings may be | separated file names or JSON list "
+                             "of file/parameter dicts [{\"file\":\"filepath\"}, {\"file\":\"file2path\"} ...]."))
     parser.add_option("--username", dest="username",
                       help=_("user name if needed (with password) for web file retrieval"))
     parser.add_option("--password", dest="password",
@@ -189,6 +194,7 @@ def parseAndRun(args):
                       help=_("Regular expression filter for log message code."))
     parser.add_option("--logcodefilter", action="store", dest="logCodeFilter", help=SUPPRESS_HELP)
     parser.add_option("--statusPipe", action="store", dest="statusPipe", help=SUPPRESS_HELP)
+    parser.add_option("--monitorParentProcess", action="store", dest="monitorParentProcess", help=SUPPRESS_HELP)
     parser.add_option("--outputAttribution", action="store", dest="outputAttribution", help=SUPPRESS_HELP)
     parser.add_option("--outputattribution", action="store", dest="outputAttribution", help=SUPPRESS_HELP)
     parser.add_option("--showOptions", action="store_true", dest="showOptions", help=SUPPRESS_HELP)
@@ -335,7 +341,7 @@ def parseAndRun(args):
         args = ["--webserver=::cgi"]
     elif cntlr.isMSW:
         # if called from java on Windows any empty-string arguments are lost, see:
-        # http://bugs.sun.com/view_bug.do?bug_id=6518827
+        # http://bugs.java.com/view_bug.do?bug_id=6518827
         # insert needed arguments
         sourceArgs = args
         args = []
@@ -351,6 +357,9 @@ def parseAndRun(args):
             if priorArg in optionsWithArg and arg in namedOptions:
                 # probable java/MSFT interface bug 6518827
                 args.append('')  # add empty string argument
+            # remove quoting if arguments quoted according to http://bugs.java.com/view_bug.do?bug_id=6518827
+            if r'\"' in arg:  # e.g., [{\"foo\":\"bar\"}] -> [{"foo":"bar"}]
+                arg = arg.replace(r'\"', '"')
             args.append(arg)
             priorArg = arg
         
@@ -401,6 +410,7 @@ def parseAndRun(args):
                 )):
             parser.error(_("incorrect arguments with --webserver, please try\n  python CntlrCmdLine.py --help"))
         else:
+            # note that web server logging does not strip time stamp, use logFormat if that is desired
             cntlr.startLogging(logFileName='logToBuffer')
             from arelle import CntlrWebMain
             app = CntlrWebMain.startWebserver(cntlr, options)
@@ -410,10 +420,20 @@ def parseAndRun(args):
         # parse and run the FILENAME
         cntlr.startLogging(logFileName=(options.logFile or "logToPrint"),
                            logFormat=(options.logFormat or "[%(messageCode)s] %(message)s - %(file)s"),
-                           logLevel=(options.logLevel or "DEBUG"))
+                           logLevel=(options.logLevel or "DEBUG"),
+                           logToBuffer=getattr(options, "logToBuffer", False)) # e.g., used by EdgarRenderer to require buffered logging
         cntlr.run(options)
         
         return cntlr
+    
+class ParserForDynamicPlugins:
+    def __init__(self, options):
+        self.options = options
+    def add_option(self, *args, **kwargs):
+        if 'dest' in kwargs:
+            _dest = kwargs['dest']
+            if not hasattr(self.options, _dest):
+                setattr(self.options, _dest, kwargs.get('default',None))
         
 class CntlrCmdLine(Cntlr.Cntlr):
     """
@@ -426,7 +446,7 @@ class CntlrCmdLine(Cntlr.Cntlr):
         super(CntlrCmdLine, self).__init__(hasGui=False)
         self.preloadedPlugins =  {}
         
-    def run(self, options, sourceZipStream=None):
+    def run(self, options, sourceZipStream=None, responseZipStream=None):
         """Process command line arguments or web service request, such as to load and validate an XBRL document, or start web server.
         
         When a web server has been requested, this method may be called multiple times, once for each web service (REST) request that requires processing.
@@ -436,18 +456,37 @@ class CntlrCmdLine(Cntlr.Cntlr):
         :type options: optparse.Values
         """
                 
+        if options.statusPipe or options.monitorParentProcess:
+            try:
+                global win32file, win32api, win32process, pywintypes
+                import win32file, win32api, win32process, pywintypes
+            except ImportError: # win32 not installed
+                self.addToLog("--statusPipe {} cannot be installed, packages for win32 missing".format(options.statusPipe))
+                options.statusPipe = options.monitorParentProcess = None
         if options.statusPipe:
             try:
-                global win32file
-                import win32file, pywintypes
                 self.statusPipe = win32file.CreateFile("\\\\.\\pipe\\{}".format(options.statusPipe), 
                                                        win32file.GENERIC_READ | win32file.GENERIC_WRITE, 0, None, win32file.OPEN_EXISTING, win32file.FILE_FLAG_NO_BUFFERING, None)
                 self.showStatus = self.showStatusOnPipe
                 self.lastStatusTime = 0.0
-            except ImportError: # win32 not installed
-                self.addToLog("--statusPipe {} cannot be installed, packages for win32 missing".format(options.statusPipe))
+                self.parentProcessHandle = None
             except pywintypes.error: # named pipe doesn't exist
                 self.addToLog("--statusPipe {} has not been created by calling program".format(options.statusPipe))
+        if options.monitorParentProcess:
+            try:
+                self.parentProcessHandle = win32api.OpenProcess(PROCESS_QUERY_INFORMATION, False, int(options.monitorParentProcess))
+                def monitorParentProcess():
+                    if win32process.GetExitCodeProcess(self.parentProcessHandle) != STILL_ACTIVE:
+                        sys.exit()
+                    _t = threading.Timer(10.0, monitorParentProcess)
+                    _t.daemon = True
+                    _t.start()
+                monitorParentProcess()
+            except ImportError: # win32 not installed
+                self.addToLog("--monitorParentProcess {} cannot be installed, packages for win32api and win32process missing".format(options.monitorParentProcess))
+            except (ValueError, pywintypes.error): # parent process doesn't exist
+                self.addToLog("--monitorParentProcess Process {} Id is invalid".format(options.monitorParentProcess))
+                sys.exit()
         if options.showOptions: # debug options
             for optName, optValue in sorted(options.__dict__.items(), key=lambda optItem: optItem[0]):
                 self.addToLog("Option {0}={1}".format(optName, optValue), messageCode="info")
@@ -517,7 +556,7 @@ class CntlrCmdLine(Cntlr.Cntlr):
                         if moduleInfo:
                             resetPlugins = True
                     if moduleInfo: 
-                        self.addToLog(_("Activation of plug-in {0} successful.").format(moduleInfo.get("name")), 
+                        self.addToLog(_("Activation of plug-in {0} successful, version {1}.").format(moduleInfo.get("name"), moduleInfo.get("version")), 
                                       messageCode="info", file=moduleInfo.get("moduleURL"))
                     else:
                         self.addToLog(_("Unable to load {0} as a plug-in or {0} is not recognized as a command. ").format(cmd), messageCode="info", file=cmd)
@@ -525,6 +564,12 @@ class CntlrCmdLine(Cntlr.Cntlr):
                     PluginManager.reset()
                     if savePluginChanges:
                         PluginManager.save(self)
+                    if options.webserver: # options may need reparsing dynamically
+                        _optionsParser = ParserForDynamicPlugins(options)
+                        # add plug-in options
+                        for optionsExtender in pluginClassMethods("CntlrCmdLine.Options"):
+                            optionsExtender(_optionsParser)
+
             if showPluginModules:
                 self.addToLog(_("Plug-in modules:"), messageCode="info")
                 for i, moduleItem in enumerate(sorted(PluginManager.pluginConfig.get("modules", {}).items())):
@@ -590,30 +635,29 @@ class CntlrCmdLine(Cntlr.Cntlr):
                 if envVar in os.environ:
                     self.addToLog(_("XDG_CONFIG_HOME={0}").format(os.environ[envVar]))
             return True
+        
+        self.modelManager.customTransforms = None # clear out prior custom transforms
+        self.modelManager.loadCustomTransforms()
+        
         # run utility command line options that don't depend on entrypoint Files
         hasUtilityPlugin = False
         for pluginXbrlMethod in pluginClassMethods("CntlrCmdLine.Utility.Run"):
             hasUtilityPlugin = True
             try:
-                pluginXbrlMethod(self, options, sourceZipStream=sourceZipStream)
+                pluginXbrlMethod(self, options, sourceZipStream=sourceZipStream, responseZipStream=responseZipStream)
             except SystemExit: # terminate operation, plug in has terminated all processing
                 return True # success
             
         # if no entrypointFile is applicable, quit now
         if options.proxy or options.plugins or hasUtilityPlugin:
-            if not options.entrypointFile:
+            if not (options.entrypointFile or sourceZipStream):
                 return True # success
         self.username = options.username
         self.password = options.password
-        self.entrypointFile = options.entrypointFile
-        if self.entrypointFile:
-            filesource = FileSource.openFileSource(self.entrypointFile, self, sourceZipStream)
-        else:
-            filesource = None
         if options.validateEFM:
             if options.disclosureSystemName:
                 self.addToLog(_("both --efm and --disclosureSystem validation are requested, proceeding with --efm only"),
-                              messageCode="info", file=self.entrypointFile)
+                              messageCode="info", file=options.entrypointFile)
             self.modelManager.validateDisclosureSystem = True
             self.modelManager.disclosureSystem.select("efm")
         elif options.disclosureSystemName:
@@ -642,7 +686,7 @@ class CntlrCmdLine(Cntlr.Cntlr):
         if options.calcDecimals:
             if options.calcPrecision:
                 self.addToLog(_("both --calcDecimals and --calcPrecision validation are requested, proceeding with --calcDecimals only"),
-                              messageCode="info", file=self.entrypointFile)
+                              messageCode="info", file=options.entrypointFile)
             self.modelManager.validateInferDecimals = True
             self.modelManager.validateCalcLB = True
         elif options.calcPrecision:
@@ -719,171 +763,226 @@ class CntlrCmdLine(Cntlr.Cntlr):
         if options.formulaRunIDs:
             fo.runIDs = options.formulaRunIDs   
         self.modelManager.formulaOptions = fo
-        timeNow = XmlUtil.dateunionValue(datetime.datetime.now())
-        firstStartedAt = startedAt = time.time()
-        modelDiffReport = None
-        success = True
-        modelXbrl = None
-        try:
-            if filesource:
-                modelXbrl = self.modelManager.load(filesource, _("views loading"))
-        except ModelDocument.LoadingException:
-            pass
-        except Exception as err:
-            self.addToLog(_("[Exception] Failed to complete request: \n{0} \n{1}").format(
-                        err,
-                        traceback.format_tb(sys.exc_info()[2])))
-            success = False    # loading errors, don't attempt to utilize loaded DTS
-        if modelXbrl and modelXbrl.modelDocument:
-            loadTime = time.time() - startedAt
-            modelXbrl.profileStat(_("load"), loadTime)
-            self.addToLog(format_string(self.modelManager.locale, 
-                                        _("loaded in %.2f secs at %s"), 
-                                        (loadTime, timeNow)), 
-                                        messageCode="info", file=self.entrypointFile)
-            if options.importFiles:
-                for importFile in options.importFiles.split("|"):
-                    fileName = importFile.strip()
-                    if sourceZipStream is not None and not (fileName.startswith('http://') or os.path.isabs(fileName)):
-                        fileName = os.path.dirname(modelXbrl.uri) + os.sep + fileName # make relative to sourceZipStream
-                    ModelDocument.load(modelXbrl, fileName)
-                    loadTime = time.time() - startedAt
-                    self.addToLog(format_string(self.modelManager.locale, 
-                                                _("import in %.2f secs at %s"), 
-                                                (loadTime, timeNow)), 
-                                                messageCode="info", file=importFile)
-                    modelXbrl.profileStat(_("import"), loadTime)
-                if modelXbrl.errors:
-                    success = False    # loading errors, don't attempt to utilize loaded DTS
-            if modelXbrl.modelDocument.type in ModelDocument.Type.TESTCASETYPES:
-                for pluginXbrlMethod in pluginClassMethods("Testcases.Start"):
-                    pluginXbrlMethod(self, options, modelXbrl)
-            else: # not a test case, probably instance or DTS
-                for pluginXbrlMethod in pluginClassMethods("CntlrCmdLine.Xbrl.Loaded"):
-                    pluginXbrlMethod(self, options, modelXbrl)
-        else:
-            success = False
-        if success and options.diffFile and options.versReportFile:
-            try:
-                diffFilesource = FileSource.FileSource(options.diffFile,self)
-                startedAt = time.time()
-                modelXbrl2 = self.modelManager.load(diffFilesource, _("views loading"))
-                if modelXbrl2.errors:
-                    if not options.keepOpen:
-                        modelXbrl2.close()
-                    success = False
-                else:
-                    loadTime = time.time() - startedAt
-                    modelXbrl.profileStat(_("load"), loadTime)
-                    self.addToLog(format_string(self.modelManager.locale, 
-                                                _("diff comparison DTS loaded in %.2f secs"), 
-                                                loadTime), 
-                                                messageCode="info", file=self.entrypointFile)
-                    startedAt = time.time()
-                    modelDiffReport = self.modelManager.compareDTSes(options.versReportFile)
-                    diffTime = time.time() - startedAt
-                    modelXbrl.profileStat(_("diff"), diffTime)
-                    self.addToLog(format_string(self.modelManager.locale, 
-                                                _("compared in %.2f secs"), 
-                                                diffTime), 
-                                                messageCode="info", file=self.entrypointFile)
-            except ModelDocument.LoadingException:
-                success = False
-            except Exception as err:
-                success = False
-                self.addToLog(_("[Exception] Failed to doad diff file: \n{0} \n{1}").format(
-                            err,
-                            traceback.format_tb(sys.exc_info()[2])))
-        if success:
-            try:
-                modelXbrl = self.modelManager.modelXbrl
-                hasFormulae = modelXbrl.hasFormulae
-                isAlreadyValidated = False
-                for pluginXbrlMethod in pluginClassMethods("ModelDocument.IsValidated"):
-                    if pluginXbrlMethod(modelXbrl): # e.g., streaming extensions already has validated
-                        isAlreadyValidated = True
-                if options.validate and not isAlreadyValidated:
-                    startedAt = time.time()
-                    if options.formulaAction: # don't automatically run formulas
-                        modelXbrl.hasFormulae = False
-                    self.modelManager.validate()
-                    if options.formulaAction: # restore setting
-                        modelXbrl.hasFormulae = hasFormulae
-                    self.addToLog(format_string(self.modelManager.locale, 
-                                                _("validated in %.2f secs"), 
-                                                time.time() - startedAt),
-                                                messageCode="info", file=self.entrypointFile)
-                if (options.formulaAction in ("validate", "run") and  # do nothing here if "none"
-                    not isAlreadyValidated):  # formulas can't run if streaming has validated the instance 
-                    from arelle import ValidateXbrlDimensions, ValidateFormula
-                    startedAt = time.time()
-                    if not options.validate:
-                        ValidateXbrlDimensions.loadDimensionDefaults(modelXbrl)
-                    # setup fresh parameters from formula optoins
-                    modelXbrl.parameters = fo.typedParameters()
-                    ValidateFormula.validate(modelXbrl, compileOnly=(options.formulaAction != "run"))
-                    self.addToLog(format_string(self.modelManager.locale, 
-                                                _("formula validation and execution in %.2f secs")
-                                                if options.formulaAction == "run"
-                                                else _("formula validation only in %.2f secs"), 
-                                                time.time() - startedAt),
-                                                messageCode="info", file=self.entrypointFile)
-                    
 
-                if options.testReport:
-                    ViewFileTests.viewTests(self.modelManager.modelXbrl, options.testReport, options.testReportCols)
-                    
-                if options.rssReport:
-                    ViewFileRssFeed.viewRssFeed(self.modelManager.modelXbrl, options.rssReport, options.rssReportCols)
-                    
-                if options.DTSFile:
-                    ViewFileDTS.viewDTS(modelXbrl, options.DTSFile)
-                if options.factsFile:
-                    ViewFileFactList.viewFacts(modelXbrl, options.factsFile, labelrole=options.labelRole, lang=options.labelLang, cols=options.factListCols)
-                if options.factTableFile:
-                    ViewFileFactTable.viewFacts(modelXbrl, options.factTableFile, labelrole=options.labelRole, lang=options.labelLang)
-                if options.conceptsFile:
-                    ViewFileConcepts.viewConcepts(modelXbrl, options.conceptsFile, labelrole=options.labelRole, lang=options.labelLang)
-                if options.preFile:
-                    ViewFileRelationshipSet.viewRelationshipSet(modelXbrl, options.preFile, "Presentation Linkbase", "http://www.xbrl.org/2003/arcrole/parent-child", labelrole=options.labelRole, lang=options.labelLang)
-                if options.calFile:
-                    ViewFileRelationshipSet.viewRelationshipSet(modelXbrl, options.calFile, "Calculation Linkbase", "http://www.xbrl.org/2003/arcrole/summation-item", labelrole=options.labelRole, lang=options.labelLang)
-                if options.dimFile:
-                    ViewFileRelationshipSet.viewRelationshipSet(modelXbrl, options.dimFile, "Dimensions", "XBRL-dimensions", labelrole=options.labelRole, lang=options.labelLang)
-                if options.formulaeFile:
-                    ViewFileFormulae.viewFormulae(modelXbrl, options.formulaeFile, "Formulae", lang=options.labelLang)
-                if options.viewArcrole and options.viewFile:
-                    ViewFileRelationshipSet.viewRelationshipSet(modelXbrl, options.viewFile, os.path.basename(options.viewArcrole), options.viewArcrole, labelrole=options.labelRole, lang=options.labelLang)
-                if options.roleTypesFile:
-                    ViewFileRoleTypes.viewRoleTypes(modelXbrl, options.roleTypesFile, "Role Types", isArcrole=False, lang=options.labelLang)
-                if options.arcroleTypesFile:
-                    ViewFileRoleTypes.viewRoleTypes(modelXbrl, options.arcroleTypesFile, "Arcrole Types", isArcrole=True, lang=options.labelLang)
-                for pluginXbrlMethod in pluginClassMethods("CntlrCmdLine.Xbrl.Run"):
-                    pluginXbrlMethod(self, options, modelXbrl)
-                                        
-            except (IOError, EnvironmentError) as err:
-                self.addToLog(_("[IOError] Failed to save output:\n {0}").format(err),
-                              messageCode="IOError", 
-                              file=options.entrypointFile, 
-                              level=logging.CRITICAL)
-                success = False
+        success = True
+        # entrypointFile may be absent (if input is a POSTED zip or file name ending in .zip)
+        #    or may be a | separated set of file names
+        _entryPoints = []
+        if options.entrypointFile:
+            _f = options.entrypointFile
+            try: # may be a json list
+                _entryPoints = json.loads(_f)
+            except ValueError:
+                # is it malformed json?
+                if _f.startswith("[{") or _f.endswith("]}") or '"file:"' in _f:
+                    self.addToLog(_("File name parameter appears to be malformed JSON: {0}").format(_f),
+                                  messageCode="FileNameFormatError",
+                                  level=logging.ERROR)
+                    success = False
+                else: # try as file names separated by '|'                    
+                    for f in (_f or '').split('|'):
+                        if not sourceZipStream and not isHttpUrl(f) and not os.path.isabs(f):
+                            f = os.path.normpath(os.path.join(os.getcwd(), f)) # make absolute normed path
+                        _entryPoints.append({"file":f})
+        filesource = None # file source for all instances if not None
+        if sourceZipStream:
+            filesource = FileSource.openFileSource(None, self, sourceZipStream)
+        elif len(_entryPoints) == 1: # check if a zip and need to discover entry points
+            filesource = FileSource.openFileSource(_entryPoints[0].get("file",None), self)
+        _entrypointFiles = _entryPoints
+        if filesource and not filesource.selection:
+            if filesource.isArchive:
+                _entrypointFiles = []
+                for _archiveFile in (filesource.dir or ()): # .dir might be none if IOerror
+                    filesource.select(_archiveFile)
+                    if ModelDocument.Type.identify(filesource, filesource.url) in (ModelDocument.Type.INSTANCE, ModelDocument.Type.INLINEXBRL):
+                        _entrypointFiles.append({"file":filesource.url})
+            elif os.path.isdir(filesource.url):
+                _entrypointFiles = []
+                for _file in os.listdir(filesource.url):
+                    _path = os.path.join(filesource.url, _file)
+                    if os.path.isfile(_path) and ModelDocument.Type.identify(filesource, _path) in (ModelDocument.Type.INSTANCE, ModelDocument.Type.INLINEXBRL):
+                        _entrypointFiles.append({"file":_path})
+        for pluginXbrlMethod in pluginClassMethods("CntlrCmdLine.Filing.Start"):
+            pluginXbrlMethod(self, options, filesource, _entrypointFiles, sourceZipStream=sourceZipStream, responseZipStream=responseZipStream)
+        for _entrypoint in _entrypointFiles:
+            _entrypointFile = _entrypoint.get("file", None) if isinstance(_entrypoint,dict) else _entrypoint
+            if filesource and filesource.isArchive:
+                filesource.select(_entrypointFile)
+            else:
+                filesource = FileSource.openFileSource(_entrypointFile, self, sourceZipStream)        
+            self.entrypointFile = _entrypointFile
+            timeNow = XmlUtil.dateunionValue(datetime.datetime.now())
+            firstStartedAt = startedAt = time.time()
+            modelDiffReport = None
+            modelXbrl = None
+            try:
+                if filesource:
+                    modelXbrl = self.modelManager.load(filesource, _("views loading"))
+            except ModelDocument.LoadingException:
+                pass
             except Exception as err:
-                self.addToLog(_("[Exception] Failed to complete request: \n{0} \n{1}").format(
-                                err,
-                                traceback.format_tb(sys.exc_info()[2])),
-                              messageCode=err.__class__.__name__, 
-                              file=options.entrypointFile, 
-                              level=logging.CRITICAL)
+                self.addToLog(_("Entry point loading Failed to complete request: \n{0} \n{1}").format(
+                            err,
+                            traceback.format_tb(sys.exc_info()[2])),
+                              messageCode="Exception",
+                              level=logging.ERROR)
+                success = False    # loading errors, don't attempt to utilize loaded DTS
+            if modelXbrl and modelXbrl.modelDocument:
+                loadTime = time.time() - startedAt
+                modelXbrl.profileStat(_("load"), loadTime)
+                self.addToLog(format_string(self.modelManager.locale, 
+                                            _("loaded in %.2f secs at %s"), 
+                                            (loadTime, timeNow)), 
+                                            messageCode="info", file=self.entrypointFile)
+                if options.importFiles:
+                    for importFile in options.importFiles.split("|"):
+                        fileName = importFile.strip()
+                        if sourceZipStream is not None and not (fileName.startswith('http://') or os.path.isabs(fileName)):
+                            fileName = os.path.dirname(modelXbrl.uri) + os.sep + fileName # make relative to sourceZipStream
+                        ModelDocument.load(modelXbrl, fileName, isSupplemental=True)
+                        loadTime = time.time() - startedAt
+                        self.addToLog(format_string(self.modelManager.locale, 
+                                                    _("import in %.2f secs at %s"), 
+                                                    (loadTime, timeNow)), 
+                                                    messageCode="info", file=importFile)
+                        modelXbrl.profileStat(_("import"), loadTime)
+                    if modelXbrl.errors:
+                        success = False    # loading errors, don't attempt to utilize loaded DTS
+                if modelXbrl.modelDocument.type in ModelDocument.Type.TESTCASETYPES:
+                    for pluginXbrlMethod in pluginClassMethods("Testcases.Start"):
+                        pluginXbrlMethod(self, options, modelXbrl)
+                else: # not a test case, probably instance or DTS
+                    for pluginXbrlMethod in pluginClassMethods("CntlrCmdLine.Xbrl.Loaded"):
+                        pluginXbrlMethod(self, options, modelXbrl, _entrypoint)
+            else:
                 success = False
-        if modelXbrl:
-            modelXbrl.profileStat(_("total"), time.time() - firstStartedAt)
-            if options.collectProfileStats and modelXbrl:
-                modelXbrl.logProfileStats()
-            if not options.keepOpen:
-                if modelDiffReport:
-                    self.modelManager.close(modelDiffReport)
-                elif modelXbrl:
-                    self.modelManager.close(modelXbrl)
+            if success and options.diffFile and options.versReportFile:
+                try:
+                    diffFilesource = FileSource.FileSource(options.diffFile,self)
+                    startedAt = time.time()
+                    modelXbrl2 = self.modelManager.load(diffFilesource, _("views loading"))
+                    if modelXbrl2.errors:
+                        if not options.keepOpen:
+                            modelXbrl2.close()
+                        success = False
+                    else:
+                        loadTime = time.time() - startedAt
+                        modelXbrl.profileStat(_("load"), loadTime)
+                        self.addToLog(format_string(self.modelManager.locale, 
+                                                    _("diff comparison DTS loaded in %.2f secs"), 
+                                                    loadTime), 
+                                                    messageCode="info", file=self.entrypointFile)
+                        startedAt = time.time()
+                        modelDiffReport = self.modelManager.compareDTSes(options.versReportFile)
+                        diffTime = time.time() - startedAt
+                        modelXbrl.profileStat(_("diff"), diffTime)
+                        self.addToLog(format_string(self.modelManager.locale, 
+                                                    _("compared in %.2f secs"), 
+                                                    diffTime), 
+                                                    messageCode="info", file=self.entrypointFile)
+                except ModelDocument.LoadingException:
+                    success = False
+                except Exception as err:
+                    success = False
+                    self.addToLog(_("[Exception] Failed to doad diff file: \n{0} \n{1}").format(
+                                err,
+                                traceback.format_tb(sys.exc_info()[2])))
+            if success:
+                try:
+                    modelXbrl = self.modelManager.modelXbrl
+                    hasFormulae = modelXbrl.hasFormulae
+                    isAlreadyValidated = False
+                    for pluginXbrlMethod in pluginClassMethods("ModelDocument.IsValidated"):
+                        if pluginXbrlMethod(modelXbrl): # e.g., streaming extensions already has validated
+                            isAlreadyValidated = True
+                    if options.validate and not isAlreadyValidated:
+                        startedAt = time.time()
+                        if options.formulaAction: # don't automatically run formulas
+                            modelXbrl.hasFormulae = False
+                        self.modelManager.validate()
+                        if options.formulaAction: # restore setting
+                            modelXbrl.hasFormulae = hasFormulae
+                        self.addToLog(format_string(self.modelManager.locale, 
+                                                    _("validated in %.2f secs"), 
+                                                    time.time() - startedAt),
+                                                    messageCode="info", file=self.entrypointFile)
+                    if (options.formulaAction in ("validate", "run") and  # do nothing here if "none"
+                        not isAlreadyValidated):  # formulas can't run if streaming has validated the instance 
+                        from arelle import ValidateXbrlDimensions, ValidateFormula
+                        startedAt = time.time()
+                        if not options.validate:
+                            ValidateXbrlDimensions.loadDimensionDefaults(modelXbrl)
+                        # setup fresh parameters from formula optoins
+                        modelXbrl.parameters = fo.typedParameters()
+                        ValidateFormula.validate(modelXbrl, compileOnly=(options.formulaAction != "run"))
+                        self.addToLog(format_string(self.modelManager.locale, 
+                                                    _("formula validation and execution in %.2f secs")
+                                                    if options.formulaAction == "run"
+                                                    else _("formula validation only in %.2f secs"), 
+                                                    time.time() - startedAt),
+                                                    messageCode="info", file=self.entrypointFile)
+                        
+    
+                    if options.testReport:
+                        ViewFileTests.viewTests(self.modelManager.modelXbrl, options.testReport, options.testReportCols)
+                        
+                    if options.rssReport:
+                        ViewFileRssFeed.viewRssFeed(self.modelManager.modelXbrl, options.rssReport, options.rssReportCols)
+                        
+                    if options.DTSFile:
+                        ViewFileDTS.viewDTS(modelXbrl, options.DTSFile)
+                    if options.factsFile:
+                        ViewFileFactList.viewFacts(modelXbrl, options.factsFile, labelrole=options.labelRole, lang=options.labelLang, cols=options.factListCols)
+                    if options.factTableFile:
+                        ViewFileFactTable.viewFacts(modelXbrl, options.factTableFile, labelrole=options.labelRole, lang=options.labelLang)
+                    if options.conceptsFile:
+                        ViewFileConcepts.viewConcepts(modelXbrl, options.conceptsFile, labelrole=options.labelRole, lang=options.labelLang)
+                    if options.preFile:
+                        ViewFileRelationshipSet.viewRelationshipSet(modelXbrl, options.preFile, "Presentation Linkbase", "http://www.xbrl.org/2003/arcrole/parent-child", labelrole=options.labelRole, lang=options.labelLang)
+                    if options.calFile:
+                        ViewFileRelationshipSet.viewRelationshipSet(modelXbrl, options.calFile, "Calculation Linkbase", "http://www.xbrl.org/2003/arcrole/summation-item", labelrole=options.labelRole, lang=options.labelLang)
+                    if options.dimFile:
+                        ViewFileRelationshipSet.viewRelationshipSet(modelXbrl, options.dimFile, "Dimensions", "XBRL-dimensions", labelrole=options.labelRole, lang=options.labelLang)
+                    if options.formulaeFile:
+                        ViewFileFormulae.viewFormulae(modelXbrl, options.formulaeFile, "Formulae", lang=options.labelLang)
+                    if options.viewArcrole and options.viewFile:
+                        ViewFileRelationshipSet.viewRelationshipSet(modelXbrl, options.viewFile, os.path.basename(options.viewArcrole), options.viewArcrole, labelrole=options.labelRole, lang=options.labelLang)
+                    if options.roleTypesFile:
+                        ViewFileRoleTypes.viewRoleTypes(modelXbrl, options.roleTypesFile, "Role Types", isArcrole=False, lang=options.labelLang)
+                    if options.arcroleTypesFile:
+                        ViewFileRoleTypes.viewRoleTypes(modelXbrl, options.arcroleTypesFile, "Arcrole Types", isArcrole=True, lang=options.labelLang)
+                    for pluginXbrlMethod in pluginClassMethods("CntlrCmdLine.Xbrl.Run"):
+                        pluginXbrlMethod(self, options, modelXbrl, _entrypoint)
+                                            
+                except (IOError, EnvironmentError) as err:
+                    self.addToLog(_("[IOError] Failed to save output:\n {0}").format(err),
+                                  messageCode="IOError", 
+                                  file=options.entrypointFile, 
+                                  level=logging.CRITICAL)
+                    success = False
+                except Exception as err:
+                    self.addToLog(_("[Exception] Failed to complete request: \n{0} \n{1}").format(
+                                    err,
+                                    traceback.format_tb(sys.exc_info()[2])),
+                                  messageCode=err.__class__.__name__, 
+                                  file=options.entrypointFile, 
+                                  level=logging.CRITICAL)
+                    success = False
+            if modelXbrl:
+                modelXbrl.profileStat(_("total"), time.time() - firstStartedAt)
+                if options.collectProfileStats and modelXbrl:
+                    modelXbrl.logProfileStats()
+                if not options.keepOpen:
+                    if modelDiffReport:
+                        self.modelManager.close(modelDiffReport)
+                    elif modelXbrl:
+                        self.modelManager.close(modelXbrl)
+        if options.validate:
+            for pluginXbrlMethod in pluginClassMethods("CntlrCmdLine.Filing.Validate"):
+                pluginXbrlMethod(self, options, filesource, _entrypointFiles, sourceZipStream=sourceZipStream, responseZipStream=responseZipStream)
+        for pluginXbrlMethod in pluginClassMethods("CntlrCmdLine.Filing.End"):
+            pluginXbrlMethod(self, options, filesource, _entrypointFiles, sourceZipStream=sourceZipStream, responseZipStream=responseZipStream)
         self.username = self.password = None #dereference password
 
         if options.statusPipe and getattr(self, "statusPipe", None) is not None:
@@ -904,9 +1003,17 @@ class CntlrCmdLine(Cntlr.Cntlr):
         # now = time.time() # seems ok without time-limiting writes to the pipe
         if self.statusPipe is not None:  # max status updates 3 per second now - 0.3 > self.lastStatusTime and 
             # self.lastStatusTime = now
-            win32file.WriteFile(self.statusPipe, (message or "").encode("utf8"))
-            win32file.FlushFileBuffers(self.statusPipe)
-            win32file.SetFilePointer(self.statusPipe, 0, win32file.FILE_BEGIN)  # hangs on close without this
+            try:
+                if self.parentProcessHandle is not None:
+                    if win32process.GetExitCodeProcess(self.parentProcessHandle) != STILL_ACTIVE:
+                        sys.exit()
+                win32file.WriteFile(self.statusPipe, (message or "").encode("utf8"))
+                win32file.FlushFileBuffers(self.statusPipe)
+                win32file.SetFilePointer(self.statusPipe, 0, win32file.FILE_BEGIN)  # hangs on close without this
+            except Exception as ex:
+                #with open("Z:\\temp\\trace.log", "at", encoding="utf-8") as fh:
+                #    fh.write("Status pipe exception {} {}\n".format(type(ex), ex))
+                system.exit()
 
 if __name__ == "__main__":
     '''

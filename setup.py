@@ -227,6 +227,11 @@ if sys.platform in ('darwin', 'linux2', 'linux', 'sunos5'): # works on ubuntu wi
                     'rdflib.plugins.sparql', 
                     'rdflib.plugins.stores', 
                     'isodate', 'regex', 'gzip', 'zlib']
+    
+    # uncomment the next two files if cx_Freezing with EdgarRenderer
+    # note that openpyxl must be 2.1.4 at this time
+    # includeLibs += ['dateutil', 'dateutil.relativedelta', 'numpy', "openpyxl", "six", "tornado", "pyparsing", "matplotlib"]
+
     if sys.platform != 'sunos5':
         try:
             import pyodbc # see if this is importable

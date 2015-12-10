@@ -103,3 +103,36 @@ def pyTypeName(object):
         return fullname
     except:
         return str(type(object))
+    
+def pyNamedObject(name):
+    try:
+        if sys.version[0] >= '3':
+            import builtins
+            return builtins.__dict__[name]
+        else:
+            import __builtin__
+            return __builtin__.__dict__[name]
+    except:
+        return None
+    
+SEQUENCE_TYPES = (tuple,list,set)
+def flattenSequence(x, sequence=None):
+    if sequence is None: 
+        if not isinstance(x, SEQUENCE_TYPES):
+            if x is None:
+                return [] # none as atomic value is an empty sequence in xPath semantics
+            return [x]
+        sequence = []
+    for el in x:
+        if isinstance(el, SEQUENCE_TYPES):
+            flattenSequence(el, sequence)
+        else:
+            sequence.append(el)
+    return sequence
+
+class attrdict(dict):
+    """ utility to simulate an object with named fields from a dict """
+    def __init__(self, *args, **kwargs):
+        dict.__init__(self, *args, **kwargs)
+        self.__dict__ = self
+

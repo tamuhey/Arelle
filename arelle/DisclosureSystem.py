@@ -11,9 +11,13 @@ from arelle import UrlUtil
 from arelle.PluginManager import pluginClassMethods
 from arelle.UrlUtil import isHttpUrl
 
-def compileAttrPattern(elt, attrName, flags=None):
+def compileAttrPattern(elt, attrName, flags=None, patternIfNoAttr=""):
     attr = elt.get(attrName)
-    if attr is None: attr = ""
+    if attr is None: 
+        # pattern to match if no attribute provided
+        if patternIfNoAttr is None:
+            return None # if None, then there is no pattern if attribute missing
+        attr = patternIfNoAttr # use default pattern
     if flags is not None:
         return re.compile(attr, flags)
     else:
@@ -41,9 +45,10 @@ class DisclosureSystem:
         self.standardAuthorities = set()
         self.baseTaxonomyNamespaces = set()
         self.standardPrefixes = {}
-        self.names = None
+        self.names = []
         self.name = None
         self.validationType = None
+        self.exclusiveTypesPattern = None # regex of type matches exclusive with validationType
         # previoulsy built-in types (intent to replace with plugin defined types)
         self.EFM = False
         self.GFM = False
@@ -60,6 +65,7 @@ class DisclosureSystem:
         self.blockDisallowedReferences = False
         self.maxSubmissionSubdirectoryEntryNesting = 0
         self.defaultXmlLang = None
+        self.defaultXmlEncoding = "utf-8"
         self.xmlLangPattern = None
         self.defaultLanguage = None
         self.language = None
@@ -149,6 +155,7 @@ class DisclosureSystem:
                                 self.names = names
                                 self.name = self.names[0]
                                 self.validationType = dsElt.get("validationType")
+                                self.exclusiveTypesPattern = compileAttrPattern(dsElt,"exclusiveTypesPattern", patternIfNoAttr=None)
                                 if self.validationType not in self.pluginTypes:
                                     self.EFM = self.validationType == "EFM"
                                     self.GFM = self.validationType == "GFM"
@@ -165,6 +172,8 @@ class DisclosureSystem:
                                 except (ValueError, TypeError):
                                     self.maxSubmissionSubdirectoryEntryNesting = 0
                                 self.defaultXmlLang = dsElt.get("defaultXmlLang")
+                                if dsElt.get("defaultXmlEncoding", default=None) is not None: # don't reset from utf-8 unless supplied with a value
+                                    self.defaultXmlEncoding = dsElt.get("defaultXmlEncoding") # may be an empty string
                                 self.xmlLangPattern = compileAttrPattern(dsElt,"xmlLangPattern")
                                 self.defaultLanguage = dsElt.get("defaultLanguage")
                                 self.standardTaxonomiesUrl = self.modelManager.cntlr.webCache.normalizeUrl(
@@ -324,20 +333,25 @@ class DisclosureSystem:
         return mappedUrl
 
     def uriAuthorityValid(self, uri):
-        return UrlUtil.authority(uri) in self.standardAuthorities
+        if self.standardTaxonomiesUrl:
+            return UrlUtil.authority(uri) in self.standardAuthorities
+        return True # no standard authorities to test
     
     def disallowedHrefOfNamespace(self, href, namespaceUri):
-        if namespaceUri in self.standardTaxonomiesDict:
-            if href in self.standardTaxonomiesDict[namespaceUri]:
-                return False
-        if namespaceUri in self.standardLocalHrefs and not isHttpUrl(href):
-            normalizedHref = href.replace("\\","/")
-            if any(normalizedHref.endswith(localHref)
-                   for localHref in self.standardLocalHrefs[namespaceUri]):
-                return False
+        if self.standardTaxonomiesUrl:
+            if namespaceUri in self.standardTaxonomiesDict:
+                if href in self.standardTaxonomiesDict[namespaceUri]:
+                    return False
+            if namespaceUri in self.standardLocalHrefs and not isHttpUrl(href):
+                normalizedHref = href.replace("\\","/")
+                if any(normalizedHref.endswith(localHref)
+                       for localHref in self.standardLocalHrefs[namespaceUri]):
+                    return False
         return False
 
     def hrefValid(self, href):
-        return href in self.standardTaxonomiesDict
+        if self.standardTaxonomiesUrl:
+            return href in self.standardTaxonomiesDict
+        return True # no standard taxonomies to test
 
 
