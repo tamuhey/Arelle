@@ -1,4 +1,4 @@
-'''
+b'''
 Created on Oct 17, 2010
 
 @author: Mark V Systems Limited
@@ -128,7 +128,7 @@ def checkDTS(val, modelDocument, checkedModelDocuments):
                             elementHref=hrefElt.get("{http://www.w3.org/1999/xlink}href"),
                             scheme=scheme)
                         break
-                    elif val.validateDisclosureSystem:
+                    elif val.validateEFMorGFM:
                         val.modelXbrl.error(("EFM.6.03.06", "GFM.1.01.03"),
                             _("Href %(elementHref)s may only have shorthand xpointers"),
                             modelObject=hrefElt, 
@@ -206,9 +206,17 @@ def checkDTS(val, modelDocument, checkedModelDocuments):
                                              "presentationLink":"5.2.4.1",
                                              "footnoteLink":"4.11.1.1"}[linkElt.localName],
                                              linkElt.localName),
-                                 _("%(linkElement)s loc href %(locHref)s must identify a concept or label"),
+                                 _("%(linkElement)s loc href %(locHref)s must identify a %(acceptableTarget)s"),
                                  modelObject=hrefElt, linkElement=linkElt.localName,
                                  locHref=hrefElt.get("{http://www.w3.org/1999/xlink}href"),
+                                 acceptableTarget= {"labelLink": "concept or label",
+                                                    "labelLinkToResource": "label",
+                                                    "referenceLink":"concept or reference",
+                                                    "referenceLinkToResource":"reference",
+                                                    "calculationLink": "concept",
+                                                    "definitionLink": "concept",
+                                                    "presentationLink": "concept",
+                                                    "footnoteLink": "item or tuple" }[hrefEltKey],
                                  messageCodes=("xbrl.5.2.2.1:labelLinkLocTarget", "xbrl.5.2.3.1:referenceLinkLocTarget", "xbrl.5.2.5.1:calculationLinkLocTarget", "xbrl.5.2.6.1:definitionLinkLocTarget", "xbrl.5.2.4.1:presentationLinkLocTarget", "xbrl.4.11.1.1:footnoteLinkLocTarget"))
                         if isInstance and not XmlUtil.isDescendantOf(hrefedElt, modelDocument.xmlRootElement):
                             val.modelXbrl.error("xbrl.4.11.1.1:instanceLoc",
@@ -284,7 +292,16 @@ def checkElements(val, modelDocument, parent):
         if isInstance or parentIsLinkbase:
             val.roleRefURIs = {}
             val.arcroleRefURIs = {}
-        childrenIter = parent.iterchildren()
+            def linkbaseTopElts():
+                for refPass in (True, False): # do roleType and arcroleType before extended links and any other children
+                    for child in parent.iterchildren():
+                        if refPass == (isinstance(child,ModelObject)
+                                       and child.localName in ("roleRef","arcroleRef") 
+                                       and child.namespaceURI == XbrlConst.link):
+                            yield child
+            childrenIter = linkbaseTopElts()
+        else:
+            childrenIter = parent.iterchildren()
     else: # parent is document node, not an element
         parentXlinkType = None
         isInstance = False
@@ -636,7 +653,7 @@ def checkElements(val, modelDocument, parent):
                            }[elt.localName]
                     if parentIsAppinfo:
                         pass    #ignore roleTypes in appinfo (test case 160 v05)
-                    elif not (parentIsLinkbase or isInstance or elt.parentQname == XbrlConst.qnIXbrlResources):
+                    elif not (parentIsLinkbase or isInstance or elt.parentQname in (XbrlConst.qnIXbrlResources, XbrlConst.qnIXbrl11Resources)):
                         val.modelXbrl.info("info:{1}Location".format(xbrlSection,elt.localName),
                             _("Link:%(elementName)s not child of link:linkbase or xbrli:instance"),
                             modelObject=elt, elementName=elt.localName,
@@ -672,7 +689,7 @@ def checkElements(val, modelDocument, parent):
                                 messageCodes=("xbrl.3.5.2.4.5:roleRefMismatch", "xbrl.3.5.2.4.5:arcroleRefMismatch"))
                             
                         
-                        if val.validateDisclosureSystem:
+                        if val.validateEFMorGFMorSBRNL:
                             if elt.localName == "arcroleRef":
                                 if hrefUri not in val.disclosureSystem.standardTaxonomiesDict:
                                     val.modelXbrl.error(("EFM.6.09.06", "GFM.1.04.06"),
@@ -1004,11 +1021,11 @@ def checkElements(val, modelDocument, parent):
                         d = XmlUtil.descendants(elt, '*', '*')
                         if d and (len(d) != 1 or d[0].namespaceURI != elt.namespaceURI or d[0].localName != "nonFraction"):
                             val.modelXbrl.error("ix:nonFractionChildren",
-                                _("Inline XBRL nil ix:nonFraction may only have on child ix:nonFraction"),
+                                _("Inline XBRL nil ix:nonFraction may only have one child ix:nonFraction"),
                                 modelObject=[elt] + d)
                         for e in d:
                             if (e.namespaceURI == elt.namespaceURI and e.localName == "nonFraction" and
-                                (e.format != elt.format or e.scale != elt.scale or e.unitID != elt.unitID)):
+                                (e.format != elt.format or e.scaleInt != elt.scaleInt or e.unitID != elt.unitID)):
                                 val.modelXbrl.error("ix:nestedNonFractionProperties",
                                     _("Inline XBRL nested ix:nonFraction must have matching format, scale, and unitRef properties"),
                                     modelObject=(elt, e))
@@ -1031,7 +1048,7 @@ def checkElements(val, modelDocument, parent):
                                     modelObject=elt)
                     else:
                         val.ixdsTuples[elt.tupleID] = elt
-            if val.validateDisclosureSystem:
+            if val.validateEFMorGFMorSBRNL:
                 if xlinkType == "extended":
                     if not xlinkRole or xlinkRole == "":
                         val.modelXbrl.error(("EFM.6.09.04", "GFM.1.04.04"),

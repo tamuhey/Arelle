@@ -270,7 +270,7 @@ class Cntlr:
                                 self.localeDir)
         
     def startLogging(self, logFileName=None, logFileMode=None, logFileEncoding=None, logFormat=None, 
-                     logLevel=None, logHandler=None):
+                     logLevel=None, logHandler=None, logToBuffer=False):
         # add additional logging levels (for python 2.7, all of these are ints)
         logging.addLevelName(logging.INFO + 1, "INFO-SEMANTIC")
         logging.addLevelName(logging.WARNING + 1, "WARNING-SEMANTIC")
@@ -285,12 +285,12 @@ class Cntlr:
             self.logger.addHandler(logHandler)
         elif logFileName: # use default logging
             self.logger = logging.getLogger("arelle")
-            if logFileName in ("logToPrint", "logToStdErr"):
+            if logFileName in ("logToPrint", "logToStdErr") and not logToBuffer:
                 self.logHandler = LogToPrintHandler(logFileName)
             elif logFileName == "logToBuffer":
                 self.logHandler = LogToBufferHandler()
                 self.logger.logRefObjectProperties = True
-            elif logFileName.endswith(".xml"):
+            elif logFileName.endswith(".xml") or logFileName.endswith(".json") or logToBuffer:
                 self.logHandler = LogToXmlHandler(filename=logFileName, mode=logFileMode or "a")  # should this be "w" mode??
                 self.logger.logRefObjectProperties = True
                 if not logFormat:
@@ -347,6 +347,8 @@ class Cntlr:
                     refs.append( {"href": _file} )
             elif isinstance(file, _STR_BASE):
                 refs.append( {"href": file} )
+            if isinstance(level, _STR_BASE):
+                level = logging._checkLevel(level)
             self.logger.log(level, *args, extra={"messageCode":messageCode,"refs":refs})
         else:
             try:
@@ -519,17 +521,20 @@ class LogFormatter(logging.Formatter):
     def __init__(self, fmt=None, datefmt=None):
         super(LogFormatter, self).__init__(fmt, datefmt)
         
-    def format(self, record):
+    def fileLines(self, record):
         # provide a file parameter made up from refs entries
         fileLines = defaultdict(set)
         for ref in record.refs:
             href = ref.get("href")
             if href:
                 fileLines[href.partition("#")[0]].add(ref.get("sourceLine", 0))
-        record.file = ", ".join(file + " " + ', '.join(str(line) 
-                                                       for line in sorted(lines, key=lambda l: l)
-                                                       if line)
-                                for file, lines in sorted(fileLines.items()))
+        return ", ".join(file + " " + ', '.join(str(line) 
+                                                for line in sorted(lines, key=lambda l: l)
+                                                if line)
+                        for file, lines in sorted(fileLines.items()))
+        
+    def format(self, record):
+        record.file = self.fileLines(record)
         try:
             formattedMessage = super(LogFormatter, self).format(record)
         except (KeyError, TypeError, ValueError) as ex:
@@ -586,6 +591,15 @@ class LogHandlerWithXml(logging.Handler):
             s = s if len(s) <= truncateAt else s[:truncateAt] + '...'
             return s.replace("&","&amp;").replace("<","&lt;").replace('"','&quot;')
         
+        def ncNameEncode(arg):
+            s = []
+            for c in arg:
+                if c.isalnum() or c in ('.','-','_'):
+                    s.append(c)
+                else: # covers : and any other non-allowed character
+                    s.append('_') # change : into _ for xml correctness
+            return "".join(s)
+        
         def propElts(properties, indent, truncatAt=128):
             nestedIndent = indent + ' '
             return indent.join('<property name="{0}" value="{1}"{2}>'.format(
@@ -598,14 +612,14 @@ class LogHandlerWithXml(logging.Handler):
         
         msg = self.format(logRec)
         if logRec.args:
-            args = "".join([' {0}="{1}"'.format(n, entityEncode(v, truncateAt=128)) 
+            args = "".join([' {0}="{1}"'.format(ncNameEncode(n), entityEncode(v, truncateAt=128)) 
                             for n, v in logRec.args.items()])
         else:
             args = ""
         refs = "\n ".join('\n <ref href="{0}"{1}{2}{3}>'.format(
                         entityEncode(ref["href"]), 
                         ' sourceLine="{0}"'.format(ref["sourceLine"]) if "sourceLine" in ref else '',
-                        ''.join(' {}="{}"'.format(k,entityEncode(v)) 
+                        ''.join(' {}="{}"'.format(ncNameEncode(k),entityEncode(v)) 
                                                   for k,v in ref["customAttributes"].items())
                              if 'customAttributes' in ref else '',
                         (">\n  " + propElts(ref["properties"],"\n  ", 32767) + "\n </ref" ) if "properties" in ref else '/')
@@ -624,11 +638,12 @@ class LogToXmlHandler(LogHandlerWithXml):
     
     A log handler that writes log entries to named XML file (utf-8 encoded) upon closing the application.
     """
-    def __init__(self, filename, mode='w'):
+    def __init__(self, filename=None, mode='w'):
         super(LogToXmlHandler, self).__init__()
-        self.filename = filename
+        self.filename = filename # may be none if buffer is retrieved by get methods below and not written anywhere
         self.logRecordBuffer = []
         self.filemode = mode
+        
     def flush(self):
         if self.filename == "logToStdOut.xml":
             print('<?xml version="1.0" encoding="utf-8"?>')
@@ -643,32 +658,42 @@ class LogToXmlHandler(LogHandlerWithXml):
                            .encode(sys.stdout.encoding, 'backslashreplace')
                            .decode(sys.stdout.encoding, 'strict')))
             print('</log>')
-        else:
-            print ("filename=" + self.filename)
-            with open(self.filename, self.filemode, encoding='utf-8') as fh:
-                fh.write('<?xml version="1.0" encoding="utf-8"?>\n')
-                fh.write('<log>\n')
+        elif self.filename is not None:
+            if self.filename.endswith(".xml"):
+                # print ("filename=" + self.filename)
+                with open(self.filename, self.filemode, encoding='utf-8') as fh:
+                    fh.write('<?xml version="1.0" encoding="utf-8"?>\n')
+                    fh.write('<log>\n')
+                    for logRec in self.logRecordBuffer:
+                        fh.write(self.recordToXml(logRec))
+                    fh.write('</log>\n')
+            elif self.filename.endswith(".json"):
+                with open(self.filename, self.filemode, encoding='utf-8') as fh:
+                    fh.write(self.getJson())
+            elif self.filename in ("logToPrint", "logToStdErr"):
+                _file = sys.stderr if self.filename == "logToStdErr" else None
                 for logRec in self.logRecordBuffer:
-                    fh.write(self.recordToXml(logRec))
-                fh.write('</log>\n')  
-    def emit(self, logRecord):
-        self.logRecordBuffer.append(logRecord)
-
-class LogToBufferHandler(LogHandlerWithXml):
-    """
-    .. class:: LogToBufferHandler()
-    
-    A log handler that writes log entries to a memory buffer for later retrieval (to a string) in XML, JSON, or text lines,
-    usually for return to a web service or web page call.
-    """
-    def __init__(self):
-        super(LogToBufferHandler, self).__init__()
-        self.logRecordBuffer = []
+                    logEntry = self.format(logRec)
+                    if not isPy3:
+                        logEntry = logEntry.encode("utf-8", "replace")
+                    try:
+                        print(logEntry, file=_file)
+                    except UnicodeEncodeError:
+                        # extra parentheses in print to allow for 3-to-2 conversion
+                        print((logEntry
+                               .encode(sys.stdout.encoding, 'backslashreplace')
+                               .decode(sys.stdout.encoding, 'strict')), 
+                              file=_file)
+            else:
+                with open(self.filename, self.filemode, encoding='utf-8') as fh:
+                    for logRec in self.logRecordBuffer:
+                        fh.write(self.format(logRec) + "\n")
+        self.clearLogBuffer()
+                
+    def clearLogBuffer(self):
+        del self.logRecordBuffer[:]
         
-    def flush(self):
-        pass # do nothing
-    
-    def getXml(self):
+    def getXml(self, clearLogBuffer=True):
         """Returns an XML document (as a string) representing the messages in the log buffer, and clears the buffer.
         
         :reeturns: str -- XML document string of messages in the log buffer.
@@ -678,10 +703,11 @@ class LogToBufferHandler(LogHandlerWithXml):
         for logRec in self.logRecordBuffer:
             xml.append(self.recordToXml(logRec))
         xml.append('</log>')  
-        self.logRecordBuffer = []
+        if clearLogBuffer:
+            self.clearLogBuffer()
         return '\n'.join(xml)
     
-    def getJson(self):
+    def getJson(self, clearLogBuffer=True):
         """Returns an JSON string representing the messages in the log buffer, and clears the buffer.
         
         :returns: str -- json representation of messages in the log buffer
@@ -697,27 +723,43 @@ class LogToBufferHandler(LogHandlerWithXml):
                      "refs": logRec.refs,
                      "message": message}
             entries.append(entry)
-        self.logRecordBuffer = []
-        return json.dumps( {"log": entries} )
+        if clearLogBuffer:
+            self.clearLogBuffer()
+        return json.dumps( {"log": entries}, ensure_ascii=False, indent=1 )
     
-    def getLines(self):
+    def getLines(self, clearLogBuffer=True):
         """Returns a list of the message strings in the log buffer, and clears the buffer.
         
         :returns: [str] -- list of strings representing messages corresponding to log buffer entries
         """
         lines = [self.format(logRec) for logRec in self.logRecordBuffer]
-        self.logRecordBuffer = []
+        if clearLogBuffer:
+            self.clearLogBuffer()
         return lines
     
-    def getText(self, separator='\n'):
+    def getText(self, separator='\n', clearLogBuffer=True):
         """Returns a string of the lines in the log buffer, separated by newline or provided separator.
         
         :param separator: Line separator (default is platform os newline character)
         :type separator: str
         :returns: str -- joined lines of the log buffer.
         """
-        return separator.join(self.getLines())
+        return separator.join(self.getLines(clearLogBuffer=clearLogBuffer))
     
     def emit(self, logRecord):
         self.logRecordBuffer.append(logRecord)
+
+class LogToBufferHandler(LogToXmlHandler):
+    """
+    .. class:: LogToBufferHandler()
+    
+    A log handler that writes log entries to a memory buffer for later retrieval (to a string) in XML, JSON, or text lines,
+    usually for return to a web service or web page call.
+    """
+    def __init__(self):
+        super(LogToBufferHandler, self).__init__()
+        
+    def flush(self):
+        pass # do nothing -- overrides LogToXmlHandler's flush
+    
 

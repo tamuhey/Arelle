@@ -18,16 +18,18 @@ class ixtFunctionNotAvailable(Exception):
     def __repr__(self):
         return self.args[0]
     
-def call(xc, p, localname, args):
+def call(xc, p, qn, args):
     try:
-        if localname not in ixtFunctions: raise ixtFunctionNotAvailable
-        if len(args) != 1: raise XPathContext.FunctionNumArgs()
-        if len(args[0]) != 1: raise XPathContext.FunctionArgType(1,"xs:string")
-        return ixtFunctions[localname](str(args[0][0]))
-    except ixtFunctionNotAvailable:
-        raise XPathContext.FunctionNotAvailable("xfi:{0}".format(localname))
+        _ixtFunction = ixtNamespaceFunctions[qn.namespaceURI][qn.localName]
+    except KeyError:
+        raise XPathContext.FunctionNotAvailable(str(qn))
+    if len(args) != 1: raise XPathContext.FunctionNumArgs()
+    if len(args[0]) != 1: raise XPathContext.FunctionArgType(1,"xs:string")
+    return _ixtFunction(str(args[0][0]))
 
 dateslashPattern = re.compile(r"^\s*(\d+)/(\d+)/(\d+)\s*$")
+daymonthslashPattern = re.compile(r"^\s*([0-9]{1,2})/([0-9]{1,2})\s*$")
+monthdayslashPattern = re.compile(r"^\s*([0-9]{1,2})/([0-9]{1,2})\s*$")
 datedotPattern = re.compile(r"^\s*(\d+)\.(\d+)\.(\d+)\s*$")
 daymonthPattern = re.compile(r"^\s*([0-9]{1,2})[^0-9]+([0-9]{1,2})\s*$")
 monthdayPattern = re.compile(r"^\s*([0-9]{1,2})[^0-9]+([0-9]{1,2})[A-Za-z]*\s*$")
@@ -47,6 +49,14 @@ monthyearDkPattern = re.compile(r"^\s*(jan|feb|mar|apr|maj|jun|jul|aug|sep|okt|n
 monthyearEnPattern = re.compile(r"^\s*(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC|JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)[^0-9]+([0-9]{1,2}|[0-9]{4})\s*$")
 monthyearInPattern = re.compile(r"^\s*([^\s0-9\u0966-\u096F]+)\s([0-9\u0966-\u096F]{4})\s*$")
 yearmonthEnPattern = re.compile(r"^\s*([0-9]{1,2}|[0-9]{4})[^0-9]+(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC|JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\s*$")
+
+# TR1-only patterns, only allow space separators, no all-CAPS month name, only 2 or 4 digit years
+daymonthShortEnTR1Pattern = re.compile(r"^\s*([0-9]{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s*$")
+monthdayShortEnTR1Pattern = re.compile(r"^\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+([0-9]{1,2})[A-Za-z]{0,2}\s*$")
+monthyearShortEnTR1Pattern = re.compile(r"^\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+([0-9]{2}|[0-9]{4})\s*$")
+monthyearLongEnTR1Pattern = re.compile(r"^\s*(January|February|March|April|May|June|July|August|September|October|November|December)\s+([0-9]{2}|[0-9]{4})\s*$")
+yearmonthShortEnTR1Pattern = re.compile(r"^\s*([0-9]{2}|[0-9]{4})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s*$")
+yearmonthLongEnTR1Pattern = re.compile(r"^\s*([0-9]{2}|[0-9]{4})\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s*$")
 
 erayearmonthjpPattern = re.compile("^[\\s\u00A0]*(\u660E\u6CBB|\u660E|\u5927\u6B63|\u5927|\u662D\u548C|\u662D|\u5E73\u6210|\u5E73)[\\s\u00A0]*([0-9]{1,2}|\u5143)[\\s\u00A0]*\u5E74[\\s\u00A0]*([0-9]{1,2})[\\s\u00A0]*\u6708[\\s\u00A0]*$")
 erayearmonthdayjpPattern = re.compile("^[\\s\u00A0]*(\u660E\u6CBB|\u660E|\u5927\u6B63|\u5927|\u662D\u548C|\u662D|\u5E73\u6210|\u5E73)[\\s\u00A0]*([0-9]{1,2}|\u5143)[\\s\u00A0]*\u5E74[\\s\u00A0]*([0-9]{1,2})[\\s\u00A0]*\u6708[\\s\u00A0]*([0-9]{1,2})[\\s\u00A0]*\u65E5[\\s\u00A0]*$")
@@ -276,6 +286,22 @@ def datemonthday(arg):
             return "--{0}-{1}".format(mo, day)
     raise XPathContext.FunctionArgType(1,"xs:gMonthDay")
     
+def datedaymonthSlashTR1(arg):
+    m = daymonthslashPattern.match(arg)
+    if m and m.lastindex == 2:
+        mo = z2(m.group(2))
+        day = z2(m.group(1))
+        return "--{0}-{1}".format(mo, day)
+    raise XPathContext.FunctionArgType(1,"xs:gMonthDay")
+    
+def datemonthdaySlashTR1(arg):
+    m = monthdayslashPattern.match(arg)
+    if m and m.lastindex == 2:
+        mo = z2(m.group(1))
+        day = z2(m.group(2))
+        return "--{0}-{1}".format(mo, day)
+    raise XPathContext.FunctionArgType(1,"xs:gMonthDay")
+    
 def datedaymonthdk(arg):
     m = daymonthDkPattern.match(arg)
     if m and m.lastindex == 4:
@@ -302,6 +328,14 @@ def datedaymonthen(arg):
             return "--{0:02}-{1}".format(_mo, _day)
     raise XPathContext.FunctionArgType(1,"xs:gMonthDay")
     
+def datedaymonthShortEnTR1(arg):
+    m = daymonthShortEnTR1Pattern.match(arg)
+    if m and m.lastindex == 2:
+        _mo = monthnumber[m.group(2)]
+        _day = z2(m.group(1))
+        return "--{0:02}-{1}".format(_mo, _day)
+    raise XPathContext.FunctionArgType(1,"xs:gMonthDay")
+    
 def datemonthdayen(arg):
     m = monthdayEnPattern.match(arg)
     if m and m.lastindex == 2:
@@ -309,6 +343,14 @@ def datemonthdayen(arg):
         _day = z2(m.group(2))
         if "01" <= _day <= maxDayInMo.get(_mo, "00"): 
             return "--{0:02}-{1}".format(_mo, _day)
+    raise XPathContext.FunctionArgType(1,"xs:gMonthDay")
+
+def datemonthdayShortEnTR1(arg):
+    m = monthdayShortEnTR1Pattern.match(arg)
+    if m and m.lastindex == 2:
+        _mo = monthnumber[m.group(1)]
+        _day = z2(m.group(2))
+        return "--{0:02}-{1}".format(_mo, _day)
     raise XPathContext.FunctionArgType(1,"xs:gMonthDay")
 
 def datedaymonthyear(arg):
@@ -353,6 +395,18 @@ def datemonthyearen(arg):
         return "{0}-{1:02}".format(yr(m.group(2)), monthnumber[m.group(1)])
     raise XPathContext.FunctionArgType(1,"xs:gYearMonth")
     
+def datemonthyearShortEnTR1(arg):
+    m = monthyearShortEnTR1Pattern.match(arg)
+    if m and m.lastindex == 2:
+        return "{0}-{1:02}".format(yr(m.group(2)), monthnumber[m.group(1)])
+    raise XPathContext.FunctionArgType(1,"xs:gYearMonth")
+    
+def datemonthyearLongEnTR1(arg):
+    m = monthyearLongEnTR1Pattern.match(arg)
+    if m and m.lastindex == 2:
+        return "{0}-{1:02}".format(yr(m.group(2)), monthnumber[m.group(1)])
+    raise XPathContext.FunctionArgType(1,"xs:gYearMonth")
+    
 def datemonthyearin(arg):
     m = monthyearInPattern.match(arg)
     try:
@@ -364,6 +418,18 @@ def datemonthyearin(arg):
     
 def dateyearmonthen(arg):
     m = yearmonthEnPattern.match(arg)
+    if m and m.lastindex == 2:
+        return "{0}-{1:02}".format(yr(m.group(1)), monthnumber[m.group(2)])
+    raise XPathContext.FunctionArgType(1,"xs:gYearMonth")
+
+def dateyearmonthShortEnTR1(arg):
+    m = yearmonthShortEnTR1Pattern.match(arg)
+    if m and m.lastindex == 2:
+        return "{0}-{1:02}".format(yr(m.group(1)), monthnumber[m.group(2)])
+    raise XPathContext.FunctionArgType(1,"xs:gYearMonth")
+
+def dateyearmonthLongEnTR1(arg):
+    m = yearmonthLongEnTR1Pattern.match(arg)
     if m and m.lastindex == 2:
         return "{0}-{1:02}".format(yr(m.group(1)), monthnumber[m.group(2)])
     raise XPathContext.FunctionArgType(1,"xs:gYearMonth")
@@ -541,9 +607,8 @@ def numunitdecimalin(arg):
         return m2[0].replace(',','').replace(' ','').replace('\xa0','') + '.' + z2(m2[-2])
     raise XPathContext.FunctionArgType(1,"ixt:numunitdecimalinType")
     
-ixtFunctions = {
-                
-    # 3010-04-20 functions
+tr1Functions = {
+    # 2010-04-20 functions
     'dateslashus': dateslashus,
     'dateslasheu': dateslasheu,
     'datedotus': datedotus,
@@ -559,7 +624,18 @@ ixtFunctions = {
     'numspacedot': numspacedot,
     'numdotcomma': numdotcomma,
     'numcomma': numdotcomma,
-    'numspacecomma': numspacecomma,    
+    'numspacecomma': numspacecomma,
+    'dateshortdaymonthuk': datedaymonthShortEnTR1,
+    'dateshortmonthdayus': datemonthdayShortEnTR1,
+    'dateslashdaymontheu': datedaymonthSlashTR1,
+    'dateslashmonthdayus': datemonthdaySlashTR1,
+    'datelongyearmonth': dateyearmonthLongEnTR1,
+    'dateshortyearmonth': dateyearmonthShortEnTR1,
+    'datelongmonthyear': datemonthyearLongEnTR1,
+    'dateshortmonthyear': datemonthyearShortEnTR1
+}
+
+tr2Functions = {
                            
     # 2011-07-31 functions
     'booleanfalse': booleanfalse,
@@ -582,10 +658,12 @@ ixtFunctions = {
     'numcommadecimal': numcommadecimal,
     'zerodash': zerodash,
     'numdotdecimal': numdotdecimal,
-    'numunitdecimal': numunitdecimal,
+    'numunitdecimal': numunitdecimal
+}
     
     # transformation registry v-3 functions
-    
+tr3Functions = tr2Functions # tr3 starts with tr2 and adds more functions
+tr3Functions.update ({
     # same as v2: 'booleanfalse': booleanfalse,
     # same as v2: 'booleantrue': booleantrue,
     'calindaymonthyear': calindaymonthyear, # TBD: calindaymonthyear,
@@ -618,13 +696,13 @@ ixtFunctions = {
     # same as v2: 'numunitdecimal': numunitdecimal,
     'numunitdecimalin': numunitdecimalin,
     # same as v2: 'zerodash': zerodash,
-}
+})
 
 deprecatedNamespaceURI = 'http://www.xbrl.org/2008/inlineXBRL/transformation' # the CR/PR pre-REC namespace
 
-ixtNamespaceURIs = {
-    'http://www.xbrl.org/inlineXBRL/transformation/2010-04-20', # transformation registry v1
-    'http://www.xbrl.org/inlineXBRL/transformation/2011-07-31', # transformation registry v2
-    'http://www.xbrl.org/inlineXBRL/transformation/2014-10-15', # transformation registry v3
-    'http://www.xbrl.org/2008/inlineXBRL/transformation' # the CR/PR pre-REC namespace
+ixtNamespaceFunctions = {
+    'http://www.xbrl.org/inlineXBRL/transformation/2010-04-20': tr1Functions, # transformation registry v1
+    'http://www.xbrl.org/inlineXBRL/transformation/2011-07-31': tr2Functions, # transformation registry v2
+    'http://www.xbrl.org/inlineXBRL/transformation/2014-10-15': tr3Functions, # transformation registry v3
+    'http://www.xbrl.org/2008/inlineXBRL/transformation': tr1Functions # the CR/PR pre-REC namespace
 }
