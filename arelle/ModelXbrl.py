@@ -1029,7 +1029,7 @@ class ModelXbrl:
                     # need locale-dependent formatting
                     fmtArgs[argName] = format_string(self.modelManager.locale, '%f', argValue)
                 else:
-                    fmtArgs[argName] = str(argValue)
+                    fmtArgs[argName] = argValue
         if "refs" not in extras:
             try:
                 file = os.path.basename(self.modelDocument.uri)
