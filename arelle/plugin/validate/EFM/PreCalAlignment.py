@@ -159,6 +159,9 @@ def checkCalcsTreeWalk(val, parentChildRels, concept, isStatementSheet, inNested
 
 def checkForCalculations(val, parentChildRels, siblingRels, iSibling, totalConcept, totalRel, reasonPresumedTotal, isStatementSheet, conceptsUsed, nestedItems, contributingItems):
     # compatible preceding sibling facts must have calc relationship to toal
+    # NOTE: THIS IS HERE TO REMOVE THIS ENTIRE SUITE OF TESTS.  THEY TAKE TOO LONG TO RUN FOR REIT FILINGS.
+    if True:
+        return
     for iContributingRel in range(iSibling - 1, -1, -1):
         contributingRel = siblingRels[iContributingRel]
         siblingConcept = contributingRel.toModelObject
