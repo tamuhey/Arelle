@@ -5,7 +5,10 @@ Created on Oct 5, 2010
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
 from tkinter import *
-from tkinter.ttk import *
+try:
+    from tkinter.ttk import *
+except ImportError:
+    from ttk import *
 import os
 from arelle import ViewWinTree
 
@@ -24,8 +27,7 @@ class ViewDTS(ViewWinTree.ViewTree):
         super(ViewDTS, self).__init__(modelXbrl, tabWin, "DTS", True)
         
     def view(self):
-        for previousNode in self.treeView.get_children(""): 
-            self.treeView.delete(previousNode)
+        self.clearTreeView()
         self.viewDtsElement(self.modelXbrl.modelDocument, "", 1, set(), {self.modelXbrl.modelDocument})
 
                 

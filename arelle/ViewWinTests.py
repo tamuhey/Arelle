@@ -5,9 +5,12 @@ Created on Oct 17, 2010
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
 from tkinter import *
-from tkinter.ttk import *
+try:
+    from tkinter.ttk import *
+except ImportError:
+    from ttk import *
 import os
-from arelle import (ViewWinTree, ModelDocument)
+from arelle import (ViewWinTree, ModelDocument, XmlUtil)
 
 def viewTests(modelXbrl, tabWin):
     view = ViewTests(modelXbrl, tabWin)
@@ -39,6 +42,8 @@ def viewTests(modelXbrl, tabWin):
             view.isTransformRegistry = True
         else:
             view.treeView["displaycolumns"] = ("name", "readMeFirst", "status", "call", "test", "expected", "actual")
+    elif modelXbrl.modelDocument.type == ModelDocument.Type.XPATHTESTSUITE:
+        view.treeView["displaycolumns"] = ("name", "readMeFirst", "status", "call", "test", "expected", "actual")
     else:
         # check if infoset needed
         if modelDocument.type in (ModelDocument.Type.TESTCASESINDEX, ModelDocument.Type.REGISTRY):
@@ -79,6 +84,9 @@ class ViewTests(ViewWinTree.ViewTree):
                 self.viewTestcase(self.modelXbrl.modelObject(testcaseTuple[1]), node, i)
         elif modelDocument.type in (ModelDocument.Type.TESTCASE, ModelDocument.Type.REGISTRYTESTCASE):
             self.viewTestcase(modelDocument, parentNode, 1)
+        elif modelDocument.type == ModelDocument.Type.XPATHTESTSUITE:
+            for i, elt in enumerate(modelDocument.xmlRootElement.iterchildren(tag="{http://www.w3.org/2005/02/query-test-XQTSCatalog}test-group")):
+                self.viewTestGroup(elt, parentNode, i)
         else:
             pass
                 
@@ -91,8 +99,25 @@ class ViewTests(ViewWinTree.ViewTree):
             for i, modelTestcaseVariation in enumerate(modelDocument.testcaseVariations):
                 self.viewTestcaseVariation(modelTestcaseVariation, node, n + i + 1)
                 
+    def viewTestGroup(self, group, parentNode, n):
+        node = self.treeView.insert(parentNode, "end", group.objectId(),
+                                    text=group.get("name"), 
+                                    tags=("odd" if n & 1 else "even",))
+        titleElt = XmlUtil.child(group, None, "title")
+        if titleElt is not None:
+            self.treeView.set(node, "name", titleElt.text)
+        self.id += 1;
+        i = -1
+        for elt in group.iterchildren(tag="{http://www.w3.org/2005/02/query-test-XQTSCatalog}test-group"):
+            i = i + 1
+            self.viewTestGroup(elt, node, n + i + 1)
+        for elt in group.iterchildren(tag="{http://www.w3.org/2005/02/query-test-XQTSCatalog}test-case"):
+            if elt.get("is-XPath2") == "true":
+                i = i + 1
+                self.viewTestcaseVariation(elt, node, n + i + 1)
+                
     def viewTestcaseVariation(self, modelTestcaseVariation, parentNode, n):
-        if self.isTransformRegistry:
+        if self.isTransformRegistry or modelTestcaseVariation.localName in ("testGroup", "test-case"):
             id = modelTestcaseVariation.name
         else:
             id = modelTestcaseVariation.id
@@ -101,7 +126,7 @@ class ViewTests(ViewWinTree.ViewTree):
         node = self.treeView.insert(parentNode, "end", modelTestcaseVariation.objectId(), 
                                     text=id, 
                                     tags=("odd" if n & 1 else "even",))
-        self.treeView.set(node, "name", (modelTestcaseVariation.name or modelTestcaseVariation.description))
+        self.treeView.set(node, "name", (modelTestcaseVariation.description or modelTestcaseVariation.name))
         self.treeView.set(node, "readMeFirst", ",".join(str(uri) for uri in modelTestcaseVariation.readMeFirstUris))
         self.treeView.set(node, "status", modelTestcaseVariation.status)
         call = modelTestcaseVariation.cfcnCall

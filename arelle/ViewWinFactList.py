@@ -4,12 +4,15 @@ Created on Oct 5, 2010
 @author: Mark V Systems Limited
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
-from arelle import (ViewWinTree, ModelDtsObject)
+from arelle import ViewWinTree, ModelDtsObject, XbrlConst
+from arelle.ModelRelationshipSet import ModelRelationshipSet
+from arelle.ModelDtsObject import ModelResource
+from arelle.ModelInstanceObject import ModelFact
 
 def viewFacts(modelXbrl, tabWin, lang=None):
     modelXbrl.modelManager.showStatus(_("viewing facts"))
     view = ViewFactList(modelXbrl, tabWin, lang)
-    view.treeView["columns"] = ("sequence", "contextID", "unitID", "decimals", "precision", "language", "value")
+    view.treeView["columns"] = ("sequence", "contextID", "unitID", "decimals", "precision", "language", "footnoted", "value")
     view.treeView.column("#0", width=200, anchor="w")
     view.treeView.heading("#0", text=_("Label"))
     view.treeView.column("sequence", width=40, anchor="e", stretch=False)
@@ -25,10 +28,13 @@ def viewFacts(modelXbrl, tabWin, lang=None):
     view.treeView.heading("precision", text=_("Prec"))
     view.treeView.column("language", width=36, anchor="w", stretch=False)
     view.treeView.heading("language",text=_("Lang"))
+    view.treeView.column("footnoted", width=18, anchor="center", stretch=False)
+    view.treeView.heading("footnoted",text=_("Fn"))
     view.treeView.column("value", width=200, anchor="w", stretch=False)
     view.treeView.heading("value", text=_("Value"))
     view.treeView["displaycolumns"] = ("sequence", "contextID", "unitID", "decimals", "precision", \
-                                       "language", "value")
+                                       "language", "footnoted", "value")
+    view.footnotesRelationshipSet = ModelRelationshipSet(modelXbrl, "XBRL-footnotes")
     view.blockSelectEvent = 1
     view.blockViewModelObject = 0
     view.view()
@@ -39,20 +45,21 @@ def viewFacts(modelXbrl, tabWin, lang=None):
     # intercept menu click before pops up to set the viewable tuple (if tuple clicked)
     view.treeView.bind( view.modelXbrl.modelManager.cntlr.contextMenuClick, view.setViewTupleChildMenuItem, '+' )
     menu = view.contextMenu()
-    view.menu.insert_cascade(0, label=_("View Tuple Children"), underline=0, command=view.viewTuplesGrid)
-    view.menu.entryconfigure(0, state='disabled')
-    view.menuAddExpandCollapse()
-    view.menuAddClipboard()
-    view.menuAddLangs()
-    view.menuAddLabelRoles(includeConceptName=True)
-    view.menuAddUnitDisplay()
+    if menu is not None:
+        view.menu.insert_cascade(0, label=_("View Tuple Children"), underline=0, command=view.viewTuplesGrid)
+        view.menu.entryconfigure(0, state='disabled')
+        view.menuAddExpandCollapse()
+        view.menuAddClipboard()
+        view.menuAddLangs()
+        view.menuAddLabelRoles(includeConceptName=True)
+        view.menuAddUnitDisplay()
     
 class ViewFactList(ViewWinTree.ViewTree):
     def __init__(self, modelXbrl, tabWin, lang):
         super(ViewFactList, self).__init__(modelXbrl, tabWin, "Fact List", True, lang)
         
     def setViewTupleChildMenuItem(self, event=None):
-        if event is not None:
+        if event is not None and self.menu is not None:
             #self.menu.delete(0, 0) # remove old filings
             menuRow = self.treeView.identify_row(event.y) # this is the object ID
             modelFact = self.modelXbrl.modelObject(menuRow)
@@ -65,14 +72,14 @@ class ViewFactList(ViewWinTree.ViewTree):
                 
     def viewTuplesGrid(self):
         from arelle.ViewWinTupleGrid import viewTuplesGrid
-        viewTuplesGrid(self.modelXbrl, self.tabWin, self.viewedTupleId, self.lang)
-                                
+        viewTuples = viewTuplesGrid(self.modelXbrl, self.tabWin, self.viewedTupleId, self.lang)
+        self.modelXbrl.modelManager.showStatus(_("Ready..."), clearAfter=2000)
+        viewTuples.select()  # bring new grid to foreground
                 
     def view(self):
         self.id = 1
         self.tag_has = {}
-        for previousNode in self.treeView.get_children(""): 
-            self.treeView.delete(previousNode)
+        self.clearTreeView()
         self.setColumnsSortable(initialSortCol="sequence")
         self.viewFacts(self.modelXbrl.facts, "", 1)
         
@@ -81,10 +88,10 @@ class ViewFactList(ViewWinTree.ViewTree):
             try:
                 concept = modelFact.concept
                 if concept is not None:
-                    lbl = concept.label(self.labelrole, lang=self.lang)
+                    lbl = concept.label(self.labelrole, lang=self.lang, linkroleHint=XbrlConst.defaultLinkRole)
                     objectIds = (modelFact.objectId(),concept.objectId())
                 else:
-                    lbl = modelFact.qname
+                    lbl = (modelFact.qname or modelFact.prefixedName) # defective inline facts may have no qname
                     objectIds = (modelFact.objectId())
                 node = self.treeView.insert(parentNode, "end", modelFact.objectId(self.id), 
                                             text=lbl,
@@ -99,14 +106,44 @@ class ViewFactList(ViewWinTree.ViewTree):
                     self.treeView.set(node, "decimals", modelFact.decimals)
                     self.treeView.set(node, "precision", modelFact.precision)
                     self.treeView.set(node, "language", modelFact.xmlLang)
-                    self.treeView.set(node, "value", 
-                              "(nil)" if modelFact.xsiNil == "true" else modelFact.effectiveValue.strip())
+                    if self.footnotesRelationshipSet.fromModelObject(modelFact):
+                        self.treeView.set(node, "footnoted", "*")
+                    self.treeView.set(node, "value", modelFact.effectiveValue.strip())
                 self.id += 1;
                 n += 1
                 self.viewFacts(modelFact.modelTupleFacts, node, n)
             except AttributeError:  # not a fact or no concept
                 pass
+            except:
+                raise # reraise error (debug stop here to see what's happening)
 
+    def getToolTip(self, tvRowId, tvColId):
+        # override tool tip when appropriate
+        if tvColId == "#7":  # footnote column
+            try:
+                modelFact = self.modelXbrl.modelObject(tvRowId) # this is a fact object
+                footnoteRels = self.footnotesRelationshipSet.fromModelObject(modelFact)
+                if footnoteRels:
+                    fns = []
+                    for i, footnoteRel in enumerate(footnoteRels):
+                        modelObject = footnoteRel.toModelObject
+                        if isinstance(modelObject, ModelResource):
+                            fns.append("Footnote {}: {}".format(
+                               i+1,
+                               modelObject.stringValue))
+                        elif isinstance(modelObject, ModelFact):
+                            fns.append("Footnoted fact {}: {} context: {} value: {}".format(
+                                i+1,
+                                modelObject.qname,
+                                modelObject.contextID,
+                                modelObject.value))
+                    return "\n".join(fns)
+                else:
+                    return None
+            except (AttributeError, KeyError):
+                pass
+        return None
+    
     def treeviewEnter(self, *args):
         self.blockSelectEvent = 0
 

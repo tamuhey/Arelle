@@ -5,9 +5,12 @@ Refactored from ModelObject on Jun 11, 2011
 @author: Mark V Systems Limited
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
-import os
+import os, io, logging
 from arelle import XmlUtil, XbrlConst, ModelValue
 from arelle.ModelObject import ModelObject
+from arelle.PluginManager import pluginClassMethods
+
+TXMY_PLG_SRC_ELTS = ("metadata", "catalog", "taxonomy")
 
 class ModelTestcaseVariation(ModelObject):
     def init(self, modelDocument):
@@ -42,30 +45,75 @@ class ModelTestcaseVariation(ModelObject):
 
     @property
     def description(self):
-        nameElement = XmlUtil.descendant(self, None, "description")
+        nameElement = XmlUtil.descendant(self, None, ("description", "documentation"))
         if nameElement is not None:
             return XmlUtil.innerText(nameElement)
         return None
 
+    @property
+    def reference(self):
+        efmNameElts = XmlUtil.children(self.getparent(), None, "name")
+        for efmNameElt in efmNameElts:
+            if efmNameElt is not None and efmNameElt.text.startswith("EDGAR"):
+                return efmNameElt.text
+        referenceElement = XmlUtil.descendant(self, None, "reference")
+        if referenceElement is not None: # formula test suite
+            return "{0}#{1}".format(referenceElement.get("specification"), referenceElement.get("id"))
+        referenceElement = XmlUtil.descendant(self, None, "documentationReference")
+        if referenceElement is not None: # w3c test suite
+            return referenceElement.get("{http://www.w3.org/1999/xlink}href")
+        descriptionElement = XmlUtil.descendant(self, None, "description")
+        if descriptionElement is not None and descriptionElement.get("reference"):
+            return descriptionElement.get("reference")  # xdt test suite
+        if self.getparent().get("description"):
+            return self.getparent().get("description")  # base spec 2.1 test suite
+        functRegistryRefElt = XmlUtil.descendant(self.getparent(), None, "reference")
+        if functRegistryRefElt is not None: # function registry
+            return functRegistryRefElt.get("{http://www.w3.org/1999/xlink}href")
+        return None
+    
     @property
     def readMeFirstUris(self):
         try:
             return self._readMeFirstUris
         except AttributeError:
             self._readMeFirstUris = []
-            for anElement in self.iterdescendants():
-                if isinstance(anElement,ModelObject) and anElement.get("readMeFirst") == "true":
-                    if anElement.get("{http://www.w3.org/1999/xlink}href"):
-                        uri = anElement.get("{http://www.w3.org/1999/xlink}href")
+            # first look if any plugin method to get readme first URIs
+            if not any(pluginXbrlMethod(self)
+                       for pluginXbrlMethod in pluginClassMethods("ModelTestcaseVariation.ReadMeFirstUris")):
+                if self.localName == "testGroup":  #w3c testcase
+                    instanceTestElement = XmlUtil.descendant(self, None, "instanceTest")
+                    if instanceTestElement is not None: # take instance first
+                        self._readMeFirstUris.append(XmlUtil.descendantAttr(instanceTestElement, None, 
+                                                                            "instanceDocument", 
+                                                                            "{http://www.w3.org/1999/xlink}href"))
                     else:
-                        uri = XmlUtil.innerText(anElement)
-                    if anElement.get("name"):
-                        self._readMeFirstUris.append( (ModelValue.qname(anElement, anElement.get("name")), uri) )
-                    elif anElement.get("dts"):
-                        self._readMeFirstUris.append( (anElement.get("dts"), uri) )
-                    else:
-                        self._readMeFirstUris.append(uri)
-            if not self._readMeFirstUris:  # provide a dummy empty instance document
+                        schemaTestElement = XmlUtil.descendant(self, None, "schemaTest")
+                        if schemaTestElement is not None:
+                            self._readMeFirstUris.append(XmlUtil.descendantAttr(schemaTestElement, None, 
+                                                                                "schemaDocument", 
+                                                                                "{http://www.w3.org/1999/xlink}href"))
+                elif self.localName == "test-case":  #xpath testcase
+                    inputFileElement = XmlUtil.descendant(self, None, "input-file")
+                    if inputFileElement is not None: # take instance first
+                        self._readMeFirstUris.append("TestSources/" + inputFileElement.text + ".xml")
+                elif self.resultIsTaxonomyPackage:
+                    self._readMeFirstUris.append( os.path.join(self.modelDocument.filepathdir, "tests", self.get("name") + ".zip") )
+                else:
+                    # default built-in method for readme first uris
+                    for anElement in self.iterdescendants():
+                        if isinstance(anElement,ModelObject) and anElement.get("readMeFirst") == "true":
+                            if anElement.get("{http://www.w3.org/1999/xlink}href"):
+                                uri = anElement.get("{http://www.w3.org/1999/xlink}href")
+                            else:
+                                uri = XmlUtil.innerText(anElement)
+                            if anElement.get("name"):
+                                self._readMeFirstUris.append( (ModelValue.qname(anElement, anElement.get("name")), uri) )
+                            elif anElement.get("dts"):
+                                self._readMeFirstUris.append( (anElement.get("dts"), uri) )
+                            else:
+                                self._readMeFirstUris.append(uri)
+            if not self._readMeFirstUris and not self.isTaxonomyPackageVariation:  # provide a dummy empty instance document
                 self._readMeFirstUris.append(os.path.join(self.modelXbrl.modelManager.cntlr.configDir, "empty-instance.xml"))
             return self._readMeFirstUris
     
@@ -116,15 +164,44 @@ class ModelTestcaseVariation(ModelObject):
         return None    
     
     @property
+    def resultIsTable(self):
+        result = XmlUtil.descendant(self, None, "result")
+        if result is not None :
+            child = XmlUtil.child(result, None, "table")
+            return child is not None and XmlUtil.text(child).endswith(".xml")
+        return False
+        
+    @property
+    def resultTableUri(self):
+        result = XmlUtil.descendant(self, None, "result")
+        if result is not None:
+            child = XmlUtil.child(result, None, "table")
+            return os.path.join(self.modelDocument.outpath, XmlUtil.text(child if child is not None else result))
+        return None    
+    
+    @property
+    def resultIsTaxonomyPackage(self):
+        return any(e.localName for e in XmlUtil.descendants(self,None,TXMY_PLG_SRC_ELTS))
+
+    @property
     def cfcnCall(self):
         # tuple of (expression, element holding the expression)
         try:
             return self._cfcnCall
         except AttributeError:
             self._cfcnCall = None
-            for callElement in XmlUtil.descendants(self, XbrlConst.cfcn, "call"):
-                self._cfcnCall = (XmlUtil.innerText(callElement), callElement)
-                break
+            if self.localName == "test-case":  #xpath testcase
+                queryElement = XmlUtil.descendant(self, None, "query")
+                if queryElement is not None: 
+                    filepath = (self.modelDocument.filepathdir + "/" + "Queries/XQuery/" +
+                                self.get("FilePath") + queryElement.get("name") + '.xq')
+                    if os.sep != "/": filepath = filepath.replace("/", os.sep)
+                    with io.open(filepath, 'rt', encoding='utf-8') as f:
+                        self._cfcnCall = (f.read(), self)
+            else:
+                for callElement in XmlUtil.descendants(self, XbrlConst.cfcn, "call"):
+                    self._cfcnCall = (XmlUtil.innerText(callElement), callElement)
+                    break
             if self._cfcnCall is None and self.namespaceURI == "http://xbrl.org/2011/conformance-rendering/transforms":
                 name = self.getparent().get("name")
                 input = self.get("input")
@@ -139,22 +216,47 @@ class ModelTestcaseVariation(ModelObject):
             return self._cfcnTest
         except AttributeError:
             self._cfcnTest = None
-            testElement = XmlUtil.descendant(self, XbrlConst.cfcn, "test")
-            if testElement is not None:
-                self._cfcnTest = (XmlUtil.innerText(testElement), testElement)
-            elif self.namespaceURI == "http://xbrl.org/2011/conformance-rendering/transforms":
-                output = self.get("output")
-                if output:
-                    self._cfcnTest =  ("$result eq '{0}'".format(output.replace("'","''")), self)
+            if self.localName == "test-case":  #xpath testcase
+                outputFileElement = XmlUtil.descendant(self, None, "output-file")
+                if outputFileElement is not None and outputFileElement.get("compare") == "Text": 
+                    filepath = (self.modelDocument.filepathdir + "/" + "ExpectedTestResults/" +
+                                self.get("FilePath") + outputFileElement.text)
+                    if os.sep != "/": filepath = filepath.replace("/", os.sep)
+                    with io.open(filepath, 'rt', encoding='utf-8') as f:
+                        self._cfcnTest = ("xs:string($result) eq '{0}'".format(f.read()), self)
+            else:
+                testElement = XmlUtil.descendant(self, XbrlConst.cfcn, "test")
+                if testElement is not None:
+                    self._cfcnTest = (XmlUtil.innerText(testElement), testElement)
+                elif self.namespaceURI == "http://xbrl.org/2011/conformance-rendering/transforms":
+                    output = self.get("output")
+                    if output:
+                        self._cfcnTest =  ("$result eq '{0}'".format(output.replace("'","''")), self)
             return self._cfcnTest
     
     @property
     def expected(self):
+        for pluginXbrlMethod in pluginClassMethods("ModelTestcaseVariation.ExpectedResult"):
+            expected = pluginXbrlMethod(self)
+            if expected:
+                return expected
+        # default behavior without plugins
         if self.localName == "testcase":
             return self.document.basename[:4]   #starts with PASS or FAIL
+        elif self.localName == "testGroup":  #w3c testcase
+            instanceTestElement = XmlUtil.descendant(self, None, "instanceTest")
+            if instanceTestElement is not None: # take instance first
+                return XmlUtil.descendantAttr(instanceTestElement, None, "expected", "validity")
+            else:
+                schemaTestElement = XmlUtil.descendant(self, None, "schemaTest")
+                if schemaTestElement is not None:
+                    return XmlUtil.descendantAttr(schemaTestElement, None, "expected", "validity")
         errorElement = XmlUtil.descendant(self, None, "error")
         if errorElement is not None:
-            return ModelValue.qname(errorElement, XmlUtil.text(errorElement))
+            _errorText = XmlUtil.text(errorElement)
+            if ' ' in _errorText: # list of tokens
+                return _errorText
+            return ModelValue.qname(errorElement, _errorText)  # turn into a QName
         resultElement = XmlUtil.descendant(self, None, "result")
         if resultElement is not None:
             expected = resultElement.get("expected")
@@ -162,6 +264,8 @@ class ModelTestcaseVariation(ModelObject):
                 return expected
             for assertElement in XmlUtil.children(resultElement, None, "assert"):
                 num = assertElement.get("num")
+                if num == "99999": # inline test, use name as expected
+                    return assertElement.get("name")
                 if len(num) == 5:
                     return "EFM.{0}.{1}.{2}".format(num[0],num[1:3],num[3:6])
             asserTests = {}
@@ -176,7 +280,33 @@ class ModelTestcaseVariation(ModelObject):
             return self.get("result")
                 
         return None
+    
+    @property
+    def expectedCount(self):
+        for pluginXbrlMethod in pluginClassMethods("ModelTestcaseVariation.ExpectedCount"):
+            _count = pluginXbrlMethod(self)
+            if _count is not None: # ignore plug in if not a plug-in-recognized test case
+                return _count
+        return None
+        
+    
+    @property
+    def severityLevel(self):
+        for pluginXbrlMethod in pluginClassMethods("ModelTestcaseVariation.ExpectedSeverity"):
+            severityLevelName = pluginXbrlMethod(self)
+            if severityLevelName: # ignore plug in if not a plug-in-recognized test case
+                return logging._checkLevel(severityLevelName)
+        # default behavior without plugins
+        # SEC error cases have <assert severity={err|wrn}>...
+        if (XmlUtil.descendant(self, None, "assert", attrName="severity", attrValue="wrn") is not None or
+            XmlUtil.descendant(self, None, "result", attrName="severity", attrValue="warning") is not None):
+            return logging._checkLevel("WARNING")
+        return logging._checkLevel("INCONSISTENCY")
 
+    @property
+    def blockedMessageCodes(self):
+        return XmlUtil.descendantAttr(self, None, "results", "blockedMessageCodes")
+    
     @property
     def expectedVersioningReport(self):
         XmlUtil.text(XmlUtil.text(XmlUtil.descendant(XmlUtil.descendant(self, None, "result"), None, "versioningReport")))

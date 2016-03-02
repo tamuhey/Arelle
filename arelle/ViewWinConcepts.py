@@ -58,22 +58,23 @@ class ViewConcepts(ViewWinTree.ViewTree):
         role = self.labelrole
         lang = self.lang
         nameIsPrefixed = self.nameIsPrefixed
-        for concept in self.modelXbrl.qnameConcepts.values():
+        for concept in set(self.modelXbrl.qnameConcepts.values()): # may be twice if unqualified, with and without namespace
             lbls[concept.label(role,lang=lang)].append(concept.objectId())
         srtLbls = sorted(lbls.keys())
         '''
         self.nodeToObjectId = {}
         self.objectIdToNode = {}
         '''
-        for previousNode in self.treeView.get_children(""): 
-            self.treeView.delete(previousNode)
+        self.clearTreeView()
         nodeNum = 1
+        excludedNamespaces = XbrlConst.ixbrlAll.union(
+            (XbrlConst.xbrli, XbrlConst.link, XbrlConst.xlink, XbrlConst.xl,
+             XbrlConst.xbrldt,
+             XbrlConst.xhtml))
         for label in srtLbls:
             for objectId in lbls[label]:
                 concept = self.modelXbrl.modelObject(objectId)
-                if concept.modelDocument.targetNamespace not in (
-                         XbrlConst.xbrli, XbrlConst.link, XbrlConst.xlink, XbrlConst.xl,
-                         XbrlConst.xbrldt):
+                if concept.modelDocument.targetNamespace not in excludedNamespaces:
                     '''
                     node = "node{0}".format(nodeNum)
                     objectId = concept.objectId()
@@ -87,7 +88,7 @@ class ViewConcepts(ViewWinTree.ViewTree):
                     '''
                     node = self.treeView.insert("", "end", 
                                                 concept.objectId(), 
-                                                text=concept.label(role,lang=lang),
+                                                text=concept.label(role,lang=lang,linkroleHint=XbrlConst.defaultLinkRole),
                                                 tags=("odd" if nodeNum & 1 else "even",))
                     nodeNum += 1
                     self.treeView.set(node, "conceptname", concept.qname if nameIsPrefixed else concept.name)

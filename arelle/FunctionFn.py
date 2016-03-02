@@ -4,14 +4,18 @@ Created on Dec 20, 2010
 @author: Mark V Systems Limited
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
-import math, re
+import math, re, sre_constants
 from arelle.ModelObject import ModelObject, ModelAttribute
 from arelle.ModelValue import (qname, dateTime, DateTime, DATE, DATETIME, dayTimeDuration,
                          YearMonthDuration, DayTimeDuration, time, Time)
-from arelle.FunctionUtil import anytypeArg, atomicArg, stringArg, numericArg, qnameArg, nodeArg
+from arelle.FunctionUtil import anytypeArg, atomicArg, stringArg, numericArg, integerArg, qnameArg, nodeArg
 from arelle import FunctionXs, XPathContext, XbrlUtil, XmlUtil, UrlUtil, ModelDocument, XmlValidate
 from arelle.Locale import format_picture
+from arelle.XmlValidate import VALID_NO_CONTENT
+from decimal import Decimal
 from lxml import etree
+
+DECIMAL_5 = Decimal(.5)
     
 class fnFunctionNotAvailable(Exception):
     def __init__(self):
@@ -40,7 +44,13 @@ def nilled(xc, p, contextItem, args):
 
 def string(xc, p, contextItem, args):
     if len(args) > 1: raise XPathContext.FunctionNumArgs()
-    x = atomicArg(xc, p, args, 0, "item()?", missingArgFallback=contextItem, emptyFallback='')
+    item = anytypeArg(xc, args, 0, "item()?", missingArgFallback=contextItem)
+    if item == (): 
+        return ''
+    if isinstance(item, ModelObject) and getattr(item,"xValid", 0) == VALID_NO_CONTENT:
+        x = item.stringValue # represents inner text of this and all subelements
+    else:
+        x = xc.atomize(p, item)
     return FunctionXs.xsString( xc, p, x ) 
 
 def data(xc, p, contextItem, args):
@@ -48,8 +58,12 @@ def data(xc, p, contextItem, args):
     return xc.atomize(p, args[0])
 
 def base_uri(xc, p, contextItem, args):
-    # TBD
-    return []
+    item = anytypeArg(xc, args, 0, "node()?", missingArgFallback=contextItem)
+    if item == (): 
+        return ''
+    if isinstance(item, (ModelObject, ModelDocument)):
+        return UrlUtil.ensureUrl(item.modelDocument.uri)
+    return ''
 
 def document_uri(xc, p, contextItem, args):
     return xc.modelXbrl.modelDocument.uri
@@ -93,7 +107,7 @@ def fn_round(xc, p, contextItem, args):
     x = numericArg(xc, p, args)
     if math.isinf(x) or math.isnan(x): 
         return x
-    return _INT(x + .5)  # round towards +inf
+    return _INT(x + (DECIMAL_5 if isinstance(x,Decimal) else .5))  # round towards +inf
 
 def fn_round_half_to_even(xc, p, contextItem, args):
     if len(args) > 2 or len(args) == 0: raise XPathContext.FunctionNumArgs()
@@ -145,7 +159,7 @@ def string_join(xc, p, contextItem, args):
     joiner = stringArg(xc, args, 1, "xs:string")
     atomizedArgs = []
     for x in xc.atomize( p, args[0] ):
-        if isinstance(x, str):
+        if isinstance(x, _STR_BASE):
             atomizedArgs.append(x)
         else:
             raise XPathContext.FunctionArgType(0,"xs:string*")
@@ -173,7 +187,7 @@ def string_length(xc, p, contextItem, args):
 nonSpacePattern = re.compile(r"\S+")
 def normalize_space(xc, p, contextItem, args):
     if len(args) > 1: raise XPathContext.FunctionNumArgs()
-    return ' '.join( p.findall( stringArg(xc, args, 0, "xs:string", missingArgFallback=contextItem) ) )
+    return ' '.join( nonSpacePattern.findall( stringArg(xc, args, 0, "xs:string", missingArgFallback=contextItem) ) )
 
 def normalize_unicode(xc, p, contextItem, args):
     raise fnFunctionNotAvailable()
@@ -242,7 +256,7 @@ def substring_functions(xc, args, contains=None, startEnd=None, beforeAfter=None
     elif beforeAfter is not None:
         if portion == '': return ''
         try:
-            if beforeAfter: return string.lpartition( portion )[0]
+            if beforeAfter: return string.partition( portion )[0]
             else: return string.rpartition( portion )[2]
         except ValueError:
             return ''
@@ -262,16 +276,27 @@ def regexFlags(xc, p, args, n):
             
 def matches(xc, p, contextItem, args):
     if not 2 <= len(args) <= 3: raise XPathContext.FunctionNumArgs()
-    input = stringArg(xc, args, 0, "xs:string?", emptyFallback=())
-    pattern = stringArg(xc, args, 1, "xs:string", emptyFallback=())
-    return bool(re.match(pattern,input,flags=regexFlags(xc, p, args, 2)))
+    input = stringArg(xc, args, 0, "xs:string?", emptyFallback="")
+    pattern = stringArg(xc, args, 1, "xs:string", emptyFallback="")
+    try:
+        return bool(re.search(pattern,input,flags=regexFlags(xc, p, args, 2)))
+    except sre_constants.error as err:
+        raise XPathContext.XPathException(p, 'err:FORX0002', _('fn:matches regular expression pattern error: {0}').format(err))
+        
 
 def replace(xc, p, contextItem, args):
     if not 3 <= len(args) <= 4: raise XPathContext.FunctionNumArgs()
-    input = stringArg(xc, args, 0, "xs:string?", emptyFallback=())
-    pattern = stringArg(xc, args, 1, "xs:string", emptyFallback=())
-    replacement = stringArg(xc, args, 2, "xs:string", emptyFallback=())
-    return re.sub(pattern,replacement,input,flags=regexFlags(xc, p, args, 3))
+    input = stringArg(xc, args, 0, "xs:string?", emptyFallback="")  # empty string is default
+    pattern = stringArg(xc, args, 1, "xs:string", emptyFallback="")
+    fnReplacement = stringArg(xc, args, 2, "xs:string", emptyFallback="")
+    if re.findall(r"(^|[^\\])[$]|[$][^0-9]", fnReplacement):
+        raise XPathContext.XPathException(p, 'err:FORX0004', _('fn:replace pattern \'$\' error in: {0}').format(fnReplacement))
+    reReplacement = re.sub(r"[\\][$]", "$", 
+                         re.sub(r"(^|[^\\])[$]([1-9])", r"\\\2", fnReplacement))
+    try:
+        return re.sub(pattern,reReplacement,input,flags=regexFlags(xc, p, args, 3))
+    except sre_constants.error as err:
+        raise XPathContext.XPathException(p, 'err:FORX0002', _('fn:replace regular expression pattern error: {0}').format(err))
 
 def tokenize(xc, p, contextItem, args):
     raise fnFunctionNotAvailable()
@@ -507,10 +532,12 @@ def Node_functions(xc, contextItem, args, name=None, localName=None, namespaceUR
         if namespaceURI: return node.namespaceURI
     return ''
 
-nan = float('NaN')
+NaN = float('NaN')
 
 def number(xc, p, contextItem, args):
-    return numericArg(xc, p, args, missingArgFallback=contextItem, emptyFallback=nan, convertFallback=nan)
+    # TBD: add argument of type of number to convert to (fallback is float)
+    n = numericArg(xc, p, args, missingArgFallback=contextItem, emptyFallback=NaN, convertFallback=NaN)
+    return float(n)
 
 def lang(xc, p, contextItem, args):
     raise fnFunctionNotAvailable()
@@ -529,7 +556,7 @@ def boolean(xc, p, contextItem, args):
     if len(inputSequence) == 1:
         if isinstance(item, bool):
             return item
-        if isinstance(item, str):
+        if isinstance(item, _STR_BASE):
             return len(item) > 0
         if isinstance(item, _NUM_TYPES):
             return not math.isnan(item) and item != 0
@@ -563,14 +590,14 @@ def distinct_values(xc, p, contextItem, args):
     if len(args) != 1: raise XPathContext.FunctionNumArgs()
     sequence = args[0]
     if len(sequence) == 0: return []
-    return list(set(sequence))
+    return list(set(xc.atomize(p, sequence)))
 
 def insert_before(xc, p, contextItem, args):
     if len(args) != 3: raise XPathContext.FunctionNumArgs()
     sequence = args[0]
     if isinstance(sequence, tuple): sequence = list(sequence)
     elif not isinstance(sequence, list): sequence = [sequence]
-    index = numericArg(xc, p, args, 1, "xs:integer", convertFallback=0) - 1
+    index = integerArg(xc, p, args, 1, "xs:integer", convertFallback=0) - 1
     insertion = args[2]
     if isinstance(insertion, tuple): insertion = list(insertion)
     elif not isinstance(insertion, list): insertion = [insertion]
@@ -579,7 +606,7 @@ def insert_before(xc, p, contextItem, args):
 def remove(xc, p, contextItem, args):
     if len(args) != 2: raise XPathContext.FunctionNumArgs()
     sequence = args[0]
-    index = numericArg(xc, p, args, 1, "xs:integer", convertFallback=0) - 1
+    index = integerArg(xc, p, args, 1, "xs:integer", convertFallback=0) - 1
     return sequence[:index] + sequence[index+1:]
 
 def reverse(xc, p, contextItem, args):
@@ -610,15 +637,24 @@ def unordered(xc, p, contextItem, args):
 
 def zero_or_one(xc, p, contextItem, args):
     if len(args) != 1: raise XPathContext.FunctionNumArgs()
-    return len(args[0]) in ( 0, 1 )
+    if len(args[0]) > 1:
+        raise XPathContext.FunctionNumArgs(errCode='err:FORG0003',
+                                           errText=_('fn:zero-or-one called with a sequence containing more than one item'))
+    return args[0]
 
 def one_or_more(xc, p, contextItem, args):
     if len(args) != 1: raise XPathContext.FunctionNumArgs()
-    return len(args[0]) >= 1
+    if len(args[0]) < 1:
+        raise XPathContext.FunctionNumArgs(errCode='err:FORG0004',
+                                           errText=_('fn:one-or-more called with a sequence containing no items'))
+    return args[0]
 
 def exactly_one(xc, p, contextItem, args):
     if len(args) != 1: raise XPathContext.FunctionNumArgs()
-    return len(args[0]) == 1
+    if len(args[0]) != 1:
+        raise XPathContext.FunctionNumArgs(errCode='err:FORG0005',
+                                           errText=_('fn:exactly-one called with a sequence containing zero or more than one item'))
+    return args[0]
 
 def deep_equal(xc, p, contextItem, args):
     if len(args) != 2: raise XPathContext.FunctionNumArgs()
@@ -630,19 +666,72 @@ def count(xc, p, contextItem, args):
 
 def avg(xc, p, contextItem, args):
     if len(args) != 1: raise XPathContext.FunctionNumArgs()
-    return sum( xc.atomize( p, args[0] ) ) / len( args[0] )
+    addends = xc.atomize( p, args[0] )
+    try:
+        l = len(addends)
+        if l == 0: 
+            return ()  # xpath allows empty sequence argument
+        hasFloat = False
+        hasDecimal = False
+        for a in addends:
+            if math.isnan(a) or math.isinf(a):
+                return NaN
+            if isinstance(a, float):
+                hasFloat = True
+            elif isinstance(a, Decimal):
+                hasDecimal = True
+        if hasFloat and hasDecimal: # promote decimals to float
+            addends = [float(a) if isinstance(a, Decimal) else a
+                       for a in addends]
+        return sum( addends ) / len( args[0] )
+    except TypeError:
+        raise XPathContext.FunctionArgType(1,"sumable values", addends, errCode='err:FORG0001')
 
-def max(xc, p, contextItem, args):
+def fn_max(xc, p, contextItem, args):
     if len(args) != 1: raise XPathContext.FunctionNumArgs()
-    return max( xc.atomize( p, args[0] ) )
+    comparands = xc.atomize( p, args[0] )
+    try:
+        if len(comparands) == 0: 
+            return ()  # xpath allows empty sequence argument
+        if any(isinstance(c, float) and math.isnan(c) for c in comparands):
+            return NaN
+        return max( comparands )
+    except TypeError:
+        raise XPathContext.FunctionArgType(1,"comparable values", comparands, errCode='err:FORG0001')
 
-def min(xc, p, contextItem, args):
+def fn_min(xc, p, contextItem, args):
     if len(args) != 1: raise XPathContext.FunctionNumArgs()
-    return min( xc.atomize( p, args[0] ) )
+    comparands = xc.atomize( p, args[0] )
+    try:
+        if len(comparands) == 0: 
+            return ()  # xpath allows empty sequence argument
+        if any(isinstance(c, float) and math.isnan(c) for c in comparands):
+            return NaN
+        return min( comparands )
+    except TypeError:
+        raise XPathContext.FunctionArgType(1,"comparable values", comparands, errCode='err:FORG0001')
 
 def fn_sum(xc, p, contextItem, args):
     if len(args) != 1: raise XPathContext.FunctionNumArgs()
-    return sum( xc.atomize( p, args[0] ) )
+    addends = xc.atomize( p, args[0] )
+    try:
+        if len(addends) == 0: 
+            return 0  # xpath allows empty sequence argument
+        hasFloat = False
+        hasDecimal = False
+        for a in addends:
+            if math.isnan(a):
+                return NaN
+            if isinstance(a, float):
+                hasFloat = True
+            elif isinstance(a, Decimal):
+                hasDecimal = True
+        if hasFloat and hasDecimal: # promote decimals to float
+            addends = [float(a) if isinstance(a, Decimal) else a
+                       for a in addends]
+        return sum( addends )
+    except TypeError:
+        raise XPathContext.FunctionArgType(1,"summable sequence", addends, errCode='err:FORG0001')
 
 def id(xc, p, contextItem, args):
     raise fnFunctionNotAvailable()
@@ -812,8 +901,8 @@ fnFunctions = {
     'deep-equal': deep_equal,
     'count': count,
     'avg': avg,
-    'max': max,
-    'min': min,
+    'max': fn_max,
+    'min': fn_min,
     'sum': fn_sum,
     'id': id,
     'idref': idref,

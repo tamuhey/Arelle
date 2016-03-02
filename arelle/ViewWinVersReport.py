@@ -40,8 +40,7 @@ class ViewVersReport(ViewWinTree.ViewTree):
         self.blockViewModelObject = 0
         self.tag_has = defaultdict(list) # temporary until Tk 8.6
 
-        for previousNode in self.treeView.get_children(""): 
-            self.treeView.delete(previousNode)
+        self.clearTreeView()
 
         versReport = self.modelXbrl.modelDocument
         # root node for tree view
@@ -136,7 +135,7 @@ class ViewVersReport(ViewWinTree.ViewTree):
                                                                   text=aspect.localName + " " + aspect.elementAttributesStr, 
                                                                   tags=("even" if l & 1 else "odd",))
                                 m = l
-                                for member in aspect.members:
+                                for member in getattr(aspect, "relatedConcepts", getattr(aspect, "relatedPeriods", getattr(aspect, "relatedMeasures", []))):
                                     self.treeView.insert(aspectNode, "end", member.objectId(), 
                                                          text=member.localName + " " + member.elementAttributesStr, 
                                                          tags=("even" if m & 1 else "odd",))

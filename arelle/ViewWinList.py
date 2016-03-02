@@ -6,7 +6,10 @@ Created on Feb 6, 2011
 '''
 import io
 from tkinter import *
-from tkinter.ttk import *
+try:
+    from tkinter.ttk import *
+except ImportError:
+    from ttk import *
 from arelle.CntlrWinTooltip import ToolTip
 from arelle import XmlUtil
 
@@ -14,6 +17,7 @@ class ViewList():
     def __init__(self, modelXbrl, tabWin, tabTitle, hasToolTip=False):
         self.tabWin = tabWin
         self.viewFrame = Frame(tabWin)
+        self.viewFrame.view = self
         self.viewFrame.grid(row=0, column=0, sticky=(N, S, E, W))
         tabWin.add(self.viewFrame,text=tabTitle)
         xmlScrollbar = Scrollbar(self.viewFrame, orient=VERTICAL)
@@ -21,6 +25,7 @@ class ViewList():
         self.listBox.grid(row=0, column=0, sticky=(N, S, E, W))
         #self.listBox.focus_set()
         self.listBox.bind("<Motion>", self.listBoxMotion, '+')
+        self.listBox.bind("<1>", self.listBoxClick, '+')
         self.listBox.bind("<Leave>", self.listBoxLeave, '+')
         xmlScrollbar["command"] = self.listBox.yview
         xmlScrollbar.grid(row=0, column=1, sticky=(N,S))
@@ -35,6 +40,7 @@ class ViewList():
             modelXbrl.views.append(self)
     
     def close(self):
+        del self.viewFrame.view
         self.tabWin.forget(self.viewFrame)
         self.modelXbrl.views.remove(self)
         self.modelXbrl = None
@@ -47,6 +53,10 @@ class ViewList():
 
     def clear(self):
         self.listBox.delete(0,END)
+        
+    def listBoxClick(self, *args):
+        if self.modelXbrl:
+            self.modelXbrl.modelManager.cntlr.currentView = self
         
     def listBoxLeave(self, *args):
         self.listBoxRow = -9999999

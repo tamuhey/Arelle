@@ -7,7 +7,9 @@ Created on Dec 6, 2010
 from collections import defaultdict
 import os
 from arelle import ViewWinTree, ModelObject, XbrlConst
-from arelle.ModelFormulaObject import ModelVariable
+from arelle.ModelFormulaObject import (ModelParameter, ModelVariable, ModelVariableSet, 
+                                       ModelVariableSetAssertion, ModelConsistencyAssertion)
+from arelle.ModelDtsObject import ModelRelationship
 from arelle.ViewUtilFormulae import rootFormulaObjects, formulaObjSortKey
 
 def viewFormulae(modelXbrl, tabWin):
@@ -41,12 +43,15 @@ class ViewFormulae(ViewWinTree.ViewTree):
                 
         # root node for tree view
         self.id = 1
+        self.clearTreeView()
         n = 1
         for rootObject in sorted(rootFormulaObjects(self), key=formulaObjSortKey):
             self.viewFormulaObjects("", rootObject, None, n, set())
             n += 1
-        for cfQname in sorted(self.modelXbrl.modelCustomFunctionSignatures.keys()):
-            cfObject = self.modelXbrl.modelCustomFunctionSignatures[cfQname]
+        for cfQnameArity in sorted(qnameArity
+                                   for qnameArity in self.modelXbrl.modelCustomFunctionSignatures.keys()
+                                   if isinstance(qnameArity, (tuple,list))):
+            cfObject = self.modelXbrl.modelCustomFunctionSignatures[cfQnameArity]
             self.viewFormulaObjects("", cfObject, None, n, set())
             n += 1
         self.treeView.bind("<<TreeviewSelect>>", self.treeviewSelect, '+')
@@ -61,13 +66,15 @@ class ViewFormulae(ViewWinTree.ViewTree):
     def viewFormulaObjects(self, parentNode, fromObject, fromRel, n, visited):
         if fromObject is None:
             return
-        if isinstance(fromObject, ModelVariable) and fromRel is not None:
+        if isinstance(fromObject, (ModelVariable, ModelParameter)) and fromRel is not None:
             text = "{0} ${1}".format(fromObject.localName, fromRel.variableQname)
+        elif isinstance(fromObject, (ModelVariableSetAssertion, ModelConsistencyAssertion)):
+            text = "{0} {1}".format(fromObject.localName, fromObject.id)
         else:
             text = fromObject.localName
         childnode = self.treeView.insert(parentNode, "end", fromObject.objectId(self.id), text=text, tags=("odd" if n & 1 else "even",))
         self.treeView.set(childnode, "label", fromObject.xlinkLabel)
-        if fromRel is not None and fromRel.arcrole == XbrlConst.variableFilter:
+        if fromRel is not None and fromRel.elementQname == XbrlConst.qnVariableFilterArc:
             self.treeView.set(childnode, "cover", "true" if fromRel.isCovered else "false")
             self.treeView.set(childnode, "complement", "true" if fromRel.isComplemented else "false")
         if isinstance(fromObject, ModelVariable):
@@ -88,7 +95,19 @@ class ViewFormulae(ViewWinTree.ViewTree):
                         if i == 0:
                             relationshipArcsShown.add(modelRel.arcElement)
             visited.remove(fromObject)
-            
+                   
+    def getToolTip(self, tvRowId, tvColId):
+        # override tool tip when appropriate
+        if tvColId == "#0":
+            try:
+                modelObject = self.modelXbrl.modelObject(tvRowId)
+                if isinstance(modelObject, ModelRelationship):
+                    modelObject = modelObject.toModelObject
+                return modelObject.xmlElementView
+            except (AttributeError, KeyError):
+                pass 
+        return None
+    
     def treeviewEnter(self, *args):
         self.blockSelectEvent = 0
 

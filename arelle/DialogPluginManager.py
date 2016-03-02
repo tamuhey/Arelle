@@ -9,10 +9,19 @@ based on pull request 4
 '''
 from tkinter import Toplevel, font, messagebox, VERTICAL, HORIZONTAL, N, S, E, W
 from tkinter.constants import DISABLED, ACTIVE
-from tkinter.ttk import Treeview, Scrollbar, Frame, Label, Button
-from arelle import PluginManager, DialogURL
+try:
+    from tkinter.ttk import Treeview, Scrollbar, Frame, Label, Button
+except ImportError:
+    from ttk import Treeview, Scrollbar, Frame, Label, Button
+from arelle import PluginManager, DialogURL, DialogOpenArchive
 from arelle.CntlrWinTooltip import ToolTip
-import re, os, time
+import os, time
+try:
+    import regex as re
+except ImportError:
+    import re
+EMPTYLIST = []
+GROUPSEP = '\x01d'
 
 def dialogPluginManager(mainWin):
     # check for updates in background
@@ -45,6 +54,10 @@ class DialogPluginManager(Toplevel):
         self.pluginConfig = PluginManager.pluginConfig
         self.pluginConfigChanged = False
         self.uiClassMethodsChanged = False
+        self.modelClassesChanged = False
+        self.customTransformsChanged = False
+        self.disclosureSystemTypesChanged = False
+        self.hostSystemFeaturesChanged = False
         self.modulesWithNewerFileDates = modulesWithNewerFileDates
         
         parentGeometry = re.match("(\d+)x(\d+)[+]?([-]?\d+)[+]?([-]?\d+)", self.parent.geometry())
@@ -58,17 +71,20 @@ class DialogPluginManager(Toplevel):
         buttonFrame = Frame(frame, width=40)
         buttonFrame.columnconfigure(0, weight=1)
         addLabel = Label(buttonFrame, text=_("Find plug-in modules:"), wraplength=60, justify="center")
-        addLocalButton = Button(buttonFrame, text=_("Locally"), command=self.findLocally)
-        ToolTip(addLocalButton, text=_("File chooser allows selecting python module files to add (or reload) plug-ins, from the local file system."), wraplength=240)
+        addSelectLocalButton = Button(buttonFrame, text=_("Select"), command=self.selectLocally)
+        ToolTip(addSelectLocalButton, text=_("Select python module files from the local plugin directory."), wraplength=240)
+        addBrowseLocalButton = Button(buttonFrame, text=_("Browse"), command=self.browseLocally)
+        ToolTip(addBrowseLocalButton, text=_("File chooser allows browsing and selecting python module files to add (or reload) plug-ins, from the local file system."), wraplength=240)
         addWebButton = Button(buttonFrame, text=_("On Web"), command=self.findOnWeb)
         ToolTip(addWebButton, text=_("Dialog to enter URL full path to load (or reload) plug-ins, from the web or local file system."), wraplength=240)
         addLabel.grid(row=0, column=0, pady=4)
-        addLocalButton.grid(row=1, column=0, pady=4)
-        addWebButton.grid(row=2, column=0, pady=4)
-        buttonFrame.grid(row=0, column=0, rowspan=2, sticky=(N, S, W), padx=3, pady=3)
+        addSelectLocalButton.grid(row=1, column=0, pady=4)
+        addBrowseLocalButton.grid(row=2, column=0, pady=4)
+        addWebButton.grid(row=3, column=0, pady=4)
+        buttonFrame.grid(row=0, column=0, rowspan=3, sticky=(N, S, W), padx=3, pady=3)
         
         # right tree frame (plugins already known to arelle)
-        modulesFrame = Frame(frame, width=700)
+        modulesFrame = Frame(frame, width=720)
         vScrollbar = Scrollbar(modulesFrame, orient=VERTICAL)
         hScrollbar = Scrollbar(modulesFrame, orient=HORIZONTAL)
         self.modulesView = Treeview(modulesFrame, xscrollcommand=hScrollbar.set, yscrollcommand=vScrollbar.set, height=7)
@@ -88,7 +104,7 @@ class DialogPluginManager(Toplevel):
         self.modulesView["columns"] = ("author", "ver", "status", "date", "update", "descr", "license")
         self.modulesView.column("author", width=100, anchor="w", stretch=False)
         self.modulesView.heading("author", text=_("Author"))
-        self.modulesView.column("ver", width=50, anchor="w", stretch=False)
+        self.modulesView.column("ver", width=60, anchor="w", stretch=False)
         self.modulesView.heading("ver", text=_("Version"))
         self.modulesView.column("status", width=50, anchor="w", stretch=False)
         self.modulesView.heading("status", text=_("Status"))
@@ -117,7 +133,7 @@ class DialogPluginManager(Toplevel):
         
         self.classesView.column("#0", width=200, anchor="w")
         self.classesView.heading("#0", text=_("Class"))
-        self.classesView["columns"] = ("modules")
+        self.classesView["columns"] = ("modules",)
         self.classesView.column("modules", width=500, anchor="w", stretch=False)
         self.classesView.heading("modules", text=_("Modules"))
         
@@ -141,29 +157,38 @@ class DialogPluginManager(Toplevel):
         self.moduleClassesLabel = Label(moduleInfoFrame, wraplength=600, justify="left")
         self.moduleClassesLabel.grid(row=3, column=1, columnspan=3, sticky=W)
         ToolTip(self.moduleClassesLabel, text=_("List of classes that this plug-in handles."), wraplength=240)
+        self.moduleVersionHdr = Label(moduleInfoFrame, text=_("Version:"), state=DISABLED)
+        self.moduleVersionHdr.grid(row=4, column=0, sticky=W)
+        self.moduleVersionLabel = Label(moduleInfoFrame, wraplength=600, justify="left")
+        self.moduleVersionLabel.grid(row=4, column=1, columnspan=3, sticky=W)
+        ToolTip(self.moduleVersionLabel, text=_("Version of plug-in module."), wraplength=240)
         self.moduleUrlHdr = Label(moduleInfoFrame, text=_("URL:"), state=DISABLED)
-        self.moduleUrlHdr.grid(row=4, column=0, sticky=W)
+        self.moduleUrlHdr.grid(row=5, column=0, sticky=W)
         self.moduleUrlLabel = Label(moduleInfoFrame, wraplength=600, justify="left")
-        self.moduleUrlLabel.grid(row=4, column=1, columnspan=3, sticky=W)
+        self.moduleUrlLabel.grid(row=5, column=1, columnspan=3, sticky=W)
         ToolTip(self.moduleUrlLabel, text=_("URL of plug-in module (local file path or web loaded file)."), wraplength=240)
         self.moduleDateHdr = Label(moduleInfoFrame, text=_("date:"), state=DISABLED)
-        self.moduleDateHdr.grid(row=5, column=0, sticky=W)
+        self.moduleDateHdr.grid(row=6, column=0, sticky=W)
         self.moduleDateLabel = Label(moduleInfoFrame, wraplength=600, justify="left")
-        self.moduleDateLabel.grid(row=5, column=1, columnspan=3, sticky=W)
+        self.moduleDateLabel.grid(row=6, column=1, columnspan=3, sticky=W)
         ToolTip(self.moduleDateLabel, text=_("Date of currently loaded module file (with parenthetical node when an update is available)."), wraplength=240)
         self.moduleLicenseHdr = Label(moduleInfoFrame, text=_("license:"), state=DISABLED)
-        self.moduleLicenseHdr.grid(row=6, column=0, sticky=W)
+        self.moduleLicenseHdr.grid(row=7, column=0, sticky=W)
         self.moduleLicenseLabel = Label(moduleInfoFrame, wraplength=600, justify="left")
-        self.moduleLicenseLabel.grid(row=6, column=1, columnspan=3, sticky=W)
+        self.moduleLicenseLabel.grid(row=7, column=1, columnspan=3, sticky=W)
+        self.moduleImportsHdr = Label(moduleInfoFrame, text=_("imports:"), state=DISABLED)
+        self.moduleImportsHdr.grid(row=8, column=0, sticky=W)
+        self.moduleImportsLabel = Label(moduleInfoFrame, wraplength=600, justify="left")
+        self.moduleImportsLabel.grid(row=8, column=1, columnspan=3, sticky=W)
         self.moduleEnableButton = Button(moduleInfoFrame, text=self.ENABLE, state=DISABLED, command=self.moduleEnable)
         ToolTip(self.moduleEnableButton, text=_("Enable/disable plug in."), wraplength=240)
-        self.moduleEnableButton.grid(row=7, column=1, sticky=E)
+        self.moduleEnableButton.grid(row=9, column=1, sticky=E)
         self.moduleReloadButton = Button(moduleInfoFrame, text=_("Reload"), state=DISABLED, command=self.moduleReload)
         ToolTip(self.moduleReloadButton, text=_("Reload/update plug in."), wraplength=240)
-        self.moduleReloadButton.grid(row=7, column=2, sticky=E)
+        self.moduleReloadButton.grid(row=9, column=2, sticky=E)
         self.moduleRemoveButton = Button(moduleInfoFrame, text=_("Remove"), state=DISABLED, command=self.moduleRemove)
         ToolTip(self.moduleRemoveButton, text=_("Remove plug in from plug in table (does not erase the plug in's file)."), wraplength=240)
-        self.moduleRemoveButton.grid(row=7, column=3, sticky=E)
+        self.moduleRemoveButton.grid(row=9, column=3, sticky=E)
         moduleInfoFrame.grid(row=2, column=0, columnspan=5, sticky=(N, S, E, W), padx=3, pady=3)
         moduleInfoFrame.config(borderwidth=4, relief="groove")
         
@@ -174,14 +199,25 @@ class DialogPluginManager(Toplevel):
         okButton.grid(row=3, column=3, sticky=(S,E), pady=3)
         cancelButton.grid(row=3, column=4, sticky=(S,E), pady=3, padx=3)
         
+        enableDisableFrame = Frame(frame)
+        enableDisableFrame.grid(row=3, column=1, sticky=(S,W), pady=3)
+        enableAllButton = Button(enableDisableFrame, text=_("Enable All"), command=self.enableAll)
+        ToolTip(enableAllButton, text=_("Enable all plug ins."), wraplength=240)
+        disableAllButton = Button(enableDisableFrame, text=_("Disable All"), command=self.disableAll)
+        ToolTip(disableAllButton, text=_("Disable all plug ins."), wraplength=240)
+        enableAllButton.grid(row=1, column=1)
+        disableAllButton.grid(row=1, column=2)
+        
         self.loadTreeViews()
 
+        self.geometry("+{0}+{1}".format(dialogX+50,dialogY+100))
         frame.grid(row=0, column=0, sticky=(N,S,E,W))
-        frame.columnconfigure(0, weight=1)
+        frame.columnconfigure(0, weight=0)
         frame.columnconfigure(1, weight=1)
+        frame.rowconfigure(0, weight=1)
         window = self.winfo_toplevel()
         window.columnconfigure(0, weight=1)
-        self.geometry("+{0}+{1}".format(dialogX+50,dialogY+100))
+        window.rowconfigure(0, weight=1)
         
         self.bind("<Return>", self.ok)
         self.bind("<Escape>", self.close)
@@ -196,19 +232,29 @@ class DialogPluginManager(Toplevel):
         # clear previous treeview entries
         for previousNode in self.modulesView.get_children(""): 
             self.modulesView.delete(previousNode)
-
-        for i, moduleItem in enumerate(sorted(self.pluginConfig.get("modules", {}).items())):
-            moduleInfo = moduleItem[1]
-            name = moduleInfo.get("name", moduleItem[0])
-            node = self.modulesView.insert("", "end", name, text=name)
-            self.modulesView.set(node, "author", moduleInfo.get("author"))
-            self.modulesView.set(node, "ver", moduleInfo.get("version"))
-            self.modulesView.set(node, "status", moduleInfo.get("status"))
-            self.modulesView.set(node, "date", moduleInfo.get("fileDate"))
-            if name in self.modulesWithNewerFileDates:
-                self.modulesView.set(node, "update", _("available"))
-            self.modulesView.set(node, "descr", moduleInfo.get("description"))
-            self.modulesView.set(node, "license", moduleInfo.get("license"))
+            
+        def loadSubtree(parentNode, moduleItems):
+            for moduleItem in sorted(moduleItems, key=lambda item: item[0]):
+                moduleInfo = moduleItem[1]
+                if parentNode or not moduleInfo.get("isImported"):
+                    nodeName = moduleItem[0]
+                    if parentNode:
+                        nodeName = parentNode + GROUPSEP + nodeName
+                    name = moduleInfo.get("name", nodeName)
+                    node = self.modulesView.insert(parentNode, "end", nodeName, text=name)
+                    self.modulesView.set(node, "author", moduleInfo.get("author"))
+                    self.modulesView.set(node, "ver", moduleInfo.get("version"))
+                    self.modulesView.set(node, "status", moduleInfo.get("status"))
+                    self.modulesView.set(node, "date", moduleInfo.get("fileDate"))
+                    if name in self.modulesWithNewerFileDates:
+                        self.modulesView.set(node, "update", _("available"))
+                    self.modulesView.set(node, "descr", moduleInfo.get("description"))
+                    self.modulesView.set(node, "license", moduleInfo.get("license"))
+                    if moduleInfo.get("imports"):
+                        loadSubtree(node, [(importModuleInfo["name"],importModuleInfo)
+                                           for importModuleInfo in moduleInfo["imports"]])
+            
+        loadSubtree("", self.pluginConfig.get("modules", {}).items())
         
         # clear previous treeview entries
         for previousNode in self.classesView.get_children(""): 
@@ -222,16 +268,52 @@ class DialogPluginManager(Toplevel):
         self.moduleSelect()  # clear out prior selection
 
     def ok(self, event=None):
+        # check for orphaned classes (for which there is no longer a corresponding module)
+        _moduleNames = self.pluginConfig.get("modules", {}).keys()
+        _orphanedClassNames = set()
+        for className, moduleList in self.pluginConfig.get("classes", {}).items():
+            for _moduleName in moduleList.copy():
+                if _moduleName not in _moduleNames: # it's orphaned
+                    moduleList.remove(_moduleName)
+                    self.pluginConfigChanged = True
+            if not moduleList: # now orphaned
+                _orphanedClassNames.add(className)
+                self.pluginConfigChanged = True
+        for _orphanedClassName in _orphanedClassNames:
+            del self.pluginConfig["classes"][_orphanedClassName]
+        
         if self.pluginConfigChanged:
             PluginManager.pluginConfig = self.pluginConfig
             PluginManager.pluginConfigChanged = True
             PluginManager.reset()  # force reloading of modules
-        if self.uiClassMethodsChanged:  # may require reloading UI
-            messagebox.showwarning(_("User interface plug-in change"),
-                                   _("A change in plug-in class methods may have affected the menus "
-                                     "of the user interface.  It may be necessary to restart Arelle to "
-                                     "access the menu entries or the changes to their plug-in methods."),
-                                   parent=self)
+        if self.uiClassMethodsChanged or self.modelClassesChanged or self.customTransformsChanged or self.disclosureSystemTypesChanged or self.hostSystemFeaturesChanged:  # may require reloading UI
+            affectedItems = ""
+            if self.uiClassMethodsChanged:
+                affectedItems += _("menus of the user interface")
+            if self.modelClassesChanged:
+                if affectedItems:
+                    affectedItems += _(" and ")
+                affectedItems += _("model objects of the processor")
+            if self.customTransformsChanged:
+                if affectedItems:
+                    affectedItems += _(" and ")
+                affectedItems += _("custom transforms")
+            if self.disclosureSystemTypesChanged:
+                if affectedItems:
+                    affectedItems += _(" and ")
+                affectedItems += _("disclosure system types")
+            if self.hostSystemFeaturesChanged:
+                if affectedItems:
+                    affectedItems += _(" and ")
+                affectedItems += _("host system features")
+            if messagebox.askyesno(_("User interface plug-in change"),
+                                   _("A change in plug-in class methods may have affected {0}.  " 
+                                     "Please restart Arelle to due to these changes.  \n\n"
+                                     "Should Arelle restart itself now "
+                                     "(if there are any unsaved changes they would be lost!)?"
+                                     ).format(affectedItems),
+                                   parent=self):
+                self.cntlr.uiThreadQueue.put((self.cntlr.quit, [None, True]))
         self.close()
         
     def close(self, event=None):
@@ -240,17 +322,21 @@ class DialogPluginManager(Toplevel):
                 
     def moduleSelect(self, *args):
         node = (self.modulesView.selection() or (None,))[0]
+        if node:
+            node = node.rpartition(GROUPSEP)[2] # drop leading path names for module name
         moduleInfo = self.pluginConfig.get("modules", {}).get(node)
         if moduleInfo:
             self.selectedModule = node
             name = moduleInfo["name"]
             self.moduleNameLabel.config(text=name)
             self.moduleAuthorHdr.config(state=ACTIVE)
-            self.moduleAuthorLabel.config(text=moduleInfo["author"])
+            self.moduleAuthorLabel.config(text=moduleInfo.get("author"))
             self.moduleDescrHdr.config(state=ACTIVE)
-            self.moduleDescrLabel.config(text=moduleInfo["description"])
+            self.moduleDescrLabel.config(text=moduleInfo.get("description"))
             self.moduleClassesHdr.config(state=ACTIVE)
             self.moduleClassesLabel.config(text=', '.join(moduleInfo["classMethods"]))
+            self.moduleVersionHdr.config(state=ACTIVE)
+            self.moduleVersionLabel.config(text=moduleInfo.get("version"))
             self.moduleUrlHdr.config(state=ACTIVE)
             self.moduleUrlLabel.config(text=moduleInfo["moduleURL"])
             self.moduleDateHdr.config(state=ACTIVE)
@@ -258,11 +344,18 @@ class DialogPluginManager(Toplevel):
                     (_("(an update is available)") if name in self.modulesWithNewerFileDates else ""))
             self.moduleLicenseHdr.config(state=ACTIVE)
             self.moduleLicenseLabel.config(text=moduleInfo["license"])
-            self.moduleEnableButton.config(state=ACTIVE,
+            if moduleInfo.get("imports"):
+                self.moduleImportsHdr.config(state=ACTIVE)
+                _text = ", ".join(mi["name"] for mi in moduleInfo["imports"][:3])
+                if len(moduleInfo["imports"]) >= 3:
+                    _text += ", ..."
+                self.moduleImportsLabel.config(text=_text)
+            _buttonState = DISABLED if moduleInfo.get("isImported") else ACTIVE
+            self.moduleEnableButton.config(state=_buttonState,
                                            text={"enabled":self.DISABLE,
                                                  "disabled":self.ENABLE}[moduleInfo["status"]])
-            self.moduleReloadButton.config(state=ACTIVE)
-            self.moduleRemoveButton.config(state=ACTIVE)
+            self.moduleReloadButton.config(state=_buttonState)
+            self.moduleRemoveButton.config(state=_buttonState)
         else:
             self.selectedModule = None
             self.moduleNameLabel.config(text="")
@@ -272,24 +365,71 @@ class DialogPluginManager(Toplevel):
             self.moduleDescrLabel.config(text="")
             self.moduleClassesHdr.config(state=DISABLED)
             self.moduleClassesLabel.config(text="")
+            self.moduleVersionHdr.config(state=DISABLED)
+            self.moduleVersionLabel.config(text="")
             self.moduleUrlHdr.config(state=DISABLED)
             self.moduleUrlLabel.config(text="")
             self.moduleDateHdr.config(state=DISABLED)
             self.moduleDateLabel.config(text="")
             self.moduleLicenseHdr.config(state=DISABLED)
             self.moduleLicenseLabel.config(text="")
+            self.moduleImportsHdr.config(state=DISABLED)
+            self.moduleImportsLabel.config(text="")
             self.moduleEnableButton.config(state=DISABLED, text=self.ENABLE)
             self.moduleReloadButton.config(state=DISABLED)
             self.moduleRemoveButton.config(state=DISABLED)
+
+    def selectLocally(self):
+        choices = [] # list of tuple of (file name, description)
+        def sortOrder(key):
+            return {"EdgarRenderer": "1",
+                    "validate": "2",
+                    "xbrlDB": "3"}.get(key, "4") + key.lower()
+        def selectChoices(dir, indent=""):
+            dirHasEntries = False
+            for f in sorted(os.listdir(dir), key=sortOrder):
+                if f not in (".", "..", "__pycache__", "__init__.py"):
+                    fPath = os.path.join(dir, f)
+                    fPkgInit = os.path.join(fPath, "__init__.py")
+                    dirInsertPoint = len(choices)
+                    moduleInfo = None
+                    if ((os.path.isdir(fPath) and os.path.exists(fPkgInit)) or
+                        ((os.path.isfile(fPath) and f.endswith(".py")))):
+                        moduleInfo = PluginManager.moduleModuleInfo(fPath)
+                        if moduleInfo:
+                            choices.append((indent + f, 
+                                            "name: {}\ndescription: {}\nversion: {}\nlicense: {}".format(
+                                                        moduleInfo["name"],
+                                                        moduleInfo["description"],
+                                                        moduleInfo.get("version"),
+                                                        moduleInfo.get("license")), 
+                                            fPath, moduleInfo["name"], moduleInfo.get("version"), moduleInfo["description"], moduleInfo.get("license")))
+                            dirHasEntries = True
+                    if os.path.isdir(fPath) and f not in ("DQC_US_Rules",):
+                        if selectChoices(fPath, indent=indent + "   ") and not moduleInfo:
+                            choices.insert(dirInsertPoint, (indent + f,None,None,None,None,None,None))
+            return dirHasEntries
+        selectChoices(self.cntlr.pluginDir)
+        selectedPath = DialogOpenArchive.selectPlugin(self, choices)
+        if selectedPath:
+            moduleInfo = PluginManager.moduleModuleInfo(selectedPath)
+            self.loadFoundModuleInfo(moduleInfo, selectedPath)
         
-    def findLocally(self):
+    def browseLocally(self):
+        initialdir = self.cntlr.pluginDir # default plugin directory
+        if not self.cntlr.isMac: # can't navigate within app easily, always start in default directory
+            initialdir = self.cntlr.config.setdefault("pluginOpenDir", initialdir)
         filename = self.cntlr.uiFileDialog("open",
-                                           owner=self,
+                                           parent=self,
                                            title=_("Choose plug-in module file"),
-                                           initialdir=self.cntlr.config.setdefault("pluginOpenDir","."),
+                                           initialdir=initialdir,
                                            filetypes=[(_("Python files"), "*.py")],
                                            defaultextension=".py")
         if filename:
+            # check if a package is selected (any file in a directory containing an __init__.py
+            #if (os.path.basename(filename) == "__init__.py" and os.path.isdir(os.path.dirname(filename)) and
+            #    os.path.isfile(filename)):
+            #    filename = os.path.dirname(filename) # refer to the package instead
             self.cntlr.config["pluginOpenDir"] = os.path.dirname(filename)
             moduleInfo = PluginManager.moduleModuleInfo(filename)
             self.loadFoundModuleInfo(moduleInfo, filename)
@@ -307,47 +447,96 @@ class DialogPluginManager(Toplevel):
             self.addPluginConfigModuleInfo(moduleInfo)
             self.loadTreeViews()
         else:
-            messagebox.showwarning(_("Module is not a plug-in"),
-                                   _("File does not contain a python program with an appropriate __pluginInfo__ declaration: \n\n{0}")
+            messagebox.showwarning(_("Module is not itself a plug-in or in a directory with package __init__.py plug-in.  "),
+                                   _("File does not itself contain a python program with an appropriate __pluginInfo__ declaration: \n\n{0}")
                                    .format(url),
                                    parent=self)
-            
+        
+    def checkIfImported(self, moduleInfo):
+        if moduleInfo.get("isImported"):
+            messagebox.showwarning(_("Plug-in is imported by a parent plug-in.  "),
+                                   _("Plug-in has a parent, please request operation on the parent: \n\n{0}")
+                                   .format(moduleInfo.get("name")),
+                                   parent=self)
+            return True
+        return False
+    
+    def checkClassMethodsChanged(self, moduleInfo):
+        for classMethod in moduleInfo["classMethods"]:
+            if classMethod.startswith("CntlrWinMain.Menu"):
+                self.uiClassMethodsChanged = True  # may require reloading UI
+            elif classMethod == "ModelObjectFactory.ElementSubstitutionClasses":
+                self.modelClassesChanged = True # model object factor classes changed
+            elif classMethod == "ModelManager.LoadCustomTransforms":
+                self.customTransformsChanged = True
+            elif classMethod == "DisclosureSystem.Types":
+                self.disclosureSystemTypesChanged = True # disclosure system types changed
+            elif classMethod.startswith("Proxy."):
+                self.hostSystemFeaturesChanged = True # system features (e.g., proxy) changed
+    
     def removePluginConfigModuleInfo(self, name):
         moduleInfo = self.pluginConfig["modules"].get(name)
         if moduleInfo:
-            for classMethod in moduleInfo["classMethods"]:
-                classMethods = self.pluginConfig["classes"].get(classMethod)
-                if classMethods and name in classMethods:
-                    classMethods.remove(name)
-                    if not classMethods: # list has become unused
-                        del self.pluginConfig["classes"][classMethod] # remove class
-                    if classMethod.startswith("CntlrWinMain.Menu"):
-                        self.uiClassMethodsChanged = True  # may require reloading UI
-            del self.pluginConfig["modules"][name]
+            if self.checkIfImported(moduleInfo):
+                return;
+            def _removePluginConfigModuleInfo(moduleInfo):
+                _name = moduleInfo.get("name")
+                if _name:
+                    self.checkClassMethodsChanged(moduleInfo)
+                    for classMethod in moduleInfo["classMethods"]:
+                        classMethods = self.pluginConfig["classes"].get(classMethod)
+                        if classMethods and _name in classMethods:
+                            classMethods.remove(_name)
+                            if not classMethods: # list has become unused
+                                del self.pluginConfig["classes"][classMethod] # remove class
+                    for importModuleInfo in moduleInfo.get("imports", EMPTYLIST):
+                        _removePluginConfigModuleInfo(importModuleInfo)
+                    self.pluginConfig["modules"].pop(_name, None)
+            _removePluginConfigModuleInfo(moduleInfo)
+            if not self.pluginConfig["modules"] and self.pluginConfig["classes"]:
+                self.pluginConfig["classes"].clear() # clean orphan classes
             self.pluginConfigChanged = True
 
     def addPluginConfigModuleInfo(self, moduleInfo):
-        name = moduleInfo["name"]
+        if self.checkIfImported(moduleInfo):
+            return;
+        name = moduleInfo.get("name")
         self.removePluginConfigModuleInfo(name)  # remove any prior entry for this module
-        self.modulesWithNewerFileDates.discard(name) # no longer has an update available
-        self.pluginConfig["modules"][name] = moduleInfo
-        # add classes
-        for classMethod in moduleInfo["classMethods"]:
-            classMethods = self.pluginConfig["classes"].setdefault(classMethod, [])
-            if name not in classMethods:
-                classMethods.append(name)
-            if classMethod.startswith("CntlrWinMain.Menu"):
-                self.uiClassMethodsChanged = True  # may require reloading UI
+        def _addPlugin(moduleInfo):
+            _name = moduleInfo.get("name")
+            if _name:
+                self.modulesWithNewerFileDates.discard(_name) # no longer has an update available
+                self.pluginConfig["modules"][_name] = moduleInfo
+                # add classes
+                for classMethod in moduleInfo["classMethods"]:
+                    classMethods = self.pluginConfig["classes"].setdefault(classMethod, [])
+                    if name not in classMethods:
+                        classMethods.append(_name)
+                self.checkClassMethodsChanged(moduleInfo)
+            for importModuleInfo in moduleInfo.get("imports", EMPTYLIST):
+                _addPlugin(importModuleInfo)
+        _addPlugin(moduleInfo)
         self.pluginConfigChanged = True
 
     def moduleEnable(self):
         if self.selectedModule in self.pluginConfig["modules"]:
             moduleInfo = self.pluginConfig["modules"][self.selectedModule]
+            if self.checkIfImported(moduleInfo):
+                return;
+            def _moduleEnable(moduleInfo):
+                if self.moduleEnableButton['text'] == self.ENABLE:
+                    moduleInfo["status"] = "enabled"
+                elif self.moduleEnableButton['text'] == self.DISABLE:
+                    moduleInfo["status"] = "disabled"
+                self.checkClassMethodsChanged(moduleInfo)
+                for importModuleInfo in moduleInfo.get("imports", EMPTYLIST):
+                    _moduleEnable(importModuleInfo) # set status on nested moduleInfo
+                    if importModuleInfo['name'] in self.pluginConfig["modules"]: # set status on top level moduleInfo
+                        _moduleEnable(self.pluginConfig["modules"][importModuleInfo['name']])
+            _moduleEnable(moduleInfo)
             if self.moduleEnableButton['text'] == self.ENABLE:
-                moduleInfo["status"] = "enabled"
                 self.moduleEnableButton['text'] = self.DISABLE
             elif self.moduleEnableButton['text'] == self.DISABLE:
-                moduleInfo["status"] = "disabled"
                 self.moduleEnableButton['text'] = self.ENABLE
             self.pluginConfigChanged = True
             self.loadTreeViews()
@@ -358,9 +547,16 @@ class DialogPluginManager(Toplevel):
             if url:
                 moduleInfo = PluginManager.moduleModuleInfo(url, reload=True)
                 if moduleInfo:
+                    if self.checkIfImported(moduleInfo):
+                        return;
                     self.addPluginConfigModuleInfo(moduleInfo)
                     self.loadTreeViews()
-                self.cntlr.showStatus(_("{0} reloaded").format(moduleInfo.get("name")), clearAfter=5000)
+                    self.cntlr.showStatus(_("{0} reloaded").format(moduleInfo["name"]), clearAfter=5000)
+                else:
+                    messagebox.showwarning(_("Module error"),
+                                           _("File or module cannot be reloaded: \n\n{0}")
+                                           .format(url),
+                                           parent=self)
 
     def moduleRemove(self):
         if self.selectedModule in self.pluginConfig["modules"]:
@@ -368,3 +564,28 @@ class DialogPluginManager(Toplevel):
             self.pluginConfigChanged = True
             self.loadTreeViews()
                     
+    def enableAll(self):
+        self.enableDisableAll(True)
+                    
+    def disableAll(self):
+        self.enableDisableAll(False)
+                    
+    def enableDisableAll(self, doEnable):
+        for module in self.pluginConfig["modules"]:
+            moduleInfo = self.pluginConfig["modules"][module]
+            if not moduleInfo.get("isImported"):
+                def _enableDisableAll(moduleInfo):
+                    if doEnable:
+                        moduleInfo["status"] = "enabled"
+                    else:
+                        moduleInfo["status"] = "disabled"
+                    for importModuleInfo in moduleInfo.get("imports", EMPTYLIST):
+                        _enableDisableAll(importModuleInfo)
+                _enableDisableAll(moduleInfo)
+                if doEnable:
+                    self.moduleEnableButton['text'] = self.DISABLE
+                else:
+                    self.moduleEnableButton['text'] = self.ENABLE
+        self.pluginConfigChanged = True
+        self.loadTreeViews()
+            

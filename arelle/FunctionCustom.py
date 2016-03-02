@@ -8,6 +8,7 @@ import xml.dom, math, re
 from arelle.ModelValue import qname
 from arelle import XPathContext, XbrlUtil
 from arelle.ModelInstanceObject import ModelDimensionValue
+from decimal import Decimal
     
 class fnFunctionNotAvailable(Exception):
     def __init__(self):
@@ -17,10 +18,12 @@ class fnFunctionNotAvailable(Exception):
     
 def call(xc, p, qname, contextItem, args):
     try:
-        cfSig = xc.modelXbrl.modelCustomFunctionSignatures[qname]
+        cfSig = xc.modelXbrl.modelCustomFunctionSignatures[qname, len(args)]
         if cfSig is not None and cfSig.customFunctionImplementation is not None:
             return callCfi(xc, p, qname, cfSig, contextItem, args)
-        elif qname not in customFunctions: 
+        elif qname in xc.customFunctions: # plug in method custom functions 
+            return xc.customFunctions[qname](xc, p, contextItem, args) # use plug-in's method
+        elif qname not in customFunctions: # compiled functions in this module
             raise fnFunctionNotAvailable
         return customFunctions[qname](xc, p, contextItem, args)
     except (fnFunctionNotAvailable, KeyError):
@@ -40,6 +43,14 @@ def callCfi(xc, p, qname, cfSig, contextItem, args):
             overriddenInScopeVars[argName] = xc.inScopeVars[argName]
         xc.inScopeVars[argName] = args[i]
         
+    if traceEvaluation:
+        xc.modelXbrl.info("formula:trace",
+                            _("%(cfi)s(%(arguments)s)"),
+                            modelObject=cfi,
+                            cfi=qname, 
+                            arguments=', '.join("{}={}".format(argName, args[i])
+                                                for i, argName in enumerate(inputNames)))
+
     for i, step in enumerate(cfi.stepExpressions):
         stepQname, stepExpression = step
         stepProg = cfi.stepProgs[i]
@@ -81,6 +92,8 @@ def callCfi(xc, p, qname, cfSig, contextItem, args):
         else:
             del xc.inScopeVars[argName]
 
+    if result is None:  # atomic value failed the result cast expression
+        raise XPathContext.FunctionArgType("output",cfSig.outputType,result)
     return result
 
 # for test case 22015 v01        
@@ -103,7 +116,14 @@ def  my_fn_PDxEV(xc, p, contextItem, args):
                     else:
                         dimEqual = (pdDim == evDim)
                     if dimEqual:
-                        PDxEV.append(pd.xValue * ev.xValue)
+                        pdX = pd.xValue
+                        evX = ev.xValue
+                        # type promotion required
+                        if isinstance(pdX,Decimal) and isinstance(evX,float):
+                            pdX = float(pdX)
+                        elif isinstance(evX,Decimal) and isinstance(pdX,float):
+                            pdX = float(evX)
+                        PDxEV.append(pdX * evX)
                         break
     return PDxEV
 

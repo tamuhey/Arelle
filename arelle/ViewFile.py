@@ -22,7 +22,8 @@ TYPENAMES = ["CSV", "HTML", "XML", "JSON"]
 nonNameCharPattern =  re.compile(r"[^\w\-\.:]")
 
 class View:
-    def __init__(self, modelXbrl, outfile, rootElementName, lang=None, style="table"):
+    # note that cssExtras override any css entries provided by this module if they have the same name
+    def __init__(self, modelXbrl, outfile, rootElementName, lang=None, style="table", cssExtras=""):
         self.modelXbrl = modelXbrl
         self.lang = lang
         if isinstance(outfile, FileNamedStringIO):
@@ -43,7 +44,10 @@ class View:
         else:
             self.type = CSV
         self.outfile = outfile
-        self.rootElementName = rootElementName[0].lower() + nonNameCharPattern.sub("", rootElementName.title())[1:]
+        if style == "rendering": # for rendering, preserve root element name
+            self.rootElementName = rootElementName
+        else: # root element is formed from words in title or description
+            self.rootElementName = rootElementName[0].lower() + nonNameCharPattern.sub("", rootElementName.title())[1:]
         self.numHdrCols = 0
         self.treeCols = 0  # set to number of tree columns for auto-tree-columns
         if modelXbrl:
@@ -53,7 +57,8 @@ class View:
             if isinstance(self.outfile, FileNamedStringIO):
                 self.csvFile = self.outfile
             else:
-                self.csvFile = open(outfile, csvOpenMode, newline=csvOpenNewline)
+                # note: BOM signature required for Excel to open properly with characters > 0x7f 
+                self.csvFile = open(outfile, csvOpenMode, newline=csvOpenNewline, encoding='utf-8-sig')
             self.csvWriter = csv.writer(self.csvFile, dialect="excel")
         elif self.type == HTML:
             if style == "rendering":
@@ -61,6 +66,7 @@ class View:
 '''
 <html xmlns="http://www.w3.org/1999/xhtml">
     <head>
+        <meta http-equiv="content-type" content="text/html;charset=utf-8" />
         <STYLE type="text/css"> 
             table {font-family:Arial,sans-serif;vertical-align:middle;white-space:normal;}
             th {background:#eee;}
@@ -76,8 +82,10 @@ class View:
             .yAxisHdrAbstractChildrenFirst{border-top:none;border-right:none;border-bottom:.5pt solid windowtext;border-left:.5pt solid windowtext;}
             .yAxisHdr{border-top:.5pt solid windowtext;border-right:none;border-bottom:none;border-left:.5pt solid windowtext;}
             .cell{border-top:1.0pt solid windowtext;border-right:.5pt solid windowtext;border-bottom:.5pt solid windowtext;border-left:.5pt solid windowtext;}
+            .abstractCell{border-top:1.0pt solid windowtext;border-right:.5pt solid windowtext;border-bottom:.5pt solid windowtext;border-left:.5pt solid windowtext;background:#e8e8e8;}
             .blockedCell{border-top:1.0pt solid windowtext;border-right:.5pt solid windowtext;border-bottom:.5pt solid windowtext;border-left:.5pt solid windowtext;background:#eee;}
             .tblCell{border-top:.5pt solid windowtext;border-right:.5pt solid windowtext;border-bottom:.5pt solid windowtext;border-left:.5pt solid windowtext;}
+            ''' + cssExtras + '''
         </STYLE>
     </head>
     <body>
@@ -92,6 +100,7 @@ class View:
 '''
 <html xmlns="http://www.w3.org/1999/xhtml">
     <head>
+        <meta http-equiv="content-type" content="text/html;charset=utf-8" />
         <STYLE type="text/css"> 
             table {font-family:Arial,sans-serif;vertical-align:middle;white-space:normal;
                     border-top:.5pt solid windowtext;border-right:1.5pt solid windowtext;border-bottom:1.5pt solid windowtext;border-left:.5pt solid windowtext;}
@@ -120,6 +129,7 @@ class View:
             self.xmlDoc = etree.parse(html)
             html.close()
             self.docEltLevels = [self.xmlDoc.getroot()]
+            self.tblElt = self.docEltLevels[0]
         elif self.type == JSON:
             self.entries = []
             self.entryLevels = [self.entries]
@@ -171,7 +181,11 @@ class View:
                 else:
                     # problem, error message? unexpected indent
                     parentElt = self.docEltLevels[0] 
-                rowElt = etree.SubElement(parentElt, xmlRowElementName or self.xmlRowElementName, attrib=xmlRowEltAttr)
+                # escape attributes content
+                escapedRowEltAttr = dict(((k, v.replace("&","&amp;").replace("<","&lt;"))
+                                          for k,v in xmlRowEltAttr.items())
+                                         if xmlRowEltAttr else ())
+                rowElt = etree.SubElement(parentElt, xmlRowElementName or self.xmlRowElementName, attrib=escapedRowEltAttr)
                 if treeIndent + 1 >= len(self.docEltLevels): # extend levels as needed
                     for extraColIndex in range(len(self.docEltLevels) - 1, treeIndent + 1):
                         self.docEltLevels.append(None)
@@ -181,6 +195,7 @@ class View:
                     rowElt.text = xmlRowText if xmlRowText else cols[0]
                 else:
                     isDimensionName = isDimensionValue = False
+                    elementName = "element" # need a default
                     for i, col in enumerate(cols):
                         if (i != 0 or not xmlCol0skipElt) and col:
                             if i < len(xmlColElementNames):
@@ -242,32 +257,32 @@ class View:
         if asHeader and lastColSpan: 
             self.numHdrCols += lastColSpan - 1
                                 
-    def close(self):
+    def close(self, noWrite=False):
         if self.type == CSV:
             if not isinstance(self.outfile, FileNamedStringIO):
                 self.csvFile.close()
-            self.modelXbrl = None
-        else:
+        elif not noWrite:
             fileType = TYPENAMES[self.type]
             try:
                 from arelle import XmlUtil
                 if isinstance(self.outfile, FileNamedStringIO):
                     fh = self.outfile
                 else:
-                    fh = open(self.outfile, "w")
+                    fh = open(self.outfile, "w", encoding="utf-8")
                 if self.type == JSON:
-                    fh.write(json.dumps(self.jsonObject))
+                    fh.write(json.dumps(self.jsonObject, ensure_ascii=False))
                 else:
-                    XmlUtil.writexml(fh, self.xmlDoc, encoding="utf-8")
+                    XmlUtil.writexml(fh, self.xmlDoc, encoding="utf-8",
+                                     xmlcharrefreplace= (self.type == HTML) )
                 if not isinstance(self.outfile, FileNamedStringIO):
                     fh.close()
                 self.modelXbrl.info("info", _("Saved output %(type)s to %(file)s"), file=self.outfile, type=fileType)
             except (IOError, EnvironmentError) as err:
                 self.modelXbrl.exception("arelle:htmlIOError", _("Failed to save output %(type)s to %(file)s: \s%(error)s"), file=self.outfile, type=fileType, error=err)
-            self.modelXbrl = None
-            if self.type == HTML:
-                self.tblElt = None
-            elif self.type == XML:
-                self.docEltLevels = None
+        self.modelXbrl = None
+        if self.type == HTML:
+            self.tblElt = None
+        elif self.type == XML:
+            self.docEltLevels = None
         self.__dict__.clear() # dereference everything after closing document
 

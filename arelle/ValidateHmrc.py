@@ -6,6 +6,8 @@ Created on May 20, 2011
 
 based on http://www.hmrc.gov.uk/ebu/ct_techpack/joint-filing-validation-checks.pdf
 
+Deprecated Nov 15, 2015.  Use plugin/validate/HMRC/__init__.py
+
 '''
 import xml.dom, xml.parsers
 import os, re, collections, datetime
@@ -13,6 +15,7 @@ from collections import defaultdict
 from arelle import (ModelObject, ModelDocument, ModelValue, ValidateXbrl,
                 ModelRelationshipSet, XmlUtil, XbrlConst, UrlUtil,
                 ValidateFilingDimensions, ValidateFilingDTS, ValidateFilingText)
+from arelle.XmlValidate import UNVALIDATED, VALID
 
 class ValidateHmrc(ValidateXbrl.ValidateXbrl):
     def __init__(self, modelXbrl):
@@ -26,6 +29,7 @@ class ValidateHmrc(ValidateXbrl.ValidateXbrl):
         gaapNamespacePattern = re.compile(r"^http://www\.xbrl\.org/uk/gaap/core")
         ifrsNamespacePattern = re.compile(r"^http://www\.iasb\.org/.*ifrs")
         direpNamespacePattern = re.compile(r"^http://www\.xbrl\.org/uk/reports/direp")
+        labelHasNegativeTermPattern = re.compile(r".*[(].*\w.*[)].*")
         
         # note that some XFM tests are done by ValidateXbrl to prevent mulstiple node walks
         super(ValidateHmrc,self).validate(modelXbrl, parameters)
@@ -91,33 +95,54 @@ class ValidateHmrc(ValidateXbrl.ValidateXbrl):
             
             uniqueFacts = {}  # key = (qname, context hash, unit hash, lang)
             
-            for iF1, f1 in enumerate(modelXbrl.facts):
-                context = f1.context
-                unit = f1.unit
-                factNamespaceURI = f1.qname.namespaceURI
-                factLocalName = f1.qname.localName
-                if busNamespacePattern.match(factNamespaceURI) and factLocalName in busLocalNames:
-                        busItems[factLocalName] = f1
-                elif gaapNamespacePattern.match(factNamespaceURI) and factLocalName in gaapLocalNames:
-                        gaapItems[factLocalName] = f1
-                elif ifrsNamespacePattern.match(factNamespaceURI) and factLocalName in ifrsLocalNames:
-                        ifrsItems[factLocalName] = f1
-                elif direpNamespacePattern.match(factNamespaceURI) and factLocalName in direpLocalNames:
-                        direpItems[factLocalName] = f1
+            def checkFacts(facts):
+                for f1 in facts:
+                    context = f1.context
+                    unit = f1.unit
+                    if getattr(f1,"xValid", 0) >= 4:
+                        factNamespaceURI = f1.qname.namespaceURI
+                        factLocalName = f1.qname.localName
+                        if busNamespacePattern.match(factNamespaceURI) and factLocalName in busLocalNames:
+                                busItems[factLocalName] = f1
+                        elif gaapNamespacePattern.match(factNamespaceURI) and factLocalName in gaapLocalNames:
+                                gaapItems[factLocalName] = f1
+                        elif ifrsNamespacePattern.match(factNamespaceURI) and factLocalName in ifrsLocalNames:
+                                ifrsItems[factLocalName] = f1
+                        elif direpNamespacePattern.match(factNamespaceURI) and factLocalName in direpLocalNames:
+                                direpItems[factLocalName] = f1
+                                
+                        dupKey = (f1.concept,
+                                  context.contextDimAwareHash if context is not None else None,
+                                  unit.hash if unit is not None else None,
+                                  f1.xmlLang)
+        
+                        if context is not None:
+                            if f1 in uniqueFacts:
+                                f2 = uniqueFacts[f1]
+                                if (f1.effectiveValue != f2.effectiveValue):
+                                    modelXbrl.error("HMRC.14",
+                                        _("Inconsistent duplicate facts %(fact)s context %(contextID)s and %(contextID2)s."),
+                                        modelObject=(f1, f2), fact=f1.qname, contextID=f1.contextID, contextID2=f2.contextID)
+                        uniqueFacts[dupKey] = f1
+                                                        
+                        if f1.isNumeric:
+                            if f1.precision:
+                                modelXbrl.error("HMRC.5.4",
+                                    _("Numeric fact %(fact)s of context %(contextID)s has a precision attribute '%(precision)s'"),
+                                    modelObject=f1, fact=f1.qname, contextID=f1.contextID, precision=f1.precision)
+                            try: # only process validated facts    
+                                if f1.xValue < 0: 
+                                    label = f1.concept.label(lang="en")
+                                    if not labelHasNegativeTermPattern.match(label):
+                                        modelXbrl.error("HMRC.5.3",
+                                            _("Numeric fact %(fact)s of context %(contextID)s has a negative value '%(value)s' but label does not have a bracketed negative term (using parentheses): %(label)s"),
+                                            modelObject=f1, fact=f1.qname, contextID=f1.contextID, value=f1.value, label=label)
+                            except AttributeError:
+                                pass  # if not validated it should have failed with a schema error
+                        if f1.modelTupleFacts:
+                            checkFacts(f1.modelTupleFacts)
                         
-                dupKey = (f1.concept,
-                          context.contextDimAwareHash if context is not None else None,
-                          unit.hash if unit is not None else None,
-                          f1.xmlLang)
-
-                if context is not None:
-                    if f1 in uniqueFacts:
-                        f2 = uniqueFacts[f1]
-                        if (f1.effectiveValue != f2.effectiveValue):
-                            modelXbrl.error("HMRC.14",
-                                _("Inconsistent duplicate facts %(fact)s context %(contextID)s and %(contextID2)s."),
-                                modelObject=(f1, f2), fact=f1.qname, contextID=f1.contextID, contextID2=f2.contextID)
-                uniqueFacts[dupKey] = f1
+            checkFacts(modelXbrl.facts)
 
             if isAccounts:
                 if "StartDateForPeriodCoveredByReport" not in busItems:
@@ -152,7 +177,8 @@ class ValidateHmrc(ValidateXbrl.ValidateXbrl):
                            "13"),
                            ):
                     if name not in items:
-                        modelXbrl.error("HMRC.{0}".format(ref), msg, modelObject=modelXbrl)
+                        modelXbrl.error("HMRC.{0}".format(ref), msg, modelObject=modelXbrl,
+                                        messageCodes=("HMRC.01","HMRC.03","HMRC.06","HMRC.09","HMRC.10","HMRC.12","HMRC.13"))
                 if ("DateApprovalAccounts" not in gaapItems and
                     "DateAuthorisationFinancialStatementsForIssue" not in ifrsItems):
                     modelXbrl.error("HMRC.07",

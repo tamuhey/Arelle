@@ -8,16 +8,20 @@ import datetime, re
 from arelle import (XPathContext, ModelValue)
 from arelle.FunctionUtil import (anytypeArg, atomicArg, stringArg, numericArg, qnameArg, nodeArg)
 from arelle.XPathParser import ProgHeader
+from math import isnan, fabs, isinf
+from decimal import Decimal, InvalidOperation
     
 class FORG0001(Exception):
-    def __init__(self):
-        pass
+    def __init__(self, message=None):
+        self.message = message
+        self.args = ( self.__repr__(), )
     def __repr__(self):
         return _("Exception: FORG0001, invalid constructor")
 
 class FONS0004(Exception):
-    def __init__(self):
-        pass
+    def __init__(self, message=None):
+        self.message = message
+        self.args = ( self.__repr__(), )
     def __repr__(self):
         return _("Exception: FONS0004, no namespace found for prefix")
 
@@ -33,11 +37,16 @@ def call(xc, p, localname, args):
     try:
         if localname not in xsFunctions: raise xsFunctionNotAvailable
         return xsFunctions[localname](xc, p, source)
-    except (FORG0001, ValueError, TypeError):
+    except (FORG0001, ValueError, TypeError) as ex:
+        if hasattr(ex, "message") and ex.message:
+            exMsg = ", " + ex.message
+        else:
+            exMsg = ""
         raise XPathContext.XPathException(p, 'err:FORG0001', 
-                                          _('invalid cast from {0} to xs:{1}').format(
+                                          _('invalid cast from {0} to xs:{1}{2}').format(
                                             type(source).__name__,
-                                            localname))
+                                            localname,
+                                            exMsg))
     except xsFunctionNotAvailable:
         raise XPathContext.FunctionNotAvailable("xs:{0}".format(localname))
       
@@ -51,7 +60,7 @@ objtype = {
         'dayTimeDuration': ModelValue.DayTimeDuration,
         'float': float,
         'double': float,
-        'decimal': float,
+        'decimal': Decimal,
         'integer': _INT,
         'nonPositiveInteger': _INT,
         'negativeInteger': _INT,
@@ -87,8 +96,19 @@ objtype = {
         'QName': ModelValue.QName,
         'NOTATION': str,
       }
+
+def isXsType(localName):
+    if localName[-1] in ('?', '+', '*'):
+        return localName[:-1] in xsFunctions
+    return localName in xsFunctions
         
 def untypedAtomic(xc, p, source):
+    raise xsFunctionNotAvailable()
+  
+def anyType(xc, p, source):
+    raise xsFunctionNotAvailable()
+  
+def anyAtomicType(xc, p, source):
     raise xsFunctionNotAvailable()
   
 def dateTime(xc, p, source):
@@ -132,8 +152,8 @@ def double(xc, p, source):
   
 def decimal(xc, p, source):
     try:
-        return float(source)
-    except ValueError:
+        return Decimal(source)
+    except InvalidOperation:
         raise FORG0001
   
 def integer(xc, p, source):
@@ -255,11 +275,10 @@ def xsString(xc, p, source):
     if isinstance(source,bool):
         return 'true' if source else 'false'
     elif isinstance(source,float):
-        from math import (isnan, fabs, isinf)
         if isnan(source):
-            return "NaN"
+            return "NaN" # note that -NaN is reported as NaN in XML
         elif isinf(source):
-            return "INF"
+            return "-INF" if source < 0 else "INF"
         '''
         numMagnitude = fabs(source)
         if numMagnitude < 1000000 and numMagnitude > .000001:
@@ -270,6 +289,12 @@ def xsString(xc, p, source):
         if s.endswith(".0"):
             s = s[:-2]
         return s
+    elif isinstance(source,Decimal):
+        if isnan(source):
+            return "NaN" # note that -NaN is reported as NaN in XML
+        elif isinf(source):
+            return "-INF" if source < 0 else "INF"
+        return str(source)
     elif isinstance(source,ModelValue.DateTime):
         return ('{0:%Y-%m-%d}' if source.dateOnly else '{0:%Y-%m-%dT%H:%M:%S}').format(source)
     return str(source)
@@ -346,6 +371,8 @@ def NOTATION(xc, p, source):
 
 xsFunctions = {
     'untypedAtomic': untypedAtomic,
+    'anyType': anyType,
+    'anyAtomicType': anyAtomicType,
     'dateTime': dateTime,
     'DATETIME_START': dateTime,
     'DATETIME_INSTANT_END': dateTimeInstantEnd,

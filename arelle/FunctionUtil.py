@@ -8,6 +8,7 @@ import xml.dom, datetime
 from arelle import (ModelValue, XmlUtil)
 from arelle.ModelObject import ModelObject, ModelAttribute
 from arelle.XPathContext import (XPathException, FunctionArgType)
+from arelle.PythonUtil import pyTypeName
 
 def anytypeArg(xc, args, i, type, missingArgFallback=None):
     if len(args) > i:
@@ -15,7 +16,7 @@ def anytypeArg(xc, args, i, type, missingArgFallback=None):
     else:
         item = missingArgFallback
     if isinstance(item, (tuple,list)):
-        if len(item) > 1: raise FunctionArgType(i,type)
+        if len(item) > 1: raise FunctionArgType(i,type,item)
         if len(item) == 0: return ()
         item = item[0]
     return item
@@ -38,9 +39,22 @@ def numericArg(xc, p, args, i=0, missingArgFallback=None, emptyFallback=0, conve
     numeric = xc.atomize(p, item)
     if not isinstance(numeric,_NUM_TYPES): 
         if convertFallback is None:
-            raise FunctionArgType(i,"numeric?")
+            raise FunctionArgType(i,"numeric?",numeric)
         try:
             numeric = float(numeric)
+        except ValueError:
+            numeric = convertFallback
+    return numeric
+
+def integerArg(xc, p, args, i=0, missingArgFallback=None, emptyFallback=0, convertFallback=None):
+    item = anytypeArg(xc, args, i, "integer?", missingArgFallback)
+    if item == (): return emptyFallback
+    numeric = xc.atomize(p, item)
+    if not isinstance(numeric,_INT_TYPES): 
+        if convertFallback is None:
+            raise FunctionArgType(i,"integer?",numeric)
+        try:
+            numeric = _INT(numeric)
         except ValueError:
             numeric = convertFallback
     return numeric
@@ -49,13 +63,13 @@ def qnameArg(xc, p, args, i, type, missingArgFallback=None, emptyFallback=()):
     item = anytypeArg(xc, args, i, type, missingArgFallback)
     if item == (): return emptyFallback
     qn = xc.atomize(p, item)
-    if not isinstance(qn, ModelValue.QName): raise FunctionArgType(i,type)
+    if not isinstance(qn, ModelValue.QName): raise FunctionArgType(i,type,qn)
     return qn
 
 def nodeArg(xc, args, i, type, missingArgFallback=None, emptyFallback=None):
     item = anytypeArg(xc, args, i, type, missingArgFallback)
     if item == (): return emptyFallback
-    if not isinstance(item, (ModelObject,ModelAttribute)): raise FunctionArgType(i,type)
+    if not isinstance(item, (ModelObject,ModelAttribute)): raise FunctionArgType(i,type,item)
     return item
 
 def testTypeCompatiblity(xc, p, op, a1, a2):
@@ -73,4 +87,5 @@ def testTypeCompatiblity(xc, p, op, a1, a2):
     else:
         if (isinstance(a1,datetime.date) and isinstance(a2,datetime.date)):
             return
-    raise XPathException(p, 'err:XPTY0004', _('Value operation {0} incompatible arguments {1} and {2}').format(op,a1,a2))
+    raise XPathException(p, 'err:XPTY0004', _('Value operation {0} incompatible arguments {1} ({2}) and {3} ({4})')
+                                            .format(op, a1, pyTypeName(a1), a2, pyTypeName(a2)))

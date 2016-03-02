@@ -6,101 +6,60 @@ Created on Dec 30, 2010
 '''
 import os
 from lxml import etree
-from arelle import (ModelDocument, ModelValue, XbrlConst, XmlUtil)
+from arelle import ModelDocument
+from collections import defaultdict
 
-def loadUtr(modelManager): # Build a dictionary of item types that are constrained by the UTR.
-    modelManager.utrDict = {} # This attribute is unbound on modelManager until this function is called.
-    utrUrl = "http://www.xbrl.org/utr/utr.xml"
-    #utrUrl = os.path.join(modelManager.cntlr.configDir, "utr.xml")
-    modelManager.cntlr.showStatus(_("Loading Unit Type Registry"))
+class UtrEntry(): # use slotted class for execution efficiency
+    __slots__ = ("id", "unitId", "nsUnit", "itemType", "nsItemType", "isSimple",
+                 "numeratorItemType", "nsNumeratorItemType", 
+                 "denominatorItemType", "nsDenominatorItemType", "symbol")
+
+    def __repr__(self):
+        return "utrEntry({})".format(', '.join("{}={}".format(n, getattr(self,n))
+                                               for n in self.__slots__))
+
+def loadUtr(modelManager): # Build a dictionary of item types that are constrained by the UTR
+    modelManager.disclosureSystem.utrItemTypeEntries = utrItemTypeEntries = defaultdict(dict)
+    # print('UTR LOADED FROM '+utrUrl);
+    # skip status message as it hides prior activity during which this might have just obtained symbols
+    # modelManager.cntlr.showStatus(_("Loading Unit Type Registry"))
+    file = None
     try:
-        xmldoc = etree.parse(modelManager.cntlr.webCache.getfilename(utrUrl))
+        from arelle.FileSource import openXmlFileStream
+        # normalize any relative paths to config directory
+        file = openXmlFileStream(modelManager.cntlr, modelManager.disclosureSystem.utrUrl, stripDeclaration=True)[0]
+        xmldoc = etree.parse(file)
         for unitElt in xmldoc.iter(tag="{http://www.xbrl.org/2009/utr}unit"):
-            id = unitElt.get("id")
-            unitId = unitElt.findtext("{http://www.xbrl.org/2009/utr}unitId")
-            nsUnit = unitElt.findtext("{http://www.xbrl.org/2009/utr}nsUnit")
-            itemType = unitElt.findtext("{http://www.xbrl.org/2009/utr}itemType")
-            nsItemType = unitElt.findtext("{http://www.xbrl.org/2009/utr}nsItemType")
-            numeratorItemType = unitElt.findtext("{http://www.xbrl.org/2009/utr}numeratorItemType")
-            nsNumeratorItemType = unitElt.findtext("{http://www.xbrl.org/2009/utr}nsNumeratorItemType")
-            denominatorItemType = unitElt.findtext("{http://www.xbrl.org/2009/utr}denominatorItemType")
-            nsDenominatorItemType = unitElt.findtext("{http://www.xbrl.org/2009/utr}nsDenominatorItemType")
+            u = UtrEntry()
+            u.id = unitElt.get("id")
+            u.unitId = unitElt.findtext("{http://www.xbrl.org/2009/utr}unitId")
+            u.nsUnit = (unitElt.findtext("{http://www.xbrl.org/2009/utr}nsUnit") or None) # None if empty entry
+            u.itemType = unitElt.findtext("{http://www.xbrl.org/2009/utr}itemType")
+            u.nsItemType = unitElt.findtext("{http://www.xbrl.org/2009/utr}nsItemType")
+            u.numeratorItemType = unitElt.findtext("{http://www.xbrl.org/2009/utr}numeratorItemType")
+            u.nsNumeratorItemType = unitElt.findtext("{http://www.xbrl.org/2009/utr}nsNumeratorItemType")
+            u.denominatorItemType = unitElt.findtext("{http://www.xbrl.org/2009/utr}denominatorItemType")
+            u.nsDenominatorItemType = unitElt.findtext("{http://www.xbrl.org/2009/utr}nsDenominatorItemType")
+            u.isSimple = u.numeratorItemType is None and u.denominatorItemType is None
+            u.symbol = unitElt.findtext("{http://www.xbrl.org/2009/utr}symbol")
             # TO DO: This indexing scheme assumes that there are no name clashes in item types of the registry.
-            if modelManager.utrDict.get(itemType) == None:
-                modelManager.utrDict[itemType] = {}
-            # a RegEntry is just an array.
-            (modelManager.utrDict[itemType])[id] = [unitId, nsUnit # 0,1
-                              , nsNumeratorItemType, numeratorItemType # 2,3
-                              , nsDenominatorItemType, denominatorItemType # 4,5
-                              , nsItemType # 6 often None
-                              ]
+            (utrItemTypeEntries[u.itemType])[u.id] = u
     except (EnvironmentError,
             etree.LxmlError) as err:
         modelManager.cntlr.addToLog("Unit Type Registry Import error: {0}".format(err))
         etree.clear_error_log()
+    if file:
+        file.close()
   
 '''
-def MeasureQName(node): # Return the qame of the content of the measure element
+def MeasureQName(node): # Return the qname of the content of the measure element
     assert node.nodeType == xml.dom.Node.ELEMENT_NODE
     assert node.localName == "measure"
     assert node.namespaceUri == XbrlConst.xbrli
     return ModelValue.qname(node, node.text)
 '''
 
-def UnitSatisfies(aRegEntry, unit, modelXbrl): # Return true if entry is satisfied by unit
-    # aRegEntry is [unitId, nsUnit, nsNumeratorItemType, numeratorItemType, nsDenominatorItemType, denominatorItemType]
-    if aRegEntry[1]: # Entry requires a measure
-        if unit.measures[1] != [] or len(unit.measures[0])>1:
-            return False # and only one measure
-        else:
-            qnameMeasure = unit.measures[0][0]
-            if qnameMeasure.namespaceURI != aRegEntry[1] or qnameMeasure.localName != aRegEntry[0]: 
-                #print(_("NOT EQUAL {0} {1}").format(sQName,sRequiredQName))
-                return False
-            else: 
-                #print(_("EQUAL {0} {1}").format(sQName,sRequiredQName))
-                return True # hooray       
-    else: # Entry requires a Divide
-        if not unit.isDivide:
-            return False
-        elif not MeasureSatisfies(unit.measures[0], aRegEntry[2], aRegEntry[3], modelXbrl):
-            return False
-        elif not MeasureSatisfies(unit.measures[1], aRegEntry[4], aRegEntry[5], modelXbrl):
-            return False
-        else:
-            return True
 
-
-def MeasureSatisfies(measures,nsItemType,itemType,modelXbrl):
-    #print(_("measures={0} namespace={1} itemType={2}").format(measures,namespace,itemType))
-    utrDict = modelXbrl.modelManager.utrDict
-    bConstrained = False # An itemType is constrained if it appears in the registry
-    bSatisfied = False   # A unit is satisfied there is one entry that matches the unit
-    if len(measures) != 1: # We assume all unit registry entries have only one measure, or one measure in num or denom.
-        return False
-    if utrDict.get(itemType) == None:
-        return True # unconstrained - this can happen when this function is called from within a Divide.
-    aRegEntries = utrDict[itemType]
-# TO DO: Improve matching to take account of itemType namespace
-#    nsRequired = aRegEntry[6]
-#    if (namespace != None) and (nsRequired != None) and (namespace != nsRequired): return False
-#   Check whether this measure (a QName) is valid for itemType (possibly qualified by namespace)
-    nEntries = len(aRegEntries)
-    if (nEntries > 0):
-        bConstrained = True
-#        print(_("itemType={0} nsMeasure={2} lnMeasure={3} aRegEntries= {1}").format(itemType,aRegEntries,nsMeasure,lnMeasure))
-        for a in aRegEntries:
-            lnRequired = aRegEntries[a][0]
-#            print(_("lnRequired={0}").format(lnRequired))
-#            print(_("nsRequired={0}").format(nsRequired))
-            if (lnRequired is None) or (lnRequired == measures[0].localName):
-                nsRequired = aRegEntries[a][1]
-                if (nsRequired is None) or (nsRequired == measures[0].namespaceURI):
-                    bSatisfied = True
-                    break # for                             
-    bResult = ((not bConstrained) or bSatisfied)
-    # print(_("bResult={0}").format(bResult))
-    return bResult
 
 '''
 def xmlEltMatch(node, localName, namespaceUri):
@@ -110,53 +69,174 @@ def xmlEltMatch(node, localName, namespaceUri):
         return False
 '''
 
-def validate(modelXbrl):
-    ValidateUtr(modelXbrl).validate()
+def validateFacts(modelXbrl):
+    ValidateUtr(modelXbrl).validateFacts()
+    
+def utrEntries(modelType, modelUnit):
+    return ValidateUtr(modelType.modelXbrl).utrEntries(modelType, modelUnit)
+
+def utrSymbol(modelType, unitMeasures):
+    return ValidateUtr(modelType.modelXbrl).utrSymbol(unitMeasures[0], unitMeasures[1])
     
 class ValidateUtr:
-    def __init__(self, modelXbrl):
+    def __init__(self, modelXbrl, messageLevel="ERROR", messageCode="utre:error-NumericFactUtrInvalid"):
         self.modelXbrl = modelXbrl
-        
-    def validate(self):
-        modelXbrl = self.modelXbrl
-        if not hasattr(modelXbrl.modelManager,"utrDict"): 
+        self.messageLevel = messageLevel
+        self.messageCode = messageCode
+        if getattr(modelXbrl.modelManager.disclosureSystem, "utrItemTypeEntries", None) is None: 
             loadUtr(modelXbrl.modelManager)
-        modelXbrl.modelManager.cntlr.showStatus(_("Validating for Unit Type Registry").format())     
+        self.utrItemTypeEntries = modelXbrl.modelManager.disclosureSystem.utrItemTypeEntries
+        
+    def validateFacts(self):
+        modelXbrl = self.modelXbrl
         if modelXbrl.modelDocument.type in (ModelDocument.Type.INSTANCE, ModelDocument.Type.INLINEXBRL):
-            aInvalidUnits = []
+            modelXbrl.modelManager.cntlr.showStatus(_("Validating for Unit Type Registry").format())     
+            utrInvalidFacts = []
             for f in modelXbrl.facts:
                 concept = f.concept
-                if concept is not None:
-                    if concept.isNumeric:
-                        unit = f.unit
-                        bConstrained = False
-                        if f.unitID != None and unit != None:  # Would have failed XBRL validation otherwise
-                            bSatisfied = True
-                            type = concept.type
-                            while type != None:
-                                aRegEntries = []
-                                if modelXbrl.modelManager.utrDict.get(type.name) != None:
-                                    aRegEntries = modelXbrl.modelManager.utrDict[type.name]
-                                nEntries = len(aRegEntries)
-                                if nEntries > 0:
-                                    bConstrained = True
-                                    type = None # No more looking for registry entries
-                                    bSatisfied = False
-                                    for a in aRegEntries:
-                                        #modelXbrl.error(_("Checking {0} against {1} on {2}").format(f.unitID, aRegEntries[a],f.concept.name))
-                                        if UnitSatisfies(aRegEntries[a], unit, modelXbrl):
-                                            bSatisfied = True
-                                            break # for                             
-                                    break # while
-                                #print(_("type={0}\ntype.qnameDerivedFrom={1}".format(type,type.qnameDerivedFrom)))
-                                type = modelXbrl.qnameTypes.get(type.qnameDerivedFrom)
-                                #print(_("type={0}").format(type))
-                            # end while
-                        # end if
-                        if bConstrained and not bSatisfied:
-                            aInvalidUnits.append(f)
+                if concept is not None and concept.isNumeric:
+                    unit = f.unit
+                    bConstrained = False
+                    if f.unitID is not None and unit is not None:  # Would have failed XBRL validation otherwise
+                        bSatisfied = True
+                        utrMatchingEntries = []
+                        _type = concept.type
+                        while _type is not None:
+                            if _type.name in self.utrItemTypeEntries:
+                                for utrEntry in self.utrItemTypeEntries[_type.name].values():
+                                    if utrEntry.itemType is None or utrEntry.itemType == _type.name:
+                                        if utrEntry.nsItemType is None or utrEntry.nsItemType == _type.modelDocument.targetNamespace:
+                                            utrMatchingEntries.append(utrEntry)                                                
+                            if utrMatchingEntries:
+                                bConstrained = True
+                                _type = None # No more looking for registry entries
+                                bSatisfied = any(self.unitSatisfies(utrEntry, unit)
+                                                 for utrEntry in utrMatchingEntries)
+                                break # while
+                            #print(_("type={0}\ntype.qnameDerivedFrom={1}".format(_type,_type.qnameDerivedFrom)))
+                            _type = _type.typeDerivedFrom
+                            if isinstance(_type,list): # union type
+                                _type = _type[0] # for now take first of union's types
+                            #print(_("type={0}").format(_type))
+                        # end while
+                    # end if
+                    if bConstrained and not bSatisfied:
+                        utrInvalidFacts.append(f)
             # end for
-            for fact in aInvalidUnits:
-                modelXbrl.error("utr:invalid",
-                                _("Unit %(unitID)s disallowed on fact %(element)s of type %(typeName)s"),
-                                modelObject=fact, unitID=fact.unitID, element=fact.qname, typeName=fact.concept.type.name)
+            for fact in utrInvalidFacts:
+                modelXbrl.log(self.messageLevel,
+                              self.messageCode,
+                              _("Unit %(unitID)s disallowed on fact %(element)s of type %(typeName)s"),
+                              modelObject=fact, unitID=fact.unitID, element=fact.qname, typeName=fact.concept.type.name,
+                              messageCodes=("utre:error-NumericFactUtrInvalid",))
+
+    def unitSatisfies(self, utrEntry, unit): # Return true if entry is satisfied by unit
+        if utrEntry.isSimple: # Entry requires a measure
+            if len(unit.measures[1]) > 0 or len(unit.measures[0]) > 1:
+                return False # and only one measure
+            else:
+                try:
+                    qnameMeasure = unit.measures[0][0]
+                    if (utrEntry.nsUnit is not None and 
+                        qnameMeasure.namespaceURI != utrEntry.nsUnit): 
+                        #print(_("NOT EQUAL {0} {1}").format(sQName,sRequiredQName))
+                        return False
+                    elif (qnameMeasure.localName != utrEntry.unitId):
+                        return False
+                    else: 
+                        #print(_("EQUAL {0} {1}").format(sQName,sRequiredQName))
+                        return True # hooray       
+                except IndexError:
+                    return False  # no measure, so it can't possibly be equal
+        else: # Entry requires a Divide
+            if not unit.isDivide:
+                return False
+            elif not self.measureSatisfies(unit.measures[0], 
+                                           utrEntry.nsNumeratorItemType, 
+                                           utrEntry.numeratorItemType):
+                return False
+            elif not self.measureSatisfies(unit.measures[1], 
+                                           utrEntry.nsDenominatorItemType, 
+                                           utrEntry.denominatorItemType):
+                return False
+            else:
+                return True
+    
+    
+    def measureSatisfies(self, measures, nsItemType, itemType):
+        #print(_("measures={0} namespace={1} itemType={2}").format(measures,namespace,itemType))
+        bConstrained = False # An itemType is constrained if it appears in the registry (qname match)
+        bSatisfied = False   # A unit is satisfied there is one entry that matches the unit
+        if len(measures) != 1: # A unit registry entry has only one measure, or one measure in num or denom.
+            return False
+        measureLocalName = measures[0].localName
+        measureNamespaceURI = measures[0].namespaceURI
+        if itemType is None or not itemType or itemType not in self.utrItemTypeEntries:
+            return True # unconstrained - this can happen when this function is called from within a Divide.
+        utrEntries = self.utrItemTypeEntries[itemType]
+        if utrEntries:
+    #        print(_("itemType={0} nsMeasure={2} lnMeasure={3} aRegEntries= {1}").format(itemType,aRegEntries,nsMeasure,lnMeasure))
+            for utrEntry in utrEntries.values():
+                if (nsItemType is None or 
+                    utrEntry.nsItemType is None or 
+                    nsItemType == utrEntry.nsItemType):
+                    bConstrained = True
+                    #print(_("unitId={0}").format(unitId))
+                    #print(_("nsUnit={0}").format(nsUnit))
+                    if (utrEntry.unitId is None) or (utrEntry.unitId == measureLocalName):
+                        if (utrEntry.nsUnit is None) or (utrEntry.nsUnit == measureNamespaceURI):
+                            bSatisfied = True
+                            break # for                             
+        bResult = ((not bConstrained) or bSatisfied)
+        # print(_("bResult={0}").format(bResult))
+        return bResult
+
+    def utrEntries(self, modelType, unit):
+        utrSatisfyingEntries = set()
+        modelXbrl = self.modelXbrl
+        _type = modelType
+        while _type is not None:
+            if _type.name in self.utrItemTypeEntries:
+                utrMatchingEntries = [utrEntry
+                                      for utrEntry in self.utrItemTypeEntries[_type.name].values()
+                                      if utrEntry.itemType is None or utrEntry.itemType == _type.name
+                                      if utrEntry.nsItemType is None or utrEntry.nsItemType == _type.modelDocument.targetNamespace]
+                if utrMatchingEntries:
+                    for utrEntry in utrMatchingEntries:
+                        if self.unitSatisfies(utrEntry, unit):
+                            utrSatisfyingEntries.add(utrEntry)
+            _type = _type.typeDerivedFrom
+            if isinstance(_type,list): # union type
+                _type = _type[0] # for now take first of union's types
+        return utrSatisfyingEntries
+
+    def utrSymbol(self, multMeasures, divMeasures):
+        if not divMeasures:
+            if not multMeasures:
+                return ''
+            elif len(multMeasures) == 1:
+                m = multMeasures[0]
+                for utrItemTypeEntry in self.utrItemTypeEntries.values():
+                    for utrEntry in utrItemTypeEntry.values():
+                        if utrEntry.unitId == m.localName and utrEntry.nsUnit == m.namespaceURI:
+                            return utrEntry.symbol or utrEntry.unitId
+                if m in self.modelXbrl.qnameConcepts: # if unit in taxonomy use label if it has any
+                    return self.modelXbrl.qnameConcepts[m].label(fallbackToQname=False) or m.localName
+                return m.localName # localName is last choice to use
+        # otherwise generate compound symbol
+        def symbols(measures, wrapMult=True):
+            measuresString = " ".join(self.utrSymbol([measure], None)
+                                                for measure in measures)
+            if len(measures) > 1 and wrapMult:
+                return "({})".format(measuresString)
+            return measuresString
+            
+        if not multMeasures and divMeasures: 
+            return "per " + symbols(divMeasures)
+        elif multMeasures:
+            if divMeasures:
+                return symbols(multMeasures) + " / " + symbols(divMeasures)
+            else:
+                return symbols(multMeasures, wrapMult=False)
+        else:
+            return ""

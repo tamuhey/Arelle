@@ -5,13 +5,15 @@ Created on Nov 26, 2010
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
 import xml.dom.minidom, math
-from arelle import XbrlConst, XmlUtil, XmlValidate
+from arelle import XbrlConst, XmlUtil
 from arelle.ModelValue import qname, QName
 from arelle.ModelObject import ModelObject, ModelAttribute
+from arelle.XmlValidate import UNKNOWN, VALID, VALID_ID, validate as xmlValidate
 
 S_EQUAL = 0 # ordinary S-equality from 2.1 spec
 S_EQUAL2 = 1 # XDT definition adds QName comparisions
 XPATH_EQ = 2 # XPath EQ on all types
+VALIDATE_BY_STRING_VALUE = 3
 
 NO_IDs_EXCLUDED = 0
 ALL_IDs_EXCLUDED = 1
@@ -47,7 +49,7 @@ def equalityHash(elt, equalMode=S_EQUAL, excludeIDs=NO_IDs_EXCLUDED):
         except AttributeError:
             dts = elt.modelXbrl
             if not hasattr(elt,"xValid"):
-                XmlValidate.validate(dts, elt)
+                xmlValidate(dts, elt)
             hashableValue = elt.sValue if equalMode == S_EQUAL else elt.xValue
             if isinstance(hashableValue,float) and math.isnan(hashableValue): 
                 hashableValue = (hashableValue,elt)    # ensure this NaN only compares to itself and no other NaN
@@ -76,16 +78,21 @@ def sEqual(dts1, elt1, elt2, equalMode=S_EQUAL, excludeIDs=NO_IDs_EXCLUDED, dts2
     elif elt1.namespaceURI != elt2.namespaceURI:
         return False
     if not hasattr(elt1,"xValid"):
-        XmlValidate.validate(dts1, elt1)
+        xmlValidate(dts1, elt1)
     if not hasattr(elt2,"xValid"):
-        XmlValidate.validate(dts2, elt2)
-    if (not xEqual(elt1, elt2, equalMode) or 
-        attributeDict(dts1, elt1, (), equalMode, excludeIDs) != 
-        attributeDict(dts2, elt2, (), equalMode, excludeIDs, ns2ns1Tbl)):
-        return False
+        xmlValidate(dts2, elt2)
     children1 = childElements(elt1)
     children2 = childElements(elt2)
     if len(children1) != len(children2):
+        return False
+    if (not xEqual(elt1, elt2,
+                   # must use stringValue for nested contents of mixed content 
+                   # ... this is now in xValue for mixed content
+                   # VALIDATE_BY_STRING_VALUE if len(children1) and elt1.xValid == VALID else
+                   equalMode
+                   ) or 
+        attributeDict(dts1, elt1, (), equalMode, excludeIDs) != 
+        attributeDict(dts2, elt2, (), equalMode, excludeIDs, ns2ns1Tbl)):
         return False
     excludeChildIDs = excludeIDs if excludeIDs != TOP_IDs_EXCLUDED else NO_IDs_EXCLUDED
     for i in range( len(children1) ):
@@ -95,7 +102,7 @@ def sEqual(dts1, elt1, elt2, equalMode=S_EQUAL, excludeIDs=NO_IDs_EXCLUDED, dts2
 
 def attributeDict(modelXbrl, elt, exclusions=set(), equalMode=S_EQUAL, excludeIDs=NO_IDs_EXCLUDED, ns2ns1Tbl=None, keyByTag=False, distinguishNaNs=False):
     if not hasattr(elt,"xValid"):
-        XmlValidate.validate(modelXbrl, elt)
+        xmlValidate(modelXbrl, elt)
     attrs = {}
     # TBD: replace with validated attributes
     for modelAttribute in elt.xAttributes.values():
@@ -113,9 +120,12 @@ def attributeDict(modelXbrl, elt, exclusions=set(), equalMode=S_EQUAL, excludeID
             else:
                 qname = QName(None, None, attrTag)
             try:
-                if excludeIDs and modelAttribute.xValid == XmlValidate.VALID_ID:
+                if excludeIDs and getattr(modelAttribute, "xValid", 0) == VALID_ID:
                     continue
-                value = modelAttribute.sValue if equalMode <= S_EQUAL2 else modelAttribute.xValue
+                if modelAttribute.xValid != UNKNOWN:
+                    value = modelAttribute.sValue if equalMode <= S_EQUAL2 else modelAttribute.xValue
+                else: # unable to validate, no schema definition, use string value of attribute
+                    value = modelAttribute.text
                 if distinguishNaNs and isinstance(value,float) and math.isnan(value):
                     value = (value,elt)
                 attrs[qname] = value
@@ -132,32 +142,34 @@ def childElements(elt):
 
 def xEqual(elt1, elt2, equalMode=S_EQUAL):
     if not hasattr(elt1,"xValid"):
-        XmlValidate.validate(elt1.modelXbrl, elt1)
+        xmlValidate(elt1.modelXbrl, elt1)
     if not hasattr(elt2,"xValid"):
-        XmlValidate.validate(elt2.modelXbrl, elt2)
-    if equalMode == S_EQUAL or (equalMode == S_EQUAL2 and not isinstance(elt1.sValue, QName)):
+        xmlValidate(elt2.modelXbrl, elt2)
+    if equalMode == VALIDATE_BY_STRING_VALUE:
+        return elt1.stringValue == elt2.stringValue
+    elif equalMode == S_EQUAL or (equalMode == S_EQUAL2 and not isinstance(elt1.sValue, QName)):
         return elt1.sValue == elt2.sValue
     else:
         return elt1.xValue == elt2.xValue
     
 def vEqual(elt1, elt2):
     if not hasattr(elt1,"xValid"):
-        XmlValidate.validate(elt1.modelXbrl, elt1)
+        xmlValidate(elt1.modelXbrl, elt1)
     if not hasattr(elt2,"xValid"):
-        XmlValidate.validate(elt2.modelXbrl, elt2)
+        xmlValidate(elt2.modelXbrl, elt2)
     return elt1.sValue == elt2.sValue
 
 def typedValue(dts, element, attrQname=None):
     try:
         if attrQname: # PSVI attribute value
             modelAttribute = element.xAttributes[attrQname.clarkNotation]
-            if modelAttribute.xValid >= XmlValidate.VALID:
+            if modelAttribute.xValid >= VALID:
                 return modelAttribute.xValue
         else: # PSVI element value (of text)
-            if element.xValid >= XmlValidate.VALID:
+            if element.xValid >= VALID:
                 return element.xValue
     except (AttributeError, KeyError):
         if dts:
-            XmlValidate.validate(dts, element, recurse=False, attrQname=attrQname)
+            xmlValidate(dts, element, recurse=False, attrQname=attrQname)
             return typedValue(None, element, attrQname=attrQname)
     return None

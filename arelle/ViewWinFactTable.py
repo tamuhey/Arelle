@@ -5,13 +5,19 @@ Created on Nov 15, 2010
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
 from collections import defaultdict
-import os, datetime
+import os, datetime, re
 from tkinter import Menu, constants, BooleanVar
 from arelle import ViewWinTree, ModelDtsObject, ModelInstanceObject, XbrlConst, XmlUtil
+from arelle.XbrlConst import conceptNameLabelRole
 
-def viewFacts(modelXbrl, tabWin, header="Fact Table", arcrole=XbrlConst.parentChild, linkrole=None, linkqname=None, arcqname=None, lang=None):
+stripXmlPattern = re.compile(r"<.*?>", re.DOTALL)
+decEntityPattern = re.compile(r"&#([0-9]+);")
+hexEntityPattern = re.compile(r"&#x([0-9]+);")
+stripWhitespacePattern = re.compile(r"\s\s+")
+
+def viewFacts(modelXbrl, tabWin, header="Fact Table", arcrole=XbrlConst.parentChild, linkrole=None, linkqname=None, arcqname=None, lang=None, expandAll=False):
     modelXbrl.modelManager.showStatus(_("viewing relationships {0}").format(os.path.basename(arcrole)))
-    view = ViewFactTable(modelXbrl, tabWin, header, arcrole, linkrole, linkqname, arcqname, lang)
+    view = ViewFactTable(modelXbrl, tabWin, header, arcrole, linkrole, linkqname, arcqname, lang, expandAll)
     view.ignoreDims = BooleanVar(value=False)
     view.showDimDefaults = BooleanVar(value=False)
     if view.view():
@@ -30,14 +36,18 @@ def viewFacts(modelXbrl, tabWin, header="Fact Table", arcrole=XbrlConst.parentCh
         view.menuAddClipboard()
         view.menuAddLangs()
         view.menuAddLabelRoles(includeConceptName=True)
+        #saveMenu = Menu(view.viewFrame, tearoff=0)
+        #saveMenu.add_command(label=_("HTML file"), underline=0, command=lambda: view.modelXbrl.modelManager.cntlr.fileSave(view=view, fileType="html"))
+        #menu.add_cascade(label=_("Save"), menu=saveMenu, underline=0)
     
 class ViewFactTable(ViewWinTree.ViewTree):
-    def __init__(self, modelXbrl, tabWin, header, arcrole, linkrole=None, linkqname=None, arcqname=None, lang=None):
+    def __init__(self, modelXbrl, tabWin, header, arcrole, linkrole=None, linkqname=None, arcqname=None, lang=None, expandAll=False):
         super(ViewFactTable, self).__init__(modelXbrl, tabWin, header, True, lang)
         self.arcrole = arcrole
         self.linkrole = linkrole
         self.linkqname = linkqname
         self.arcqname = arcqname
+        self.expandAllOnFirstDisplay = expandAll
         
     def viewReloadDueToMenuAction(self, *args):
         self.view()
@@ -51,16 +61,26 @@ class ViewFactTable(ViewWinTree.ViewTree):
         if not relationshipSet:
             self.modelXbrl.modelManager.addToLog(_("no relationships for {0}").format(self.arcrole))
             return False
-        # set up facts
+        # consider facts in the relationshipSet (only)
+        contexts = set()
         self.conceptFacts = defaultdict(list)
-        for fact in self.modelXbrl.facts:
-            self.conceptFacts[fact.qname].append(fact)
+        if self.linkrole and hasattr(self.modelXbrl.roleTypes[self.linkrole][0], "_tableFacts"):
+            for fact in self.modelXbrl.roleTypes[self.linkrole][0]._tableFacts:
+                self.conceptFacts[fact.qname].append(fact)
+                if fact.context is not None:
+                    contexts.add(fact.context)
+        else:
+            for fact in self.modelXbrl.facts:
+                if relationshipSet.fromModelObject(fact.concept) or relationshipSet.toModelObject(fact.concept):
+                    self.conceptFacts[fact.qname].append(fact)
+                    if fact.context is not None:
+                        contexts.add(fact.context)
         # sort contexts by period
         self.periodContexts = defaultdict(set)
         contextStartDatetimes = {}
         ignoreDims = self.ignoreDims.get()
         showDimDefaults = self.showDimDefaults.get()
-        for context in self.modelXbrl.contexts.values():
+        for context in contexts:
             if ignoreDims:
                 if context.isForeverPeriod:
                     contextkey = datetime.datetime(datetime.MINYEAR,1,1)
@@ -78,7 +98,9 @@ class ViewFactTable(ViewWinTree.ViewTree):
                     for dimQname in sorted(dims.keys(), key=lambda d: str(d)):
                         dimvalue = dims[dimQname]
                         if dimvalue.isExplicit:
-                            values.append(dimvalue.member.label(self.labelrole,lang=self.lang))
+                            values.append(dimvalue.member.label(self.labelrole,lang=self.lang)
+                                          if dimvalue.member is not None 
+                                          else str(dimvalue.memberQname))
                         else:
                             values.append(XmlUtil.innerText(dimvalue.typedMember))
                             
@@ -116,7 +138,7 @@ class ViewFactTable(ViewWinTree.ViewTree):
             self.numCols += 1
         self.treeView["columns"] = columnIds
         for colId, colHeading in columnIdHeadings:
-            self.treeView.column(colId, width=60, anchor="w")
+            self.treeView.column(colId, width=100, anchor="w")
             if ignoreDims:
                 if colHeading.year == datetime.MINYEAR:
                     date = "forever"
@@ -127,8 +149,7 @@ class ViewFactTable(ViewWinTree.ViewTree):
                 self.treeView.heading(colId, text=colHeading)
 
         # fact rendering
-        for previousNode in self.treeView.get_children(""): 
-            self.treeView.delete(previousNode)
+        self.clearTreeView()
         self.rowColFactId = {}
         # root node for tree view
         self.id = 1
@@ -136,16 +157,16 @@ class ViewFactTable(ViewWinTree.ViewTree):
         linkroleUris = []
         relationshipSet = self.modelXbrl.relationshipSet(self.arcrole, self.linkrole, self.linkqname, self.arcqname)
         if self.linkrole:
-            roleType = self.modelXbrl.roleTypes[self.linkrole]
-            linkroleUris.append((self.linkrole, roleType.definition, roleType.objectId(self.id)))
+            roleType = self.modelXbrl.roleTypes[self.linkrole][0]
+            linkroleUris.append(((roleType.genLabel(lang=self.lang, strip=True) or 
+                                  roleType.definition or 
+                                  linkroleUri), self.linkrole, roleType.objectId(self.id)))
             self.id += 1
         else:
             for linkroleUri in relationshipSet.linkRoleUris:
                 modelRoleTypes = self.modelXbrl.roleTypes.get(linkroleUri)
-                if modelRoleTypes is not None and len(modelRoleTypes) > 0:
-                    roledefinition = modelRoleTypes[0].definition
-                    if roledefinition is None or roledefinition == "":
-                        roledefinition = linkroleUri                    
+                if modelRoleTypes:
+                    roledefinition = (modelRoleTypes[0].genLabel(lang=self.lang, strip=True) or modelRoleTypes[0].definition or linkroleUri)                    
                     roleId = modelRoleTypes[0].objectId(self.id)
                 else:
                     roledefinition = linkroleUri
@@ -160,13 +181,18 @@ class ViewFactTable(ViewWinTree.ViewTree):
             for rootConcept in linkRelationshipSet.rootConcepts:
                 node = self.viewConcept(rootConcept, rootConcept, "", self.labelrole, linknode, 1, linkRelationshipSet, set())
     
+        if self.expandAllOnFirstDisplay:
+            self.expandAll()
+ 
         return True
 
     def viewConcept(self, concept, modelObject, labelPrefix, preferredLabel, parentnode, n, relationshipSet, visited):
-        if concept is None or concept.substitutionGroupQname == XbrlConst.qnXbrldtDimensionItem:
+        # bad relationship could identify non-concept or be None
+        if (not isinstance(concept, ModelDtsObject.ModelConcept) or 
+            concept.substitutionGroupQname == XbrlConst.qnXbrldtDimensionItem):
             return
         childnode = self.treeView.insert(parentnode, "end", modelObject.objectId(self.id),
-                    text=labelPrefix + concept.label(preferredLabel,lang=self.lang), 
+                    text=labelPrefix + concept.label(preferredLabel,lang=self.lang,linkroleHint=relationshipSet.linkrole), 
                     tags=("odd" if n & 1 else "even",))
         self.setRowFacts(childnode,concept,preferredLabel)
         self.id += 1
@@ -190,7 +216,8 @@ class ViewFactTable(ViewWinTree.ViewTree):
                 if toConcept in visited:
                     childPrefix += "(loop)"
                 labelrole = modelRel.preferredLabel
-                if not labelrole: labelrole = self.labelrole
+                if not labelrole or self.labelrole == conceptNameLabelRole: 
+                    labelrole = self.labelrole
                 self.viewConcept(toConcept, modelRel, childPrefix, labelrole, childnode, n + i + 1, nestedRelationshipSet, visited)
             visited.remove(concept)
             
@@ -208,7 +235,16 @@ class ViewFactTable(ViewWinTree.ViewTree):
                             continue # not shown on this row (belongs on end period label row
                 self.treeView.set(node, 
                                   colId, 
-                                  fact.effectiveValue)
+                                  fact.effectiveValue if concept is None 
+                                  or concept.isNumeric else 
+                                  hexEntityPattern.sub(
+                                    lambda m: chr(int('0x'+m.group(1),16)),
+                                    decEntityPattern.sub(
+                                      lambda m: chr(int(m.group(1),10)),
+                                      stripWhitespacePattern.sub(" ",
+                                        stripXmlPattern.sub(" ", fact.stringValue)))
+                                    ).strip(),
+                                )
                 factObjectId = fact.objectId()
                 self.tag_has[factObjectId].append(node)
                 self.rowColFactId[node + colId] = factObjectId
@@ -244,6 +280,10 @@ class ViewFactTable(ViewWinTree.ViewTree):
         if self.blockViewModelObject == 0:
             self.blockViewModelObject += 1
             try:
+                if isinstance(modelObject, ModelDtsObject.ModelRoleType):
+                    self.linkrole = modelObject.roleURI
+                    self.view()
+                    modelObject = None
                 # get concept of fact or toConcept of relationship, role obj if roleType
                 if not isinstance(modelObject, ModelInstanceObject.ModelFact):
                     modelObject = modelObject.viewConcept
@@ -254,6 +294,7 @@ class ViewFactTable(ViewWinTree.ViewTree):
                         self.treeView.selection_set(items[0])
             except (AttributeError, KeyError):
                 self.treeView.selection_set(())
-            self.blockViewModelObject -= 1
+            if self.blockViewModelObject > 0:
+                self.blockViewModelObject -= 1
 
     

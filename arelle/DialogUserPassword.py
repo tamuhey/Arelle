@@ -4,11 +4,18 @@ Created on Oct 10, 2010
 @author: Mark V Systems Limited
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
-from tkinter import Toplevel, StringVar, N, S, E, W, EW, DISABLED, NORMAL
-from tkinter.ttk import Frame, Button, Label, Entry
+from tkinter import Toplevel, StringVar, N, S, E, W, EW, DISABLED, NORMAL, messagebox
+try:
+    from tkinter.ttk import Frame, Button, Label, Entry
+except ImportError:
+    from ttk import Frame, Button, Label, Entry
 from arelle.CntlrWinTooltip import ToolTip
-from arelle.UiUtil import (checkbox)
-import re, sys
+from arelle.UiUtil import checkbox, gridCombobox
+import sys
+try:
+    import regex as re
+except ImportError:
+    import re
 
 '''
 caller checks accepted, if True, caller retrieves url
@@ -22,7 +29,7 @@ def askUserPassword(parent, host, realm, untilDoneEvent, result):
     untilDoneEvent.set()
 
 def askProxy(parent, priorProxySettings):
-    if isinstance(priorProxySettings,tuple) and len(priorProxySettings) == 5:
+    if isinstance(priorProxySettings,(tuple,list)) and len(priorProxySettings) == 5:
         useOsProxy, urlAddr, urlPort, user, password = priorProxySettings
     else:
         useOsProxy = True
@@ -32,9 +39,59 @@ def askProxy(parent, priorProxySettings):
         return (dialog.useOsProxyCb.value, dialog.urlAddr, dialog.urlPort, dialog.user, dialog.password)
     return None
 
+def askSmtp(parent, priorSmtpSettings):
+    if isinstance(priorSmtpSettings,(tuple,list)) and len(priorSmtpSettings) == 4:
+        urlAddr, urlPort, user, password = priorSmtpSettings
+    else:
+        urlAddr = urlPort = user = password = None
+    dialog = DialogUserPassword(parent, _("Outgoing E-mail Server (SMTP)"), urlAddr=urlAddr, urlPort=urlPort, user=user, password=password, showHost=False, showUrl=True, showUser=True, showRealm=False)
+    if dialog.accepted:
+        return (dialog.urlAddr, dialog.urlPort, dialog.user, dialog.password)
+    return None
+
+DBTypes = ("postgres", "mssqlSemantic", "mysqlSemantic", "orclSemantic",
+           "pgSemantic", "sqliteSemantic", "sqliteDpmDB", "rexster", "rdfDB", "json")
+DBDescriptions = ("XBRL-US Postgres SQL",
+                  "Semantic MSSQL SQL",
+                  "Semantic MySQL SQL",
+                  "Semantic Oracle SQL",
+                  "Semantic Postgres SQL",
+                  "Semantic SQLite SQL",
+                  "DPM SQLite SQL",
+                  "Rexter (Titan Cassandra)",
+                  "RDF (Turtle, NanoSparqlServer)",
+                  "JSON (JSON, MongoDB)")
+
+def askDatabase(parent, priorDatabaseSettings):
+    if isinstance(priorDatabaseSettings,(tuple,list)) and len(priorDatabaseSettings) == 7:
+        urlAddr, urlPort, user, password, database, timeout, dbType = priorDatabaseSettings
+    else:
+        urlAddr = urlPort = user = password = database = timeout = dbType = None
+    dialog = DialogUserPassword(parent, _("XBRL Database Server"), urlAddr=urlAddr, urlPort=urlPort, user=user, password=password, database=database, timeout=timeout, dbType=dbType, showHost=False, showUrl=True, showUser=True, showRealm=False, showDatabase=True)
+    if dialog.accepted:
+        return (dialog.urlAddr, dialog.urlPort, dialog.user, dialog.password, dialog.database, dialog.timeout, dialog.dbType)
+    return None
+
+def askInternetLogon(parent, url, quotedUrl, dialogCaption, dialogText, untilDoneEvent, result):
+    # received Html suggests url may require web page logon (due to receivedHtml)
+    r = messagebox.askyesnocancel(dialogCaption, dialogText)
+    if r is None:
+        result.append("cancel")
+    elif r == False:
+        result.append("no")
+    else:
+        import webbrowser
+        webbrowser.open(quotedUrl, new=1, autoraise=True)
+        r = messagebox.askretrycancel(dialogCaption,
+                                      _("After logging on (by web browser, if applicable) click 'retry' to reload web file"))
+        if r:
+            result.append("retry")
+        else:
+            result.append("cancel")
+    untilDoneEvent.set()
 
 class DialogUserPassword(Toplevel):
-    def __init__(self, parent, title, host=None, realm=None, useOsProxy=None, urlAddr=None, urlPort=None, user=None, password=None, showUrl=False, showUser=False, showHost=True, showRealm=True):
+    def __init__(self, parent, title, host=None, realm=None, useOsProxy=None, urlAddr=None, urlPort=None, user=None, password=None, database=None, timeout=None, dbType=None, showUrl=False, showUser=False, showHost=True, showRealm=True, showDatabase=False):
         super(DialogUserPassword, self).__init__(parent)
         self.parent = parent
         parentGeometry = re.match("(\d+)x(\d+)[+]?([-]?\d+)[+]?([-]?\d+)", parent.geometry())
@@ -51,6 +108,10 @@ class DialogUserPassword(Toplevel):
         self.userVar.set(user if user else "")
         self.passwordVar = StringVar()
         self.passwordVar.set(password if password else "")
+        self.databaseVar = StringVar()
+        self.databaseVar.set(database if database else "")
+        self.timeoutVar = StringVar()
+        self.timeoutVar.set(timeout if timeout else "")
         
         frame = Frame(self)
         y = 0
@@ -122,6 +183,27 @@ class DialogUserPassword(Toplevel):
         passwordEntry.grid(row=y, column=1, columnspan=4, sticky=EW, pady=3, padx=3)
         self.enabledWidgets.append(passwordEntry)
         y += 1
+        if showDatabase:
+            urlDatabaseLabel = Label(frame, text=_("Database:"), underline=0)
+            urlDatabaseEntry = Entry(frame, textvariable=self.databaseVar, width=25)
+            urlDatabaseLabel.grid(row=y, column=0, sticky=W, pady=3, padx=3)
+            urlDatabaseEntry.grid(row=y, column=1, columnspan=4, sticky=EW, pady=3, padx=3)
+            ToolTip(urlAddrEntry, text=_("Enter database name (optional) or leave blank"), wraplength=360)
+            self.enabledWidgets.append(urlDatabaseEntry)
+            y += 1
+            urlTimeoutLabel = Label(frame, text=_("Timeout:"), underline=0)
+            urlTimeoutEntry = Entry(frame, textvariable=self.timeoutVar, width=25)
+            urlTimeoutLabel.grid(row=y, column=0, sticky=W, pady=3, padx=3)
+            urlTimeoutEntry.grid(row=y, column=1, columnspan=4, sticky=EW, pady=3, padx=3)
+            ToolTip(urlAddrEntry, text=_("Enter timeout seconds (optional) or leave blank for default (60 secs.)"), wraplength=360)
+            self.enabledWidgets.append(urlTimeoutEntry)
+            y += 1
+            dbTypeLabel = Label(frame, text=_("DB type:"), underline=0)
+            dbTypeLabel.grid(row=y, column=0, sticky=W, pady=3, padx=3)
+            self.cbDbType = gridCombobox(frame, 1, y, values=DBDescriptions, 
+                                         selectindex=DBTypes.index(dbType) if dbType in DBTypes else None)
+            self.cbDbType.grid(columnspan=4, pady=3, padx=3)
+            y += 1
         okButton = Button(frame, text=_("OK"), command=self.ok)
         cancelButton = Button(frame, text=_("Cancel"), command=self.close)
         okButton.grid(row=y, column=2, sticky=E, pady=3)
@@ -144,6 +226,20 @@ class DialogUserPassword(Toplevel):
         self.grab_set()
         self.wait_window(self)
             
+    def checkEntries(self):
+        errors = []
+        if self.urlPort and not self.urlPort.isdigit():
+            errors.append(_("Port number invalid"))
+        if self.timeout and not self.timeout.isdigit():
+            errors.append(_("Timeout seconds invalid"))
+        if hasattr(self,"cbDbType") and self.cbDbType.value not in DBDescriptions:
+            errors.append(_("DB type is invalid"))
+        if errors:
+            messagebox.showwarning(_("Dialog validation error(s)"),
+                                "\n ".join(errors), parent=self)
+            return False
+        return True
+    
     def ok(self, event=None):
         if hasattr(self, "useOsProxyCb"):
             self.useOsProxy = self.useOsProxyCb.value
@@ -152,6 +248,11 @@ class DialogUserPassword(Toplevel):
         self.urlPort = self.urlPortVar.get()
         self.user = self.userVar.get()
         self.password = self.passwordVar.get()
+        self.database = self.databaseVar.get()
+        self.timeout = self.timeoutVar.get()
+        self.dbType = DBTypes[DBDescriptions.index(self.cbDbType.value)] if hasattr(self,"cbDbType") and self.cbDbType.value in DBDescriptions else None
+        if not self.checkEntries():
+            return
         self.accepted = True
         self.close()
         

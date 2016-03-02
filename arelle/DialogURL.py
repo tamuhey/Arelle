@@ -5,9 +5,15 @@ Created on Oct 10, 2010
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
 from tkinter import Toplevel, StringVar, N, S, E, W, EW
-from tkinter.ttk import Frame, Button, Label, Entry
+try:
+    from tkinter.ttk import Frame, Button, Label, Entry
+except ImportError:
+    from ttk import Frame, Button, Label, Entry
 from arelle.CntlrWinTooltip import ToolTip
-import re
+try:
+    import regex as re
+except ImportError:
+    import re
 
 '''
 caller checks accepted, if True, caller retrieves url
@@ -78,7 +84,9 @@ class DialogURL(Toplevel):
         self.wait_window(self)
         
     def ok(self, event=None):
-        self.url = self.urlVar.get()
+        self.url = self.urlVar.get().strip()
+        if self.url and self.url[0] == '"' and self.url[-1] == '"':
+            self.url = self.url[1:-1] # strip double quotes (from cut and paste from database etc
         self.accepted = True
         self.close()
         

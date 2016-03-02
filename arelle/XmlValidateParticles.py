@@ -8,11 +8,10 @@ from lxml import etree
 from arelle.ModelDtsObject import (ModelConcept, ModelType, ModelGroupDefinition, 
                                    ModelAll, ModelChoice, ModelSequence, 
                                    ModelAny, anonymousTypeSuffix)
-from arelle.ModelInstanceObject import ModelInlineFact
 from arelle.ModelObject import ModelObject, ModelAttribute
 from arelle.XmlValidate import validate
 
-def validateElementSequence(modelXbrl, compositor, children, iNextChild=0):
+def validateElementSequence(modelXbrl, compositor, children, ixFacts, iNextChild=0):
     particles = compositor.dereference().particles        
     iStartingChild = iNextChild
     errDesc = None
@@ -25,55 +24,63 @@ def validateElementSequence(modelXbrl, compositor, children, iNextChild=0):
     while moreParticlesPasses:
         moreParticlesPasses = False
         for particle in particles:
-            occurences = 0
+            occurrences = 0
             if isinstance(particle, (ModelConcept, ModelAny)):
                 elementDeclaration = particle.dereference()
                 while iNextChild < len(children):
                     elt = children[iNextChild]
-                    if isinstance(elt, ModelObject):
-                        # for any, check namespace overlap
-                        if (isinstance(particle, ModelAny) or 
-                            (elementDeclaration is not None and 
-                             (elt.qname == elementDeclaration.qname or 
-                              elt.elementDeclaration.substitutesForQname(elementDeclaration.qname)))):
-                            occurences += 1
-                            validate(modelXbrl, elt)
-                            iNextChild += 1
-                            if occurences == particle.maxOccurs:
-                                break
-                        elif not isinstance(particle, ModelAll):
-                            break # done with this element
-                    else: # comment or processing instruction, skip over it
+                    # children now only contains ModelObjects, no comments or other lxml elements
+                    vQname = elt.vQname(modelXbrl) # takes care of elements inside inline or other instances
+                    # for any, check namespace overlap
+                    if ((isinstance(particle, ModelAny) and 
+                         particle.allowsNamespace(vQname.namespaceURI)) or 
+                        (isinstance(particle, ModelConcept) and
+                         elementDeclaration is not None and 
+                         (vQname == elementDeclaration.qname or
+                          (vQname in modelXbrl.qnameConcepts and  
+                           modelXbrl.qnameConcepts[vQname].substitutesForQname(elementDeclaration.qname))))):
+                        occurrences += 1
+                        validate(modelXbrl, elt, ixFacts=ixFacts)
                         iNextChild += 1
+                        if occurrences == particle.maxOccurs:
+                            break
+                    elif not isinstance(particle, ModelAll):
+                        break # done with this element
             else:  # group definition or compositor
-                while occurences < particle.maxOccurs:
+                while occurrences < particle.maxOccurs:
                     iPrevChild = iNextChild
-                    iNextChild, occured, errDesc, errArgs = validateElementSequence(modelXbrl, particle, children, iNextChild)
-                    if occured:
-                        occurences += 1
-                        if occurences == particle.maxOccurs or iNextChild >= len(children):
+                    iNextChild, occurred, errDesc, errArgs = validateElementSequence(modelXbrl, particle, children, ixFacts, iNextChild)
+                    if occurred:
+                        # test if occurrence was because of minOccurs zero but no match occurred (HF 2012-09-07)
+                        if occurred and iNextChild == iPrevChild and particle.minOccurs == 0: # nothing really occurred
+                            break
+                        occurrences += 1
+                        if occurrences == particle.maxOccurs or iNextChild >= len(children):
                             break
                     else:
                         break
             if isinstance(compositor, ModelChoice):
-                if occurences > 0 and particle.minOccurs <= occurences <= particle.maxOccurs:
+                if occurrences > 0 and particle.minOccurs <= occurrences <= particle.maxOccurs:
                     return (iNextChild, True, None, None)  # choice has been selected
                 else: # otherwise start again on next choice
                     if particle.minOccurs == 0:
                         anyChoiceHasMinOccurs0 = True
                     iNextChild = iStartingChild
             elif isinstance(compositor, ModelAll):
-                if particle.minOccurs <= occurences <= particle.maxOccurs:
+                if particle.minOccurs <= occurrences <= particle.maxOccurs:
                     allParticles.add(particle)  # particle found
                     moreParticlesPasses = True
                     break # advance to next all particle
             elif particle.minOccurs > 0 and errDesc:
                 return (iNextChild, False, errDesc, errArgs)
-            elif not particle.minOccurs <= occurences <= particle.maxOccurs:
+            elif not particle.minOccurs <= occurrences <= particle.maxOccurs:
                 return (iNextChild, False,
-                        ("xmlSchema:elementOccurencesError", 
-                         _("%(compositor)s(%(particles)s) %(element)s occured %(occurences)s times, minOccurs=%(minOccurs)s, maxOccurs=%(maxOccurs)s, within %(parentElement)s")),
-                        dict(compositor=compositor, particles=particles, occurences=occurences, minOccurs=particle.minOccursStr, maxOccurs=particle.maxOccursStr))
+                        ("xmlSchema:elementOccurrencesError", 
+                         _("%(compositor)s(%(particles)s) %(element)s occurred %(occurrences)s times, minOccurs=%(minOccurs)s, maxOccurs=%(maxOccurs)s, within %(parentElement)s")
+                        if occurrences > 0 else
+                         _("%(compositor)s(%(particles)s) content occurred %(occurrences)s times, minOccurs=%(minOccurs)s, maxOccurs=%(maxOccurs)s, within %(parentElement)s")
+                         ),
+                        dict(compositor=compositor, particles=particles, occurrences=occurrences, minOccurs=particle.minOccursStr, maxOccurs=particle.maxOccursStr))
     if isinstance(compositor, ModelAll):
         missingParticles = set(particles) - allParticles
         if missingParticles:
@@ -81,20 +88,19 @@ def validateElementSequence(modelXbrl, compositor, children, iNextChild=0):
                     ("xmlSchema:missingParticlesError",
                      _("All(%(particles)s) missing at %(element)s, within %(parentElement)s")),
                     dict(particles=particles))
-        occured = True
+        occurred = True
     elif isinstance(compositor, ModelChoice):
-        occured = anyChoiceHasMinOccurs0 # deemed to have occured if any choice had minoccurs=0
+        occurred = anyChoiceHasMinOccurs0 # deemed to have occurred if any choice had minoccurs=0
     else:
-        occured = True
+        occurred = True
     if isinstance(compositor, ModelType) and iNextChild < len(children):
-        elt = children[iNextChild]
-        eltChildren = elt.modelTupleFacts if isinstance(elt, ModelInlineFact) else elt
-        if any(True for child in eltChildren if isinstance(child, ModelObject)): # any unexpected content elements
+        #if any(True for child in children[iNextChild:] if isinstance(child, ModelObject)): # any unexpected content elements
+        if len(children) > iNextChild: # any unexpected content elements
             return (iNextChild, False,
                     ("xmlSchema:elementUnexpected",
                      _("%(compositor)s(%(particles)s) %(element)s unexpected, within %(parentElement)s")),
                     dict(compositor=compositor, particles=particles))
-    return (iNextChild, occured, None, None)
+    return (iNextChild, occurred, None, None)
 
 def modelGroupCompositorTitle(compositor):
     if isinstance(compositor, ModelType):
@@ -141,4 +147,6 @@ def validateUniqueParticleAttribution(modelXbrl, particles, compositor):
                     modelObject=particle, compositor=compositor.localName)
             priorAnyParticles.insert(0, i)
         else:   # recurse
-            validateUniqueParticleAttribution(modelXbrl, particle.dereference().particles, particle)
+            particleDeclaration = particle.dereference()
+            if particleDeclaration is not None:  # none if particle ref is invalid
+                validateUniqueParticleAttribution(modelXbrl, particleDeclaration.particles, particle)
