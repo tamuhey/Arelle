@@ -33,14 +33,16 @@
 """
 from collections import defaultdict
 from lxml import etree
-from arelle import XmlUtil, XbrlConst, XbrlUtil, UrlUtil, Locale, ModelValue, XmlValidate
+from arelle import XmlUtil, XbrlConst, XbrlUtil, UrlUtil, Locale, ModelValue
 from arelle.ValidateXbrlCalcs import inferredPrecision, inferredDecimals, roundValue
+from arelle.XmlValidate import UNVALIDATED, INVALID, VALID
 from arelle.PrototypeInstanceObject import DimValuePrototype
 from math import isnan, isinf
 from arelle.ModelObject import ModelObject
 from decimal import Decimal, InvalidOperation
 from hashlib import md5
 from arelle.HashUtil import md5hash, Md5Sum
+
 Aspect = None
 utrEntries = None
 utrSymbol = None
@@ -336,8 +338,12 @@ class ModelFact(ModelObject):
     @property
     def fractionValue(self):
         """( (str,str) ) -- (text value of numerator, text value of denominator)"""
-        return (XmlUtil.text(XmlUtil.child(self, None, "numerator")),
-                XmlUtil.text(XmlUtil.child(self, None, "denominator")))
+        try:
+            return self._fractionValue
+        except AttributeError:
+            self._fractionValue = (XmlUtil.text(XmlUtil.child(self, None, "numerator")),
+                                   XmlUtil.text(XmlUtil.child(self, None, "denominator")))
+            return self._fractionValue
     
     @property
     def effectiveValue(self):
@@ -349,6 +355,10 @@ class ModelFact(ModelObject):
         if self.isNil:
             return "(nil)"
         try:
+            if concept.isFraction:
+                if self.xValid >= VALID:
+                    return str(self.xValue)
+                return "/".join(self.fractionValue)
             if concept.isNumeric:
                 val = self.value
                 try:
@@ -364,7 +374,11 @@ class ModelFact(ModelObject):
                             dec = len(val.partition(".")[2])
                         else: # max decimals at 28
                             dec = max( min(int(dec), 28), -28) # 2.7 wants short int, 3.2 takes regular int, don't use _INT here
-                        return Locale.format(self.modelXbrl.locale, "%.*f", (dec, num), True)
+                        # return Locale.format(self.modelXbrl.locale, "%.*f", (dec, num), True)
+                        # switch to new formatting so long-precision decimal numbers are correct
+                        if dec < 0:
+                            dec = 0 # {} formatting doesn't accept negative dec
+                        return Locale.format(self.modelXbrl.locale, "{:.{}f}", (num,dec), True)
                 except ValueError: 
                     return "(error)"
             return self.value
@@ -414,8 +428,8 @@ class ModelFact(ModelObject):
                 return False
         selfValue = self.value
         otherValue = other.value
-        if isinstance(selfValue,str) and isinstance(otherValue,str):
-            return selfValue.strip() == otherValue.strip()
+        if isinstance(selfValue,str) and isinstance(otherValue,str): # normalized space comparison
+            return ' '.join(selfValue.split()) == ' '.join(otherValue.split())
         else:
             return selfValue == otherValue
         
@@ -548,6 +562,10 @@ class ModelInlineValueObject:
         except ValueError:
             return None # should have rasied a validation error in XhtmlValidate.py
     
+    def setInvalid(self):
+        self._ixValue = ModelValue.INVALIDixVALUE
+        self.xValid = INVALID
+        self.xValue = None
     
     @property
     def value(self):
@@ -556,6 +574,8 @@ class ModelInlineValueObject:
         try:
             return self._ixValue
         except AttributeError:
+            self.xValid = UNVALIDATED # may not be initialized otherwise
+            self.xValue = None
             v = XmlUtil.innerText(self, 
                                   ixExclude=True, 
                                   ixEscape=(self.get("escape") in ("true","1")), 
@@ -572,11 +592,19 @@ class ModelInlineValueObject:
                 else:
                     try:
                         v = self.modelXbrl.modelManager.customTransforms[f](v)
+                    except KeyError as err:
+                        self._ixValue = ModelValue.INVALIDixVALUE
+                        raise FunctionIxt.ixtFunctionNotAvailable
                     except Exception as err:
                         self._ixValue = ModelValue.INVALIDixVALUE
                         raise err
             if self.localName == "nonNumeric" or self.localName == "tuple" or self.isNil:
                 self._ixValue = v
+            elif self.localName == "fraction":
+                if self.xValid >= VALID:
+                    self._ixValue = str(self.xValue)
+                else:
+                    self._ixValue = "NaN"
             else:  # determine string value of transformed value
                 negate = -1 if self.sign else 1
                 try:
@@ -584,7 +612,7 @@ class ModelInlineValueObject:
                     # use decimal so all number forms work properly
                     num = Decimal(v)
                 except (ValueError, InvalidOperation):
-                    self._ixValue = ModelValue.INVALIDixVALUE
+                    self.setInvalid()
                     raise ValueError("Invalid value for {} number: {}".format(self.localName, v))
                 try:
                     scale = self.scale
@@ -596,11 +624,11 @@ class ModelInlineValueObject:
                     elif isnan(num):
                         self._ixValue = "NaN"
                     else:
-                        if num == num.to_integral():
+                        if num == num.to_integral() and ".0" not in v:
                             num = num.quantize(DECIMALONE) # drop any .0
                         self._ixValue = "{}".format(num)
                 except (ValueError, InvalidOperation):
-                    self._ixValue = ModelValue.INVALIDixVALUE
+                    self.setInvalid()
                     raise ValueError("Invalid value for {} scale {} for number {}".format(self.localName, scale, v))
             return self._ixValue
 
@@ -719,12 +747,14 @@ class ModelInlineFraction(ModelInlineFact):
 class ModelInlineFractionTerm(ModelInlineValueObject, ModelObject):
     def init(self, modelDocument):
         super(ModelInlineFractionTerm, self).init(modelDocument)
+        self.isNil = False # required for inherited value property
+        self.modelTupleFacts = [] # required for inherited XmlValudate of fraction term
         
     @property
     def qname(self):
         if self.localName == "numerator":
             return XbrlConst.qnXbrliNumerator
-        elif self.localName == "denomiantor":
+        elif self.localName == "denominator":
             return XbrlConst.qnXbrliDenominator
         return self.elementQname
     
@@ -1187,7 +1217,7 @@ class ModelDimensionValue(ModelObject):
     def dimensionQname(self):
         """(QName) -- QName of the dimension concept"""
         dimAttr = self.xAttributes.get("dimension", None)
-        if dimAttr is not None and dimAttr.xValid >= 4:
+        if dimAttr is not None and dimAttr.xValid >= VALID:
             return dimAttr.xValue
         return None
         #return self.prefixedNameQname(self.get("dimension"))
@@ -1228,7 +1258,7 @@ class ModelDimensionValue(ModelObject):
         try:
             return self._memberQname
         except AttributeError:
-            if self.isExplicit and self.xValid >= 4:
+            if self.isExplicit and self.xValid >= VALID:
                 self._memberQname = self.xValue
             else:
                 self._memberQname = None
@@ -1271,7 +1301,7 @@ class ModelDimensionValue(ModelObject):
             return (str(self.dimensionQname), XmlUtil.xmlstring( XmlUtil.child(self), stripXmlns=True, prettyPrint=True ) )
         
 def measuresOf(parent):
-    if parent.xValid >= 4: # has DTS and is validated
+    if parent.xValid >= VALID: # has DTS and is validated
         return sorted([m.xValue 
                        for m in parent.iterchildren(tag="{http://www.xbrl.org/2003/instance}measure") 
                        if isinstance(m, ModelObject) and m.xValue])
@@ -1488,18 +1518,13 @@ class ModelInlineFootnote(ModelResource):
         return attributes
 
     def viewText(self, labelrole=None, lang=None):
-        """(str) -- Text of contained (inner) text nodes except for any whose localName 
-        starts with URI, for label and reference parts displaying purposes."""
-        return " ".join([XmlUtil.text(resourceElt)
-                           for resourceElt in self.iter()
-                              if isinstance(resourceElt,ModelObject) and 
-                                  not resourceElt.localName.startswith("URI")])    
+        return value
         
     @property
     def propertyView(self):
         return (("file", self.modelDocument.basename),
                 ("line", self.sourceline)) + \
-               super(ModelInlineFact,self).propertyView + \
+               super(ModelInlineFootnote,self).propertyView + \
                (("html value", XmlUtil.innerText(self)),)
         
     def __repr__(self):

@@ -13,11 +13,10 @@ from arelle.ModelXbrl import ModelXbrl
 from arelle.ModelDtsObject import anonymousTypeSuffix, ModelConcept
 from arelle.ModelInstanceObject import ModelDimensionValue, ModelFact, ModelInlineFact
 from arelle.ModelFormulaObject import ModelFormulaResource
-from arelle.XmlValidate import UNKNOWN, VALID, validate, NCNamePattern
+from arelle.XmlValidate import UNKNOWN, VALID, validate as xmlValidate, NCNamePattern
 from arelle.ValidateXbrlCalcs import inferredDecimals, inferredPrecision
 from arelle.ValidateXbrlDimensions import priItemElrHcRels
 from arelle.Locale import format_picture
-from arelle import XmlValidate
 from lxml import etree
 from math import isnan, isinf
 
@@ -710,9 +709,13 @@ def filter_member_DRS_selection(xc, p, args):
     dimConcept = xc.modelXbrl.qnameConcepts.get(qnDim)
     if dimConcept is None or dimConcept.qname is None or dimConcept.qname.namespaceURI == XbrlConst.xbrli:
         raise XPathContext.XPathException(p, 'xfie:invalidDimensionQName', _('Argument 1 {0} is not in the DTS.').format(qnDim))
+    elif not dimConcept.isDimensionItem:
+        raise XPathContext.XPathException(p, 'xfie:invalidDimensionQName', _('Argument 1 {0} is not a dimension.').format(qnDim))
     priItemConcept = xc.modelXbrl.qnameConcepts.get(qnPriItem)
     if priItemConcept is None  or priItemConcept.qname is None  or priItemConcept.qname.namespaceURI == XbrlConst.xbrli:
-        raise XPathContext.XPathException(p, 'xfie:invalidPrimaryItemConceptQName', _('Argument 1 {0} is not in the DTS.').format(qnPriItem))
+        raise XPathContext.XPathException(p, 'xfie:invalidPrimaryItemConceptQName', _('Argument 2 {0} is not in the DTS.').format(qnPriItem))
+    elif not priItemConcept.isPrimaryItem:
+        raise XPathContext.XPathException(p, 'xfie:invalidPrimaryItemConceptQName', _('Argument 2 {0} is not a primary item.').format(qnPriItem))
     memConcept = xc.modelXbrl.qnameConcepts.get(qnMem)
     if memConcept is None or not memConcept.isDomainMember or not dimConcept.isDimensionItem:
         # not an error, just don't find anything
@@ -957,13 +960,17 @@ def concept_relationships(xc, p, args, nestResults=False):
     arcroleURI = stringArg(xc, args, 2, "xs:string")
     axis = stringArg(xc, args, 3, "xs:string")
     if not axis in ('descendant', 'child', 'ancestor', 'parent', 'sibling', 'sibling-or-self'):
-        return ()
+        raise XPathContext.FunctionArgType(3, "'descendant', 'child', 'ancestor', 'parent', 'sibling' or 'sibling-or-self'",
+                                           errCode="xfie:InvalidConceptRelationParameters")
     if qnSource != XbrlConst.qnXfiRoot:
         srcConcept = inst.qnameConcepts.get(qnSource)
         if srcConcept is None:
             return ()
     if lenArgs > 4:
         generations = numericArg(xc, p, args, 4, "xs:integer", convertFallback=0)
+        if axis in ('child', 'parent', 'sibling', 'sibling-or-self') and generations != 1:
+            raise XPathContext.FunctionArgType(4, "generations must be 1 for 'child', 'parent', 'sibling' or 'sibling-or-self' axis",
+                                               errCode="xfie:InvalidConceptRelationParameters")
     elif axis in ('child', 'parent', 'sibling', 'sibling-or-self'):
         generations = 1
     else:
@@ -1206,7 +1213,7 @@ def  create_element(xc, p, args):
                 newElement.append(element)
                 
     # node myst be validated for use in instance creation (typed dimension references)
-    XmlValidate.validate(xc.modelXbrl, newElement)
+    xmlValidate(xc.modelXbrl, newElement)
                 
     return newElement
 

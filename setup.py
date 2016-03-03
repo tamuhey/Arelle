@@ -35,7 +35,7 @@ setup_requires = ['lxml']
 # this also allows installation directly from the github repository 
 # (using 'pip install -e git+git://github.com/rheimbuchArelle.git#egg=Arelle') 
 # and the install_requires packages are auto-installed as well.
-install_requires = ['lxml==3.4.4']
+install_requires = ['lxml']
 options = {}
 scripts = []
 cxFreezeExecutables = []
@@ -248,7 +248,7 @@ if sys.platform in ('darwin', 'linux2', 'linux', 'sunos5'):
         
     includeLibs = [
         'lxml', 'lxml.etree', 'lxml._elementpath', 'lxml.html',
-        'pg8000', 'pymysql', 'sqlite3',
+        'pg8000', 'pymysql', 'sqlite3', 'numpy', 
         # note cx_Oracle isn't here because it is version and machine specific,
         # ubuntu not likely working
         # more rdflib plugin modules may need to be added later
@@ -264,21 +264,21 @@ if sys.platform in ('darwin', 'linux2', 'linux', 'sunos5'):
         'rdflib.plugins.serializers.xmlwriter',
         'rdflib.plugins.sparql',
         'rdflib.plugins.stores',
-        'isodate', 'regex', 'gzip', 'zlib', 'openpyxl'
+        'isodate', 'regex', 'gzip', 'zlib', 
+        'openpyxl' # openpyxl's __init__.py must be hand edited, see https://bitbucket.org/openpyxl/openpyxl/pull-requests/80/__about__py/diff
     ]
     
     # uncomment the next two files if cx_Freezing with EdgarRenderer
     # note that openpyxl must be 2.1.4 at this time
-    # if os.path.exists("arelle/plugin/EdgarRenderer"):
-    #     includeLibs += [
-    #         'dateutil',
-    #         'dateutil.relativedelta',
-    #         'numpy',
-    #         'six',
-    #         'tornado',
-    #         'pyparsing',
-    #         'matplotlib'
-    #     ]
+    if os.path.exists("arelle/plugin/EdgarRenderer"):
+        includeLibs += [
+            'dateutil',
+            'dateutil.relativedelta',
+            'six',
+            'tornado',
+            'pyparsing',
+            'matplotlib'
+        ]
 
     if sys.platform != 'sunos5':
         try:
@@ -335,7 +335,7 @@ elif sys.platform == 'win32':
         
     includeLibs = [
         'lxml', 'lxml.etree', 'lxml._elementpath', 'lxml.html',
-        'pg8000', 'pymysql', 'cx_Oracle', 'pyodbc', 'sqlite3',
+        'pg8000', 'pymysql', 'cx_Oracle', 'pyodbc', 'sqlite3', 'numpy',
         # more rdflib plugin modules may need to be added later
         'rdflib',
         'rdflib.extras',
@@ -349,9 +349,19 @@ elif sys.platform == 'win32':
         'rdflib.plugins.serializers.xmlwriter',
         'rdflib.plugins.sparql',
         'rdflib.plugins.stores',
-        'isodate', 'regex', 'gzip', 'zlib', 'openpyxl'
-    ]
+        'isodate', 'regex', 'gzip', 'zlib', 
+        'openpyxl' # openpyxl's __init__.py must be hand edited, see https://bitbucket.org/openpyxl/openpyxl/pull-requests/80/__about__py/diff
 
+    ]
+    # uncomment the next line if cx_Freezing with EdgarRenderer
+    # note that openpyxl must be 2.1.4 at this time
+    # removed tornado
+    if os.path.exists("arelle/plugin/EdgarRenderer"):
+        includeLibs += [
+            'dateutil', 'dateutil.relativedelta',
+            "six", "pyparsing", "matplotlib"
+        ]
+        
     options = dict(
         build_exe={
             "include_files": win32includeFiles,

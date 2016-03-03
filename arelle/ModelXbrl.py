@@ -69,7 +69,7 @@ def load(modelManager, url, nextaction=None, base=None, useFileSource=None, erro
     modelManager.showStatus(_("xbrl loading finished, {0}...").format(nextaction))
     return modelXbrl
 
-def create(modelManager, newDocumentType=None, url=None, schemaRefs=None, createModelDocument=True, isEntry=False, errorCaptureLevel=None, initialXml=None, initialComment=None, base=None):
+def create(modelManager, newDocumentType=None, url=None, schemaRefs=None, createModelDocument=True, isEntry=False, errorCaptureLevel=None, initialXml=None, initialComment=None, base=None, discover=True):
     from arelle import (ModelDocument, FileSource)
     modelXbrl = ModelXbrl(modelManager, errorCaptureLevel=errorCaptureLevel)
     modelXbrl.locale = modelManager.locale
@@ -77,7 +77,7 @@ def create(modelManager, newDocumentType=None, url=None, schemaRefs=None, create
         modelXbrl.fileSource = FileSource.FileSource(url, modelManager.cntlr) # url may be an open file handle, use str(url) below
         modelXbrl.closeFileSource= True
         if createModelDocument:
-            modelXbrl.modelDocument = ModelDocument.create(modelXbrl, newDocumentType, str(url), schemaRefs=schemaRefs, isEntry=isEntry, initialXml=initialXml, initialComment=initialComment, base=base)
+            modelXbrl.modelDocument = ModelDocument.create(modelXbrl, newDocumentType, str(url), schemaRefs=schemaRefs, isEntry=isEntry, initialXml=initialXml, initialComment=initialComment, base=base, discover=discover)
             if isEntry:
                 del modelXbrl.entryLoadingUrl
                 loadSchemalocatedSchemas(modelXbrl)
@@ -447,12 +447,12 @@ class ModelXbrl:
             if isinstance(view, ViewWinDTS.ViewDTS):
                 self.modelManager.cntlr.uiThreadQueue.put((view.view, []))
                 
-    def saveInstance(self, overrideFilepath=None, outputZip=None):
+    def saveInstance(self, **kwargs):
         """Saves current instance document file.
         
         :param overrideFilepath: specify to override saving in instance's modelDocument.filepath
         """
-        self.modelDocument.save(overrideFilepath=overrideFilepath, outputZip=outputZip)
+        self.modelDocument.save(**kwargs)
             
     @property    
     def prefixedNamespaces(self):
@@ -826,8 +826,10 @@ class ModelXbrl:
         global ModelFact
         if ModelFact is None:
             from arelle.ModelInstanceObject import ModelFact
+        if hasattr(self, "_factsByQname"):
+            self._factsByQname[newFact.qname].add(newFact)
         if not isinstance(newFact, ModelFact):
-            return None # unable to create fact for this concept
+            return None # unable to create fact for this concept OR DTS not loaded for target instance (e.g., inline extraction, summary output)
         del self.makeelementParentModelObject
         if validate:
             XmlValidate.validate(self, newFact)
@@ -835,8 +837,6 @@ class ModelXbrl:
         # update cached sets
         if not newFact.isNil and hasattr(self, "_nonNilFactsInInstance"):
             self._nonNilFactsInInstance.add(newFact)
-        if hasattr(self, "_factsByQname"):
-            self._factsByQname[newFact.qname].add(newFact)
         if newFact.concept is not None:
             if hasattr(self, "_factsByDatatype"):
                 del self._factsByDatatype # would need to iterate derived type ancestry to populate
@@ -844,8 +844,23 @@ class ModelXbrl:
                 self._factsByPeriodType[newFact.concept.periodType].add(newFact)
             if hasattr(self, "_factsByDimQname"):
                 del self._factsByDimQname
+        self.setIsModified()
         return newFact    
         
+    def setIsModified(self):
+        """Records that the underlying document has been modified.
+        """
+        self.modelDocument.isModified = True
+
+    def isModified(self):
+        """Check if the underlying document has been modified.
+        """
+        md = self.modelDocument
+        if md is not None:
+            return md.isModified
+        else:
+            return False
+
     def modelObject(self, objectId):
         """Finds a model object by an ordinal ID which may be buried in a tkinter view id string (e.g., 'somedesignation_ordinalnumber').
         
@@ -1028,8 +1043,11 @@ class ModelXbrl:
                 elif isinstance(argValue,(float,Decimal)):
                     # need locale-dependent formatting
                     fmtArgs[argName] = format_string(self.modelManager.locale, '%f', argValue)
-                else:
+                elif isinstance(argValue, dict):
                     fmtArgs[argName] = argValue
+                else:
+                    fmtArgs[argName] = str(argValue)
+
         if "refs" not in extras:
             try:
                 file = os.path.basename(self.modelDocument.uri)

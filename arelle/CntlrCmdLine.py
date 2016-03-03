@@ -46,8 +46,8 @@ def main():
     gettext.install("arelle") # needed for options messages
     parseAndRun(args)
     
-def wsgiApplication():
-    return parseAndRun( ["--webserver=::wsgi"] )
+def wsgiApplication(extraArgs=[]): # for example call wsgiApplication(["--plugins=EdgarRenderer"])
+    return parseAndRun( ["--webserver=::wsgi"] + extraArgs )
        
 def parseAndRun(args):
     """interface used by Main program and py.test (arelle_test.py)
@@ -385,6 +385,7 @@ def parseAndRun(args):
                 "\n   xlrd (c) 2005-2013 Stephen J. Machin, Lingfo Pty Ltd, (c) 2001 D. Giffin, (c) 2000 A. Khan"
                 "\n   xlwt (c) 2007 Stephen J. Machin, Lingfo Pty Ltd, (c) 2005 R. V. Kiseliov"
                 "{2}"
+                "\n   May include installable plug-in modules with author-specific license terms"
                 ).format(cntlr.systemWordSize, Version.version,
                          _("\n   Bottle (c) 2011-2013 Marcel Hellkamp") if hasWebServer else "",
                          sys.version_info, etree.LXML_VERSION))
@@ -559,7 +560,9 @@ class CntlrCmdLine(Cntlr.Cntlr):
                         self.addToLog(_("Activation of plug-in {0} successful, version {1}.").format(moduleInfo.get("name"), moduleInfo.get("version")), 
                                       messageCode="info", file=moduleInfo.get("moduleURL"))
                     else:
-                        self.addToLog(_("Unable to load {0} as a plug-in or {0} is not recognized as a command. ").format(cmd), messageCode="info", file=cmd)
+                        self.addToLog(_("Unable to load \"%(name)s\" as a plug-in or \"%(name)s\" is not recognized as a plugin command. "),
+                                      messageCode="arelle:pluginParameterError", 
+                                      messageArgs={"name": cmd, "file": cmd}, level=logging.ERROR)
                 if resetPlugins:
                     PluginManager.reset()
                     if savePluginChanges:
@@ -594,7 +597,7 @@ class CntlrCmdLine(Cntlr.Cntlr):
                         self.addToLog(_("Addition of package {0} successful.").format(packageInfo.get("name")), 
                                       messageCode="info", file=packageInfo.get("URL"))
                     else:
-                        self.addToLog(_("Unable to load plug-in."), messageCode="info", file=cmd[1:])
+                        self.addToLog(_("Unable to load package."), messageCode="info", file=cmd[1:])
                 elif cmd.startswith("~"):
                     if PackageManager.reloadPackageModule(self, cmd[1:]):
                         self.addToLog(_("Reload of package successful."), messageCode="info", file=cmd[1:])
@@ -613,7 +616,9 @@ class CntlrCmdLine(Cntlr.Cntlr):
                                       messageCode="info", file=packageInfo.get("URL"))
                         resetPlugins = True
                     else:
-                        self.addToLog(_("Unable to load {0} as a package or {0} is not recognized as a command. ").format(cmd), messageCode="info", file=cmd)
+                        self.addToLog(_("Unable to load package \"%(name)s\". "),
+                                      messageCode="arelle:packageLoadingError", 
+                                      messageArgs={"name": cmd, "file": cmd}, level=logging.ERROR)
             if PackageManager.packagesConfigChanged:
                 PackageManager.rebuildRemappings(self)
             if savePackagesChanges:
@@ -654,15 +659,15 @@ class CntlrCmdLine(Cntlr.Cntlr):
                 return True # success
         self.username = options.username
         self.password = options.password
-        if options.validateEFM:
-            if options.disclosureSystemName:
-                self.addToLog(_("both --efm and --disclosureSystem validation are requested, proceeding with --efm only"),
-                              messageCode="info", file=options.entrypointFile)
-            self.modelManager.validateDisclosureSystem = True
-            self.modelManager.disclosureSystem.select("efm")
-        elif options.disclosureSystemName:
+        if options.disclosureSystemName:
             self.modelManager.validateDisclosureSystem = True
             self.modelManager.disclosureSystem.select(options.disclosureSystemName)
+            if options.validateEFM:
+                self.addToLog(_("both --efm and --disclosureSystem validation are requested, ignoring --efm only"),
+                              messageCode="info", file=options.entrypointFile)
+        elif options.validateEFM:
+            self.modelManager.validateDisclosureSystem = True
+            self.modelManager.disclosureSystem.select("efm")
         elif options.validateHMRC:
             self.modelManager.validateDisclosureSystem = True
             self.modelManager.disclosureSystem.select("hmrc")

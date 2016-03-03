@@ -51,7 +51,7 @@ class ModelManager:
         self.validateDisclosureSystem = False
         self.disclosureSystem = DisclosureSystem.DisclosureSystem(self)
         self.validateCalcLB = False
-        self.validateInferDecimals = False
+        self.validateInferDecimals = True
         self.validateInfoset = False
         self.validateUtr = False
         self.skipDTS = False
@@ -67,7 +67,7 @@ class ModelManager:
     def shutdown(self):
         self.status = "shutdown"
         
-    def addToLog(self, message, messageCode="", file="", level=logging.INFO):
+    def addToLog(self, message, messageCode="", file="", refs=[], level=logging.INFO):
         """Add a simple info message to the default logger
            
         :param message: Text of message to add to log.
@@ -75,9 +75,10 @@ class ModelManager:
         :param messageCode: Message code (e.g., a prefix:id of a standard error)
         :param messageCode: str
         :param file: File name (and optional line numbers) pertaining to message
+        :param refs: [{"href":file,"sourceLine":lineno},...] pertaining to message
         :type file: str
         """
-        self.cntlr.addToLog(message, messageCode=messageCode, file=file, level=level)
+        self.cntlr.addToLog(message, messageCode=messageCode, file=file, refs=refs, level=level)
         
     def showStatus(self, message, clearAfter=None):
         """Provide user feedback on status line of GUI or web page according to type of controller.
@@ -153,7 +154,8 @@ class ModelManager:
             self.modelXbrl.saveDTSpackage()
     
     def create(self, newDocumentType=None, url=None, schemaRefs=None, createModelDocument=True, isEntry=False, errorCaptureLevel=None, initialXml=None, base=None):
-        self.modelXbrl = ModelXbrl.create(self, newDocumentType, url, schemaRefs, createModelDocument, isEntry, errorCaptureLevel, initialXml, base)
+        self.modelXbrl = ModelXbrl.create(self, newDocumentType=newDocumentType, url=url, schemaRefs=schemaRefs, createModelDocument=createModelDocument, 
+                                          isEntry=isEntry, errorCaptureLevel=errorCaptureLevel, initialXml=initialXml, base=base)
         self.loadedModelXbrls.append(self.modelXbrl)
         return self.modelXbrl
     

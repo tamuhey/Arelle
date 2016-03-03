@@ -1,4 +1,4 @@
-b'''
+'''
 Created on Oct 17, 2010
 
 @author: Mark V Systems Limited
@@ -9,8 +9,9 @@ from arelle import (ModelDocument, ModelDtsObject, HtmlUtil, UrlUtil, XmlUtil, X
 from arelle.ModelRelationshipSet import baseSetRelationship
 from arelle.ModelObject import ModelObject, ModelComment
 from arelle.ModelValue import qname
-from lxml import etree
 from arelle.PluginManager import pluginClassMethods
+from arelle.XhtmlValidate import ixMsgCode
+from lxml import etree
 from collections import defaultdict
 try:
     import regex as re
@@ -94,6 +95,11 @@ def checkDTS(val, modelDocument, checkedModelDocuments):
             val.ixdsTuples = {}
             val.ixdsReferences = defaultdict(list)
             val.ixdsRelationships = []
+            val.ixdsRoleRefURIs = val.modelXbrl.targetRoleRefs  # roleRefs defined for all targets
+            val.ixdsArcroleRefURIs = val.modelXbrl.targetArcroleRefs  # arcroleRefs defined for all targets
+        # accumulate all role/arcrole refs across target document instance files
+        val.roleRefURIs = val.ixdsRoleRefURIs
+        val.arcroleRefURIs = val.ixdsArcroleRefURIs
         val.ixdsDocs.append(modelDocument)
         
     for hrefElt, hrefedDoc, hrefId in modelDocument.hrefObjects:
@@ -289,8 +295,8 @@ def checkElements(val, modelDocument, parent):
         isInstance = parent.namespaceURI == XbrlConst.xbrli and parent.localName == "xbrl"
         parentIsLinkbase = parent.namespaceURI == XbrlConst.link and parent.localName == "linkbase"
         parentIsSchema = parent.namespaceURI == XbrlConst.xsd and parent.localName == "schema"
-        if isInstance or parentIsLinkbase:
-            val.roleRefURIs = {}
+        if isInstance or parentIsLinkbase: # only for non-inline instance
+            val.roleRefURIs = {} # uses ixdsRoleRefURIs when inline instance (across all target documents)
             val.arcroleRefURIs = {}
             def linkbaseTopElts():
                 for refPass in (True, False): # do roleType and arcroleType before extended links and any other children
@@ -338,7 +344,9 @@ def checkElements(val, modelDocument, parent):
                             modelObject=elt, element=elt.prefixedName, attribute=name, value=attrValue)
                     '''
                     if name == "id" and attrValue in val.elementIDs:
-                        val.modelXbrl.error("xmlschema2.3.2.10:idDuplicated",
+                        # 2.1 spec @id validation refers to http://www.w3.org/TR/REC-xml#NT-TokenizedType
+                        # TODO: this check should not test inline elements, those should be in ModelDocument inlineIxdsDiscover using ixdsEltById
+                        val.modelXbrl.error("xml.3.3.1:idMustBeUnique", 
                             _("Element %(element)s id %(value)s is duplicated"),
                             modelObject=elt, element=elt.prefixedName, attribute=name, value=attrValue)
                     val.elementIDs.add(attrValue)
@@ -665,28 +673,28 @@ def checkElements(val, modelDocument, parent):
                         hrefAttr = elt.get("{http://www.w3.org/1999/xlink}href")
                         hrefUri, hrefId = UrlUtil.splitDecodeFragment(hrefAttr)
                         if refUri == "":
-                            val.modelXbrl.error("xbrl.3.5.2.4.5:{0}Missing".format(elt.localName),
+                            val.modelXbrl.error("xbrl.{}.5:{}Missing".format(xbrlSection,elt.localName),
                                 _("%(element)s %(refURI)s missing"),
                                 modelObject=elt, element=elt.qname, refURI=refUri,
-                                messageCodes=("xbrl.3.5.2.4.5:roleRefMissing", "xbrl.3.5.2.4.5:arcroleRefMissing"))
+                                messageCodes=("xbrl.3.5.2.4.5:roleRefMissing", "xbrl.3.5.2.5.5:arcroleRefMissing"))
                         elif refUri in refs:
-                            val.modelXbrl.error("xbrl.3.5.2.4.5:{0}Duplicate".format(elt.localName),
+                            val.modelXbrl.error("xbrl.{}.5:{}Duplicate".format(xbrlSection,elt.localName),
                                 _("%(element)s is duplicated for %(refURI)s"),
                                 modelObject=elt, element=elt.qname, refURI=refUri,
-                                messageCodes=("xbrl.3.5.2.4.5:roleRefDuplicate", "xbrl.3.5.2.4.5:arcroleRefDuplicate"))
+                                messageCodes=("xbrl.3.5.2.4.5:roleRefDuplicate", "xbrl.3.5.2.5.5:arcroleRefDuplicate"))
                         elif refUri not in roleTypeDefs:
-                            val.modelXbrl.error("xbrl.3.5.2.4.5:{0}NotDefined".format(elt.localName),
+                            val.modelXbrl.error("xbrl.{}.5:{}NotDefined".format(xbrlSection,elt.localName),
                                 _("%(element)s %(refURI)s is not defined"),
                                 modelObject=elt, element=elt.qname, refURI=refUri,
-                                messageCodes=("xbrl.3.5.2.4.5:roleRefNotDefined", "xbrl.3.5.2.4.5:arcroleRefNotDefined"))
+                                messageCodes=("xbrl.3.5.2.4.5:roleRefNotDefined", "xbrl.3.5.2.5.5:arcroleRefNotDefined"))
                         else:
                             refs[refUri] = hrefUri
                             roleTypeElt = elt.resolveUri(uri=hrefAttr)
                             if roleTypeElt not in roleTypeDefs[refUri]:
-                                val.modelXbrl.error("xbrl.3.5.2.4.5:{0}Mismatch".format(elt.localName),
+                                val.modelXbrl.error("xbrl.{}.5:{}Mismatch".format(xbrlSection,elt.localName),
                                     _("%(element)s %(refURI)s defined with different URI"),
                                     modelObject=(elt,roleTypeElt), element=elt.qname, refURI=refUri,
-                                messageCodes=("xbrl.3.5.2.4.5:roleRefMismatch", "xbrl.3.5.2.4.5:arcroleRefMismatch"))
+                                messageCodes=("xbrl.3.5.2.4.5:roleRefMismatch", "xbrl.3.5.2.5.5:arcroleRefMismatch"))
                             
                         
                         if val.validateEFMorGFMorSBRNL:
@@ -774,109 +782,13 @@ def checkElements(val, modelDocument, parent):
                                         modelObject=linkPart, element=linkPart.elementQname)
                     # TBD: add lang attributes content validation
             if xlinkRole is not None:
-                if xlinkRole == "" and xlinkType == "simple":
-                    val.modelXbrl.error("xbrl.3.5.1.3:emptySimpleLinkRole",
-                        _("Simple link role %(xlinkRole)s is empty"),
-                        modelObject=elt, xlinkRole=xlinkRole)
-                elif xlinkRole == "" and xlinkType == "extended" and \
-                     XbrlConst.isStandardResourceOrExtLinkElement(elt):
-                    val.modelXbrl.error("xbrl.3.5.3.3:emptyStdExtLinkRole",
-                        _("Standard extended link role %(xlinkRole)s is empty"),
-                        modelObject=elt, xlinkRole=xlinkRole)
-                elif not UrlUtil.isAbsolute(xlinkRole):
-                    if XbrlConst.isStandardResourceOrExtLinkElement(elt):
-                        val.modelXbrl.error("xbrl.3.5.2.4:roleNotAbsolute",
-                            _("Role %(xlinkRole)s is not absolute"),
-                            modelObject=elt, xlinkRole=xlinkRole)
-                    elif val.isGenericLink(elt):
-                        val.modelXbrl.error("xbrlgene:nonAbsoluteLinkRoleURI",
-                            _("Generic link role %(xlinkRole)s is not absolute"),
-                            modelObject=elt, xlinkRole=xlinkRole)
-                    elif val.isGenericResource(elt):
-                        val.modelXbrl.error("xbrlgene:nonAbsoluteResourceRoleURI",
-                            _("Generic resource role %(xlinkRole)s is not absolute"),
-                            modelObject=elt, xlinkRole=xlinkRole)
-                elif XbrlConst.isStandardRole(xlinkRole):
-                    if elt.namespaceURI == XbrlConst.link:
-                        errCode, definedRoles = standard_roles_definitions.get(elt.localName, standard_roles_other)
-                        if xlinkRole not in definedRoles:
-                            val.modelXbrl.error(errCode,
-                                _("Standard role %(xlinkRole)s is not defined for %(element)s"),
-                                modelObject=elt, xlinkRole=xlinkRole, element=elt.qname,
-                                messageCodes=("xbrl.5.2.2.2.2", "xbrl.5.2.3.2.1", "xbrl.4.11.1.2", "xbrl.4.3.4", "xbrl.3.5.3.7"))
-                else:  # custom role
-                    if xlinkRole not in val.roleRefURIs:
-                        if XbrlConst.isStandardResourceOrExtLinkElement(elt):
-                            val.modelXbrl.error("xbrl.3.5.2.4:missingRoleRef",
-                                _("Role %(xlinkRole)s is missing a roleRef"),
-                                modelObject=elt, xlinkRole=xlinkRole)
-                        elif val.isGenericLink(elt):
-                            val.modelXbrl.error("xbrlgene:missingRoleRefForLinkRole",
-                                _("Generic link role %(xlinkRole)s is missing a roleRef"),
-                                modelObject=elt, xlinkRole=xlinkRole)
-                        elif val.isGenericResource(elt):
-                            val.modelXbrl.error("xbrlgene:missingRoleRefForResourceRole",
-                                _("Generic resource role %(xlinkRole)s is missing a roleRef"),
-                                modelObject=elt, xlinkRole=xlinkRole)
-                    modelsRole = val.modelXbrl.roleTypes.get(xlinkRole)
-                    if modelsRole is None or len(modelsRole) == 0 or elt.qname not in modelsRole[0].usedOns:
-                        if XbrlConst.isStandardResourceOrExtLinkElement(elt):
-                            val.modelXbrl.error("xbrl.5.1.3.4:custRoleUsedOn",
-                                _("Role %(xlinkRole)s missing usedOn for %(element)s"),
-                                modelObject=elt, xlinkRole=xlinkRole, element=elt.qname)
-                        elif val.isGenericLink(elt):
-                            val.modelXbrl.error("xbrlgene:missingLinkRoleUsedOnValue",
-                                _("Generic link role %(xlinkRole)s missing usedOn for {2}"),
-                                modelObject=elt, xlinkRole=xlinkRole, element=elt.qname)
-                        elif val.isGenericResource(elt):
-                            val.modelXbrl.error("xbrlgene:missingResourceRoleUsedOnValue",
-                                _("Generic resource role %(xlinkRole)s missing usedOn for %(element)s"),
-                                modelObject=elt, xlinkRole=xlinkRole, element=elt.qname)
+                checkLinkRole(val, elt, elt.qname, xlinkRole, xlinkType, val.roleRefURIs)
             elif xlinkType == "extended" and val.validateSBRNL: # no @role on extended link
                 val.modelXbrl.error("SBR.NL.2.3.10.13",
                     _("Extended link %(element)s must have an xlink:role attribute"),
                     modelObject=elt, element=elt.elementQname)
             if elt.get("{http://www.w3.org/1999/xlink}arcrole") is not None:
-                arcrole = elt.get("{http://www.w3.org/1999/xlink}arcrole")
-                if arcrole == "" and \
-                    elt.get("{http://www.w3.org/1999/xlink}type") == "simple":
-                    val.modelXbrl.error("xbrl.3.5.1.4:emptyXlinkArcrole",
-                        _("Arcrole on %(element)s is empty"),
-                        modelObject=elt, element=elt.qname)
-                elif not UrlUtil.isAbsolute(arcrole):
-                    if XbrlConst.isStandardArcInExtLinkElement(elt):
-                        val.modelXbrl.error("xbrl.3.5.2.5:arcroleNotAbsolute",
-                            _("Arcrole %(arcrole)s is not absolute"),
-                            modelObject=elt, element=elt.qname, arcrole=arcrole)
-                    elif val.isGenericArc(elt):
-                        val.modelXbrl.error("xbrlgene:nonAbsoluteArcRoleURI",
-                            _("Generic arc arcrole %(arcrole)s is not absolute"),
-                            modelObject=elt, element=elt.qname, arcrole=arcrole)
-                elif not XbrlConst.isStandardArcrole(arcrole):
-                    if arcrole not in val.arcroleRefURIs:
-                        if XbrlConst.isStandardArcInExtLinkElement(elt):
-                            val.modelXbrl.error("xbrl.3.5.2.5:missingArcroleRef",
-                                _("Arcrole %(arcrole)s is missing an arcroleRef"),
-                                modelObject=elt, element=elt.qname, arcrole=arcrole)
-                        elif val.isGenericArc(elt):
-                            val.modelXbrl.error("xbrlgene:missingRoleRefForArcRole",
-                                _("Generic arc arcrole %(arcrole)s is missing an arcroleRef"),
-                                modelObject=elt, element=elt.qname, arcrole=arcrole)
-                    modelsRole = val.modelXbrl.arcroleTypes.get(arcrole)
-                    if modelsRole is None or len(modelsRole) == 0 or elt.qname not in modelsRole[0].usedOns:
-                        if XbrlConst.isStandardArcInExtLinkElement(elt):
-                            val.modelXbrl.error("xbrl.5.1.4.5:custArcroleUsedOn",
-                                _("Arcrole %(arcrole)s missing usedOn for %(element)s"),
-                                modelObject=elt, element=elt.qname, arcrole=arcrole)
-                        elif val.isGenericArc(elt):
-                            val.modelXbrl.error("xbrlgene:missingArcRoleUsedOnValue",
-                                _("Generic arc arcrole %(arcrole)s missing usedOn for %(element)s"),
-                                modelObject=elt, element=elt.qname, arcrole=arcrole)
-                elif XbrlConst.isStandardArcElement(elt):
-                    if XbrlConst.standardArcroleArcElement(arcrole) != elt.localName:
-                        val.modelXbrl.error("xbrl.5.1.4.5:custArcroleUsedOn",
-                            _("XBRL file {0} standard arcrole %(arcrole)s used on wrong arc %(element)s"),
-                            modelObject=elt, element=elt.qname, arcrole=arcrole)
+                checkArcrole(val, elt, elt.qname, elt.get("{http://www.w3.org/1999/xlink}arcrole"), val.arcroleRefURIs)
     
             #check resources
             if parentXlinkType == "extended":
@@ -956,7 +868,8 @@ def checkElements(val, modelDocument, parent):
                         if elt.get("{http://www.w3.org/1999/xlink}arcrole") != XbrlConst.factFootnote:
                             # must be in a nonDisplay div
                             if not any(inlineDisplayNonePattern.search(e.get("style") or "")
-                                       for e in XmlUtil.ancestors(elt, XbrlConst.xhtml, "div")):
+                                       for ns in (XbrlConst.xhtml, None)  # may be un-namespaced html
+                                       for e in XmlUtil.ancestors(elt, ns, "div")):
                                 val.modelXbrl.error(("EFM.N/A", "GFM:1.10.16"),
                                     _("Inline XBRL footnote %(footnoteID)s must be in non-displayable div due to arcrole %(arcrole)s"),
                                     modelObject=elt, footnoteID=elt.get("footnoteID"), 
@@ -971,7 +884,7 @@ def checkElements(val, modelDocument, parent):
                     else:
                         checkIxContinuationChain(elt)  
                     if not elt.xmlLang:
-                        val.modelXbrl.error("ix:footnoteID",
+                        val.modelXbrl.error(ixMsgCode("footnoteLang", elt, sect="validation"),
                             _("Inline XBRL footnotes require an in-scope xml:lang"),
                             modelObject=elt)
                 elif elt.localName == "fraction":
@@ -980,33 +893,40 @@ def checkElements(val, modelDocument, parent):
                                         for d in ixDescendants
                                         if d.localName not in ('numerator','denominator','fraction')]
                     if wrongDescendants:
-                        val.modelXbrl.error("ix:fractionDescendants",
+                        val.modelXbrl.error(ixMsgCode("fractionDescendants", elt, sect="validation"),
                             _("Inline XBRL fraction may only contain ix:numerator, ix:denominator, or ix:fraction, but contained %(wrongDescendants)s"),
                             modelObject=[elt] + wrongDescendants, wrongDescendants=", ".join(str(d.elementQname) for d in wrongDescendants))
                     ixDescendants = XmlUtil.descendants(elt, elt.namespaceURI, ('numerator','denominator'))
                     if not elt.isNil:
                         if set(d.localName for d in ixDescendants) != {'numerator','denominator'}:
-                            val.modelXbrl.error("ix:fractionTerms",
+                            val.modelXbrl.error(ixMsgCode("fractionTerms", elt, sect="validation"),
                                 _("Inline XBRL fraction must have one ix:numerator and one ix:denominator when not nil"),
                                 modelObject=[elt] + ixDescendants)
-                    elif ixDescendants: # nil and has fraction term elements
-                        val.modelXbrl.error("ix:fractionNilTerms",
-                            _("Inline XBRL fraction must not have ix:numerator or ix:denominator when nil"),
-                            modelObject=[elt] + ixDescendants)
+                    else:
+                        if ixDescendants: # nil and has fraction term elements
+                            val.modelXbrl.error(ixMsgCode("fractionNilTerms", elt, sect="validation"),
+                                _("Inline XBRL fraction must not have ix:numerator or ix:denominator when nil"),
+                                modelObject=[elt] + ixDescendants)
+                        e2 = XmlUtil.ancestor(elt, elt.namespaceURI, "fraction")
+                        if e2 is not None:
+                            val.modelXbrl.error(ixMsgCode("nestedFractionIsNil", elt, sect="validation"),
+                                _("Inline XBRL nil ix:fraction may not have an ancestor ix:fraction"),
+                                modelObject=(elt,e2))
                 elif elt.localName in ("denominator", "numerator"):
                     wrongDescendants = [d for d in XmlUtil.descendants(elt, '*', '*')]
                     if wrongDescendants:
-                        val.modelXbrl.error("ix:fractionTermDescendants",
+                        val.modelXbrl.error(ixMsgCode("fractionTermDescendants", elt, sect="validation"),
                             _("Inline XBRL fraction term ix:%(name)s may only contain text nodes, but contained %(wrongDescendants)s"),
                             modelObject=[elt] + wrongDescendants, name=elt.localName, wrongDescendants=", ".join(str(d.elementQname) for d in wrongDescendants))
                     if elt.get("format") is None and '-' in XmlUtil.innerText(elt):
-                        val.modelXbrl.error("ix:fractionTermNegative",
+                        val.modelXbrl.error(ixMsgCode("fractionTermNegative", elt, sect="validation"),
                             _("Inline XBRL ix:numerator or ix:denominator without format attribute must be non-negative"),
                             modelObject=elt)
                 elif elt.localName == "header":
                     if not any(inlineDisplayNonePattern.search(e.get("style") or "")
-                               for e in XmlUtil.ancestors(elt, XbrlConst.xhtml, "div")):
-                        val.modelXbrl.warning("ix:headerDisplayNone",
+                               for ns in (XbrlConst.xhtml, None)  # may be un-namespaced html
+                               for e in XmlUtil.ancestors(elt, ns, "div")):
+                        val.modelXbrl.warning(ixMsgCode("headerDisplayNone", elt, sect="validation"),
                             _("Warning, Inline XBRL ix:header is recommended to be nested in a <div> with style display:none"),
                             modelObject=elt)
                     val.ixdsHeaderCount += 1
@@ -1014,23 +934,23 @@ def checkElements(val, modelDocument, parent):
                     if elt.isNil:
                         e2 = XmlUtil.ancestor(elt, elt.namespaceURI, "nonFraction")
                         if e2 is not None:
-                            val.modelXbrl.error("ix:nestedNonFractionIsNil",
+                            val.modelXbrl.error(ixMsgCode("nestedNonFractionIsNil", elt, sect="validation"),
                                 _("Inline XBRL nil ix:nonFraction may not have an ancestor ix:nonFraction"),
                                 modelObject=(elt,e2))
                     else:
-                        d = XmlUtil.descendants(elt, '*', '*')
-                        if d and (len(d) != 1 or d[0].namespaceURI != elt.namespaceURI or d[0].localName != "nonFraction"):
-                            val.modelXbrl.error("ix:nonFractionChildren",
+                        c = XmlUtil.children(elt, '*', '*')
+                        if c and (len(c) != 1 or c[0].namespaceURI != elt.namespaceURI or c[0].localName != "nonFraction"):
+                            val.modelXbrl.error(ixMsgCode("nonFractionChildren", elt, sect="validation"),
                                 _("Inline XBRL nil ix:nonFraction may only have one child ix:nonFraction"),
-                                modelObject=[elt] + d)
-                        for e in d:
+                                modelObject=[elt] + c)
+                        for e in c:
                             if (e.namespaceURI == elt.namespaceURI and e.localName == "nonFraction" and
                                 (e.format != elt.format or e.scaleInt != elt.scaleInt or e.unitID != elt.unitID)):
-                                val.modelXbrl.error("ix:nestedNonFractionProperties",
+                                val.modelXbrl.error(ixMsgCode("nestedNonFractionProperties", e, sect="validation"),
                                     _("Inline XBRL nested ix:nonFraction must have matching format, scale, and unitRef properties"),
                                     modelObject=(elt, e))
                     if elt.get("format") is None and '-' in XmlUtil.innerText(elt):
-                        val.modelXbrl.error("ix:nonFractionNegative",
+                        val.modelXbrl.error(ixMsgCode("nonFractionNegative", elt, sect="validation"),
                             _("Inline XBRL ix:nonFraction without format attribute must be non-negative"),
                             modelObject=elt)
                 elif elt.localName == "nonNumeric":
@@ -1043,7 +963,7 @@ def checkElements(val, modelDocument, parent):
                     if not elt.tupleID:
                         if not elt.isNil:
                             if not XmlUtil.descendants(elt, elt.namespaceURI, ("fraction", "nonFraction", "nonNumeric",  "tuple")):
-                                val.modelXbrl.error("ix:tupleID",
+                                val.modelXbrl.error(ixMsgCode("tupleID", elt, sect="validation"),
                                     _("Inline XBRL non-nil tuples without ix:fraction, ix:nonFraction, ix:nonNumeric or ix:tuple descendants require a tupleID"),
                                     modelObject=elt)
                     else:
@@ -1303,11 +1223,108 @@ def checkElements(val, modelDocument, parent):
                             _('%(fileType)s must have only one comment node before schema element: "%(value)s"'),
                             modelObject=elt, fileType=modelDocument.gettype().title(), value=elt.text,
                             messageCodes=("SBR.NL.2.2.0.05", "SBR.NL.2.3.0.05"))
+                    
+def checkLinkRole(val, elt, linkEltQname, xlinkRole, xlinkType, roleRefURIs):
+    if xlinkRole == "" and xlinkType == "simple":
+        val.modelXbrl.error("xbrl.3.5.1.3:emptySimpleLinkRole",
+            _("Simple link role %(xlinkRole)s is empty"),
+            modelObject=elt, xlinkRole=xlinkRole)
+    elif xlinkRole == "" and xlinkType == "extended" and \
+         XbrlConst.isStandardResourceOrExtLinkElement(elt):
+        val.modelXbrl.error("xbrl.3.5.3.3:emptyStdExtLinkRole",
+            _("Standard extended link role %(xlinkRole)s is empty"),
+            modelObject=elt, xlinkRole=xlinkRole)
+    elif not UrlUtil.isAbsolute(xlinkRole):
+        if XbrlConst.isStandardResourceOrExtLinkElement(elt):
+            val.modelXbrl.error("xbrl.3.5.2.4:roleNotAbsolute",
+                _("Role %(xlinkRole)s is not absolute"),
+                modelObject=elt, xlinkRole=xlinkRole)
+        elif val.isGenericLink(elt):
+            val.modelXbrl.error("xbrlgene:nonAbsoluteLinkRoleURI",
+                _("Generic link role %(xlinkRole)s is not absolute"),
+                modelObject=elt, xlinkRole=xlinkRole)
+        elif val.isGenericResource(elt):
+            val.modelXbrl.error("xbrlgene:nonAbsoluteResourceRoleURI",
+                _("Generic resource role %(xlinkRole)s is not absolute"),
+                modelObject=elt, xlinkRole=xlinkRole)
+    elif XbrlConst.isStandardRole(xlinkRole):
+        if elt.namespaceURI == XbrlConst.link:
+            errCode, definedRoles = standard_roles_definitions.get(elt.localName, standard_roles_other)
+            if xlinkRole not in definedRoles:
+                val.modelXbrl.error(errCode,
+                    _("Standard role %(xlinkRole)s is not defined for %(element)s"),
+                    modelObject=elt, xlinkRole=xlinkRole, element=linkEltQname,
+                    messageCodes=("xbrl.5.2.2.2.2", "xbrl.5.2.3.2.1", "xbrl.4.11.1.2", "xbrl.4.3.4", "xbrl.3.5.3.7"))
+    else:  # custom role
+        if xlinkRole not in roleRefURIs:
+            if XbrlConst.isStandardResourceOrExtLinkElement(elt):
+                val.modelXbrl.error("xbrl.3.5.2.4:missingRoleRef",
+                    _("Role %(xlinkRole)s is missing a roleRef"),
+                    modelObject=elt, xlinkRole=xlinkRole)
+            elif val.isGenericLink(elt):
+                val.modelXbrl.error("xbrlgene:missingRoleRefForLinkRole",
+                    _("Generic link role %(xlinkRole)s is missing a roleRef"),
+                    modelObject=elt, xlinkRole=xlinkRole)
+            elif val.isGenericResource(elt):
+                val.modelXbrl.error("xbrlgene:missingRoleRefForResourceRole",
+                    _("Generic resource role %(xlinkRole)s is missing a roleRef"),
+                    modelObject=elt, xlinkRole=xlinkRole)
+        modelsRole = val.modelXbrl.roleTypes.get(xlinkRole)
+        if modelsRole is None or len(modelsRole) == 0 or linkEltQname not in modelsRole[0].usedOns:
+            if XbrlConst.isStandardResourceOrExtLinkElement(elt):
+                val.modelXbrl.error("xbrl.5.1.3.4:custRoleUsedOn",
+                    _("Role %(xlinkRole)s missing usedOn for %(element)s"),
+                    modelObject=elt, xlinkRole=xlinkRole, element=linkEltQname)
+            elif val.isGenericLink(elt):
+                val.modelXbrl.error("xbrlgene:missingLinkRoleUsedOnValue",
+                    _("Generic link role %(xlinkRole)s missing usedOn for {2}"),
+                    modelObject=elt, xlinkRole=xlinkRole, element=linkEltQname)
+            elif val.isGenericResource(elt):
+                val.modelXbrl.error("xbrlgene:missingResourceRoleUsedOnValue",
+                    _("Generic resource role %(xlinkRole)s missing usedOn for %(element)s"),
+                    modelObject=elt, xlinkRole=xlinkRole, element=linkEltQname)
+                
+def checkArcrole(val, elt, arcEltQname, arcrole, arcroleRefURIs):
+    if arcrole == "" and \
+        elt.get("{http://www.w3.org/1999/xlink}type") == "simple":
+        val.modelXbrl.error("xbrl.3.5.1.4:emptyXlinkArcrole",
+            _("Arcrole on %(element)s is empty"),
+            modelObject=elt, element=arcEltQname)
+    elif not UrlUtil.isAbsolute(arcrole):
+        if XbrlConst.isStandardArcInExtLinkElement(elt):
+            val.modelXbrl.error("xbrl.3.5.2.5:arcroleNotAbsolute",
+                _("Arcrole %(arcrole)s is not absolute"),
+                modelObject=elt, element=arcEltQname, arcrole=arcrole)
+        elif val.isGenericArc(elt):
+            val.modelXbrl.error("xbrlgene:nonAbsoluteArcRoleURI",
+                _("Generic arc arcrole %(arcrole)s is not absolute"),
+                modelObject=elt, element=arcEltQname, arcrole=arcrole)
+    elif not XbrlConst.isStandardArcrole(arcrole):
+        if arcrole not in arcroleRefURIs:
+            if XbrlConst.isStandardArcInExtLinkElement(elt):
+                val.modelXbrl.error("xbrl.3.5.2.5:missingArcroleRef",
+                    _("Arcrole %(arcrole)s is missing an arcroleRef"),
+                    modelObject=elt, element=arcEltQname, arcrole=arcrole)
+            elif val.isGenericArc(elt):
+                val.modelXbrl.error("xbrlgene:missingRoleRefForArcRole",
+                    _("Generic arc arcrole %(arcrole)s is missing an arcroleRef"),
+                    modelObject=elt, element=arcEltQname, arcrole=arcrole)
+        modelsRole = val.modelXbrl.arcroleTypes.get(arcrole)
+        if modelsRole is None or len(modelsRole) == 0 or arcEltQname not in modelsRole[0].usedOns:
+            if XbrlConst.isStandardArcInExtLinkElement(elt):
+                val.modelXbrl.error("xbrl.5.1.4.5:custArcroleUsedOn",
+                    _("Arcrole %(arcrole)s missing usedOn for %(element)s"),
+                    modelObject=elt, element=arcEltQname, arcrole=arcrole)
+            elif val.isGenericArc(elt):
+                val.modelXbrl.error("xbrlgene:missingArcRoleUsedOnValue",
+                    _("Generic arc arcrole %(arcrole)s missing usedOn for %(element)s"),
+                    modelObject=elt, element=arcEltQname, arcrole=arcrole)
+    elif XbrlConst.isStandardArcElement(elt):
+        if XbrlConst.standardArcroleArcElement(arcrole) != arcEltQname.localName:
+            val.modelXbrl.error("xbrl.5.1.4.5:custArcroleUsedOn",
+                _("XBRL file {0} standard arcrole %(arcrole)s used on wrong arc %(element)s"),
+                modelObject=elt, element=arcEltQname, arcrole=arcrole)
 
-    # dereference at end of processing children of instance linkbase
-    if isInstance or parentIsLinkbase:
-        val.roleRefURIs = {}
-        val.arcroleRefURIs = {}
 
 def checkIxContinuationChain(elt, chain=None):
     if chain is None:

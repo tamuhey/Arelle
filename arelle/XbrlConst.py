@@ -14,6 +14,8 @@ builtinAttributes = {qnXsiNil,
                      ,qname(xsi,"xsi:noNamespaceSchemaLocation")}
 xml = "http://www.w3.org/XML/1998/namespace"
 xbrli = "http://www.xbrl.org/2003/instance"
+eurofilingModelNamespace = "http://www.eurofiling.info/xbrl/ext/model"
+eurofilingModelPrefix = "model"
 qnNsmap = qname("nsmap") # artificial parent for insertion of xmlns in saving xml documents
 qnXbrliXbrl = qname("{http://www.xbrl.org/2003/instance}xbrli:xbrl")
 qnXbrliItem = qname("{http://www.xbrl.org/2003/instance}xbrli:item")
@@ -28,6 +30,8 @@ qnXbrliStringItemType = qname("{http://www.xbrl.org/2003/instance}xbrli:stringIt
 qnXbrliMonetaryItemType = qname("{http://www.xbrl.org/2003/instance}xbrli:monetaryItemType")
 qnXbrliDateItemType = qname("{http://www.xbrl.org/2003/instance}xbrli:dateItemType")
 qnXbrliDurationItemType = qname("{http://www.xbrl.org/2003/instance}xbrli:durationItemType")
+qnXbrliBooleanItemType = qname("{http://www.xbrl.org/2003/instance}xbrli:booleanItemType")
+qnXbrliQNameItemType = qname("{http://www.xbrl.org/2003/instance}xbrli:QNameItemType")
 qnXbrliPure = qname("{http://www.xbrl.org/2003/instance}xbrli:pure")
 qnXbrliShares = qname("{http://www.xbrl.org/2003/instance}xbrli:shares")
 qnInvalidMeasure = qname("{http://arelle.org}arelle:invalidMeasureQName")
@@ -217,9 +221,10 @@ qnAssertion = qname("{http://xbrl.org/2008/validation}validation:assertion")
 qnVariableSetAssertion = qname("{http://xbrl.org/2008/validation}validation:variableSetAssertion")
 qnAssertionSet = qname("{http://xbrl.org/2008/validation}validation:assertionSet")
 assertionSet = "http://xbrl.org/arcrole/2008/assertion-set"
-assertionSatisfiedSeverity = "http://xbrl.org/arcrole/2014/assertion-satisfied-severity"
-assertionUnsatisfiedSeverity = "http://xbrl.org/arcrole/2014/assertion-unsatisfied-severity"
-qnAssertionSeverity = qname("{http://xbrl.org/2014/assertion-severity}sev:severity")
+assertionUnsatisfiedSeverity = "http://xbrl.org/arcrole/PR/2015-11-18/assertion-unsatisfied-severity"
+qnAssertionSeverityError = qname("{http://xbrl.org/PR/2015-11-18/assertion-severity}sev:error")
+qnAssertionSeverityWarning = qname("{http://xbrl.org/PR/2015-11-18/assertion-severity}sev:warning")
+qnAssertionSeverityOk = qname("{http://xbrl.org/PR/2015-11-18/assertion-severity}sev:ok")
 
 acf = "http://xbrl.org/2010/filter/aspect-cover"
 qnAspectCover = qname("{http://xbrl.org/2010/filter/aspect-cover}acf:aspectCover")
@@ -441,6 +446,9 @@ qnTablePredefinedAxis2011 = qname("{http://xbrl.org/2011/table}table:predefinedA
 qnTableSelectionAxis2011 = qname("{http://xbrl.org/2011/table}table:selectionAxis")
 qnTableTupleAxis2011 = qname("{http://xbrl.org/2011/table}table:tupleAxis")
 
+booleanValueTrue = "true"
+booleanValueFalse = "false"
+
 # Eurofiling 2010 table linkbase
 euRend = "http://www.eurofiling.info/2010/rendering"
 euTableAxis = "http://www.eurofiling.info/arcrole/2010/table-axis"
@@ -478,7 +486,8 @@ errMsgPrefixNS = {
     "utre": "http://www.xbrl.org/2009/utr/errors",
     "enumte": "http://xbrl.org/2014/extensible-enumerations/taxonomy-errors",
     "enumie": "http://xbrl.org/2014/extensible-enumerations/instance-errors",
-    "seve": "http://xbrl.org/2014/assertion-severity/error"
+    "seve": "http://xbrl.org/PR/2015-11-18/assertion-severity/error",
+    "tpe": "http://xbrl.org/WGWD/YYYY-MM-DD/taxonomy-package/errors"
     }
 
 arcroleGroupDetect = "*detect*"
@@ -641,14 +650,17 @@ def isDefinitionOrXdtArcrole(arcrole):
 def isStandardResourceOrExtLinkElement(element):
     return element.namespaceURI == link and element.localName in {
           "definitionLink", "calculationLink", "presentationLink", "labelLink", "referenceLink", "footnoteLink", 
-          "label", "footnote", "reference"}
+          "label", "footnote", "reference"} or \
+          element.qname == qnIXbrl11Relationship
     
 def isStandardArcElement(element):
     return element.namespaceURI == link and element.localName in {
-          "definitionArc", "calculationArc", "presentationArc", "labelArc", "referenceArc", "footnoteArc"}
+          "definitionArc", "calculationArc", "presentationArc", "labelArc", "referenceArc", "footnoteArc"} or \
+          element.qname == qnIXbrl11Relationship
         
 def isStandardArcInExtLinkElement(element):
-    return isStandardArcElement(element) and isStandardResourceOrExtLinkElement(element.getparent())
+    return ((isStandardArcElement(element) and isStandardResourceOrExtLinkElement(element.getparent())) or
+            element.qname == qnIXbrl11Relationship)
 
 standardExtLinkQnames = {qname("{http://www.xbrl.org/2003/linkbase}definitionLink"), 
                          qname("{http://www.xbrl.org/2003/linkbase}calculationLink"), 
@@ -729,8 +741,7 @@ def isFormulaArcrole(arcrole):
                        "http://xbrl.org/arcrole/2010/function-implementation",
                        "http://xbrl.org/arcrole/2010/assertion-satisfied-message",
                        "http://xbrl.org/arcrole/2010/assertion-unsatisfied-message",
-                       "http://xbrl.org/arcrole/2014/assertion-satisfied-severity",
-                       "http://xbrl.org/arcrole/2014/assertion-unsatisfied-severity",
+                       "http://xbrl.org/arcrole/PR/2015-11-18/assertion-unsatisfied-severity",
                        "http://xbrl.org/arcrole/2010/instance-variable",
                        "http://xbrl.org/arcrole/2010/formula-instance",
                        "http://xbrl.org/arcrole/2010/function-implementation",

@@ -55,6 +55,7 @@ class DialogPluginManager(Toplevel):
         self.pluginConfigChanged = False
         self.uiClassMethodsChanged = False
         self.modelClassesChanged = False
+        self.customTransformsChanged = False
         self.disclosureSystemTypesChanged = False
         self.hostSystemFeaturesChanged = False
         self.modulesWithNewerFileDates = modulesWithNewerFileDates
@@ -267,11 +268,25 @@ class DialogPluginManager(Toplevel):
         self.moduleSelect()  # clear out prior selection
 
     def ok(self, event=None):
+        # check for orphaned classes (for which there is no longer a corresponding module)
+        _moduleNames = self.pluginConfig.get("modules", {}).keys()
+        _orphanedClassNames = set()
+        for className, moduleList in self.pluginConfig.get("classes", {}).items():
+            for _moduleName in moduleList.copy():
+                if _moduleName not in _moduleNames: # it's orphaned
+                    moduleList.remove(_moduleName)
+                    self.pluginConfigChanged = True
+            if not moduleList: # now orphaned
+                _orphanedClassNames.add(className)
+                self.pluginConfigChanged = True
+        for _orphanedClassName in _orphanedClassNames:
+            del self.pluginConfig["classes"][_orphanedClassName]
+        
         if self.pluginConfigChanged:
             PluginManager.pluginConfig = self.pluginConfig
             PluginManager.pluginConfigChanged = True
             PluginManager.reset()  # force reloading of modules
-        if self.uiClassMethodsChanged or self.modelClassesChanged or self.disclosureSystemTypesChanged or self.hostSystemFeaturesChanged:  # may require reloading UI
+        if self.uiClassMethodsChanged or self.modelClassesChanged or self.customTransformsChanged or self.disclosureSystemTypesChanged or self.hostSystemFeaturesChanged:  # may require reloading UI
             affectedItems = ""
             if self.uiClassMethodsChanged:
                 affectedItems += _("menus of the user interface")
@@ -279,6 +294,10 @@ class DialogPluginManager(Toplevel):
                 if affectedItems:
                     affectedItems += _(" and ")
                 affectedItems += _("model objects of the processor")
+            if self.customTransformsChanged:
+                if affectedItems:
+                    affectedItems += _(" and ")
+                affectedItems += _("custom transforms")
             if self.disclosureSystemTypesChanged:
                 if affectedItems:
                     affectedItems += _(" and ")
@@ -311,9 +330,9 @@ class DialogPluginManager(Toplevel):
             name = moduleInfo["name"]
             self.moduleNameLabel.config(text=name)
             self.moduleAuthorHdr.config(state=ACTIVE)
-            self.moduleAuthorLabel.config(text=moduleInfo["author"])
+            self.moduleAuthorLabel.config(text=moduleInfo.get("author"))
             self.moduleDescrHdr.config(state=ACTIVE)
-            self.moduleDescrLabel.config(text=moduleInfo["description"])
+            self.moduleDescrLabel.config(text=moduleInfo.get("description"))
             self.moduleClassesHdr.config(state=ACTIVE)
             self.moduleClassesLabel.config(text=', '.join(moduleInfo["classMethods"]))
             self.moduleVersionHdr.config(state=ACTIVE)
@@ -379,15 +398,16 @@ class DialogPluginManager(Toplevel):
                         moduleInfo = PluginManager.moduleModuleInfo(fPath)
                         if moduleInfo:
                             choices.append((indent + f, 
-                                            "name: {}\ndescription: {}\n version {}".format(
+                                            "name: {}\ndescription: {}\nversion: {}\nlicense: {}".format(
                                                         moduleInfo["name"],
                                                         moduleInfo["description"],
-                                                        moduleInfo.get("version")), 
-                                            fPath, moduleInfo["name"], moduleInfo.get("version"), moduleInfo["description"]))
+                                                        moduleInfo.get("version"),
+                                                        moduleInfo.get("license")), 
+                                            fPath, moduleInfo["name"], moduleInfo.get("version"), moduleInfo["description"], moduleInfo.get("license")))
                             dirHasEntries = True
-                    if os.path.isdir(fPath):
+                    if os.path.isdir(fPath) and f not in ("DQC_US_Rules",):
                         if selectChoices(fPath, indent=indent + "   ") and not moduleInfo:
-                            choices.insert(dirInsertPoint, (indent + f,None,None,None,None,None))
+                            choices.insert(dirInsertPoint, (indent + f,None,None,None,None,None,None))
             return dirHasEntries
         selectChoices(self.cntlr.pluginDir)
         selectedPath = DialogOpenArchive.selectPlugin(self, choices)
@@ -447,6 +467,8 @@ class DialogPluginManager(Toplevel):
                 self.uiClassMethodsChanged = True  # may require reloading UI
             elif classMethod == "ModelObjectFactory.ElementSubstitutionClasses":
                 self.modelClassesChanged = True # model object factor classes changed
+            elif classMethod == "ModelManager.LoadCustomTransforms":
+                self.customTransformsChanged = True
             elif classMethod == "DisclosureSystem.Types":
                 self.disclosureSystemTypesChanged = True # disclosure system types changed
             elif classMethod.startswith("Proxy."):
@@ -550,8 +572,8 @@ class DialogPluginManager(Toplevel):
                     
     def enableDisableAll(self, doEnable):
         for module in self.pluginConfig["modules"]:
-            if not module.get("isImported"):
-                moduleInfo = self.pluginConfig["modules"][module]
+            moduleInfo = self.pluginConfig["modules"][module]
+            if not moduleInfo.get("isImported"):
                 def _enableDisableAll(moduleInfo):
                     if doEnable:
                         moduleInfo["status"] = "enabled"

@@ -72,7 +72,7 @@ class Cntlr:
         URL string of application download file (on arelle.org server).  Usually redirected to latest released application installable module.
         
     """
-    __version__ = "1.0.0"
+    __version__ = "1.6.0"
     
     def __init__(self, hasGui=False, logFileName=None, logFileMode=None, logFileEncoding=None, logFormat=None):
         self.hasWin32gui = False
@@ -237,13 +237,13 @@ class Cntlr:
         self.webCache = WebCache(self, self.config.get("proxySettings"))
         
         # start plug in server (requres web cache initialized, but not logger)
-        PluginManager.init(self)
+        PluginManager.init(self, loadPluginConfig=hasGui)
 
         # requires plug ins initialized
         self.modelManager = ModelManager.initialize(self)
  
         # start taxonomy package server (requres web cache initialized, but not logger)
-        PackageManager.init(self)
+        PackageManager.init(self, loadPackagesConfig=hasGui)
  
         self.startLogging(logFileName, logFileMode, logFileEncoding, logFormat)
         
@@ -324,7 +324,7 @@ class Cntlr:
         if self.logger:
             self.logger.messageCodeFilter = re.compile(logCodeFilter) if logCodeFilter else None
                         
-    def addToLog(self, message, messageCode="", messageArgs=None, file="", level=logging.INFO):
+    def addToLog(self, message, messageCode="", messageArgs=None, file="", refs=[], level=logging.INFO):
         """Add a simple info message to the default logger
            
         :param message: Text of message to add to log.
@@ -341,7 +341,6 @@ class Cntlr:
                 args = (message, messageArgs)
             else:
                 args = (message,)  # pass no args if none provided
-            refs = []
             if isinstance(file, (tuple,list,set)):
                 for _file in file: 
                     refs.append( {"href": _file} )
@@ -516,6 +515,17 @@ class Cntlr:
         except Exception:
             pass
         return 0
+    
+def logRefsFileLines(refs):
+    fileLines = defaultdict(set)
+    for ref in refs:
+        href = ref.get("href")
+        if href:
+            fileLines[href.partition("#")[0]].add(ref.get("sourceLine", 0))
+    return ", ".join(file + " " + ', '.join(str(line) 
+                                            for line in sorted(lines, key=lambda l: l)
+                                            if line)
+                    for file, lines in sorted(fileLines.items()))
 
 class LogFormatter(logging.Formatter):
     def __init__(self, fmt=None, datefmt=None):
@@ -523,15 +533,7 @@ class LogFormatter(logging.Formatter):
         
     def fileLines(self, record):
         # provide a file parameter made up from refs entries
-        fileLines = defaultdict(set)
-        for ref in record.refs:
-            href = ref.get("href")
-            if href:
-                fileLines[href.partition("#")[0]].add(ref.get("sourceLine", 0))
-        return ", ".join(file + " " + ', '.join(str(line) 
-                                                for line in sorted(lines, key=lambda l: l)
-                                                if line)
-                        for file, lines in sorted(fileLines.items()))
+        return logRefsFileLines(record.refs)
         
     def format(self, record):
         record.file = self.fileLines(record)
@@ -725,7 +727,7 @@ class LogToXmlHandler(LogHandlerWithXml):
             entries.append(entry)
         if clearLogBuffer:
             self.clearLogBuffer()
-        return json.dumps( {"log": entries}, ensure_ascii=False, indent=1 )
+        return json.dumps( {"log": entries}, ensure_ascii=False, indent=1, default=str )
     
     def getLines(self, clearLogBuffer=True):
         """Returns a list of the message strings in the log buffer, and clears the buffer.

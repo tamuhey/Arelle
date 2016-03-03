@@ -172,7 +172,7 @@ def innerTextNodes(element, ixExclude, ixEscape, ixContinuation):
            not ixExclude or 
            not (child.localName == "exclude" and child.namespaceURI in ixbrlAll)):
             firstChild = True
-            for nestedText in innerTextNodes(child, ixExclude, ixEscape, ixContinuation):
+            for nestedText in innerTextNodes(child, ixExclude, ixEscape, False): # nested elements don't participate in continuation chain
                 if firstChild and ixEscape:
                     yield escapedNode(child, True, False)
                     firstChild = False
@@ -506,6 +506,9 @@ def addChild(parent, childName1, childName2=None, attributes=None, text=None, af
                 child.set(name, xsString(None, None, value) )
     if text is not None:
         child.text = xsString(None, None, text)
+        # check if the text is a QName and add the namespace if needed!
+        if isinstance(text, QName):
+            addQnameValue(modelDocument, text)
     child.init(modelDocument)
     return child
 
@@ -544,33 +547,40 @@ def copyChildren(parent, elt):
         if isinstance(childNode,ModelObject):
             copyNodes(parent, childNode)
 
-def copyIxFootnoteHtml(sourceXml, targetHtml, withText=False):
-    if withText:
-        _tx = sourceXml.text
-        if _tx:
-            try: # if target has a last child already with a tail, add to tail instead of to text
-                targetLastchild = next(targetHtml.iterchildren(reversed=True))
-                targetLastchild.tail = (targetLastchild.tail or "") + _tx
-            except StopIteration: # no children
-                targetHtml.text = (targetHtml.text or "") + _tx
-    for sourceChild in sourceXml.iterchildren():
-        if not sourceChild.namespaceURI in ixbrlAll:
-            # ensure xhtml has an xmlns
-            if sourceChild.namespaceURI == xhtml and xhtml not in targetHtml.nsmap.values():
-                setXmlns(targetHtml.getroottree(), "xhtml", xhtml)
-            targetChild = etree.SubElement(targetHtml, sourceChild.tag)
-            for attrTag, attrValue in sourceChild.items():
-                targetChild.set(attrTag, attrValue)
-            copyIxFootnoteHtml(sourceChild, targetChild, withText=withText)
-        else:
-            copyIxFootnoteHtml(sourceChild, targetHtml, withText=withText)
+def copyIxFootnoteHtml(sourceXml, targetHtml, targetModelDocument=None, withText=False, isContinChainElt=True):
+    if not (isinstance(sourceXml,ModelObject) and sourceXml.localName == "exclude" and sourceXml.namespaceURI in ixbrlAll):
+        if withText:
+            _tx = sourceXml.text
+            if _tx:
+                try: # if target has a last child already with a tail, add to tail instead of to text
+                    targetLastchild = next(targetHtml.iterchildren(reversed=True))
+                    targetLastchild.tail = (targetLastchild.tail or "") + _tx
+                except StopIteration: # no children
+                    targetHtml.text = (targetHtml.text or "") + _tx
+        for sourceChild in sourceXml.iterchildren():
+            if isinstance(sourceChild,ModelObject):
+                if not sourceChild.namespaceURI in ixbrlAll:
+                    # ensure xhtml has an xmlns
+                    if targetModelDocument is not None and sourceChild.namespaceURI == xhtml and xhtml not in targetHtml.nsmap.values():
+                        setXmlns(targetModelDocument, "xhtml", xhtml)
+                    targetChild = etree.SubElement(targetHtml, sourceChild.tag)
+                    for attrTag, attrValue in sourceChild.items():
+                        targetChild.set(attrTag, attrValue)
+                    copyIxFootnoteHtml(sourceChild, targetChild, targetModelDocument, withText=withText, isContinChainElt=False)
+                else:
+                    copyIxFootnoteHtml(sourceChild, targetHtml, targetModelDocument, withText=withText, isContinChainElt=False)
     if withText:
         _tl = sourceXml.tail
         if _tl:
-            targetHtml.tail = (targetHtml.tail or "") + _tl
-    contAt = getattr(sourceXml, "_continuationElement", None)
-    if contAt is not None:
-        copyIxFootnoteHtml(contAt, targetHtml, withText=withText)
+            try: # if target has a last child already with a tail, add to tail instead of to text
+                targetLastchild = next(targetHtml.iterchildren(reversed=True))
+                targetLastchild.tail = (targetLastchild.tail or "") + _tl
+            except StopIteration: # no children
+                targetHtml.text = (targetHtml.text or "") + _tl
+    if isContinChainElt: # for inline continuation chain elements, follow chain (but not for nested elements)
+        contAt = getattr(sourceXml, "_continuationElement", None)
+        if contAt is not None:
+            copyIxFootnoteHtml(contAt, targetHtml, targetModelDocument, withText=withText, isContinChainElt=True)
         
 def addComment(parent, commentText):
     comment = str(commentText)
@@ -579,9 +589,11 @@ def addComment(parent, commentText):
     child = etree.Comment( comment )
     parent.append(child)
     
-def addProcessingInstruction(parent, piTarget, piText, insertBeforeChildElements=True):
+def addProcessingInstruction(parent, piTarget, piText, insertBeforeChildElements=True, insertBeforeParentElement=False):
     child = etree.ProcessingInstruction(piTarget, piText)
-    if insertBeforeChildElements:
+    if insertBeforeParentElement:
+        parent.addprevious(child)
+    elif insertBeforeChildElements:
         i = 0 # find position to insert after other comments and PIs but before any element
         for i, _otherChild in enumerate(parent):
             if not isinstance(_otherChild, (etree._Comment, etree._ProcessingInstruction)):
@@ -759,6 +771,8 @@ def xpointerElement(modelDocument, fragmentIdentifier):
     return None
 
 def elementFragmentIdentifier(element):
+    if getattr(element, "sourceElement", None) is not None: # prototype element
+        return elementFragmentIdentifier(element.sourceElement)
     if isinstance(element,etree.ElementBase) and element.get('id'):
         return element.get('id')  # "short hand pointer" for element fragment identifier
     else:
@@ -780,6 +794,18 @@ def elementFragmentIdentifier(element):
         location = "/".join(childSequence)
         return "element({0})".format(location)
     
+def elementIndex(element):
+    if isinstance(element,etree.ElementBase):
+        try:
+            return element._elementSequence # set by loader in some element hierarchies
+        except AttributeError:
+            siblingPosition = 1
+            for sibling in element.itersiblings(preceding=True):
+                if isinstance(sibling,etree.ElementBase):
+                    siblingPosition += 1
+            return siblingPosition
+    return 0
+    
 def elementChildSequence(element):
     childSequence = [""] # "" represents document element for / (root) on the join below
     while element is not None:
@@ -795,11 +821,16 @@ def elementChildSequence(element):
         element = element.getparent()
     return "/".join(childSequence)
                         
-def xmlstring(elt, stripXmlns=False, prettyPrint=False, contentsOnly=False):
+def xmlstring(elt, stripXmlns=False, prettyPrint=False, contentsOnly=False, includeText=False):
     if contentsOnly:
-        return ('\n' if prettyPrint else '').join(
+        if includeText:
+            _text = elt.text
+            _tail = elt.tail
+        else:
+            _text = _tail = ""
+        return _text + ('\n' if prettyPrint else '').join(
             xmlstring(child, stripXmlns, prettyPrint)
-            for child in elt.iterchildren())
+            for child in elt.iterchildren()) + _tail
     xml = etree.tostring(elt, encoding=_STR_UNICODE, pretty_print=prettyPrint)
     if not prettyPrint:
         xml = xml.strip()
