@@ -405,7 +405,7 @@ setup(
     name='Arelle',
     version=get_version(),
     description='An open source XBRL platform',
-    long_description=open('README.md').read(),
+    long_description="insert long description here (open('README.md').read(),)",
     author='arelle.org',
     author_email='support@arelle.org',
     url='http://www.arelle.org',
