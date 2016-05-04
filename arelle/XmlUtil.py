@@ -155,13 +155,13 @@ def innerText(element, ixExclude=False, ixEscape=False, ixContinuation=False, st
         if strip:
             return text.strip()
         return text
-    except TypeError:
+    except (AttributeError, TypeError):
         return ""
 
 def innerTextList(element, ixExclude=False, ixEscape=False, ixContinuation=False):   
     try:
         return ", ".join(text.strip() for text in innerTextNodes(element, ixExclude, ixEscape, ixContinuation) if len(text.strip()) > 0)
-    except TypeError:
+    except (AttributeError, TypeError):
         return ""
 
 def innerTextNodes(element, ixExclude, ixEscape, ixContinuation):
@@ -822,6 +822,8 @@ def elementChildSequence(element):
     return "/".join(childSequence)
                         
 def xmlstring(elt, stripXmlns=False, prettyPrint=False, contentsOnly=False, includeText=False):
+    if elt is None:
+        return ""
     if contentsOnly:
         if includeText:
             _text = elt.text or ""

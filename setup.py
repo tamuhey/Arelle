@@ -213,7 +213,7 @@ if sys.platform in ('darwin', 'linux2', 'linux', 'sunos5'):
         '.',  # note that new setuptools finds plugin and lib unwanted stuff
         exclude=['*.plugin.*', '*.lib.*']
     )
-    dataFiles = None 
+    dataFiles = []
     includeFiles = [
         ('arelle/config','config'),
         ('arelle/doc','doc'),
@@ -229,9 +229,9 @@ if sys.platform in ('darwin', 'linux2', 'linux', 'sunos5'):
     ]
     if sys.platform == 'darwin':
         includeFiles.append(('arelle/scripts-macOS','scripts'))
-        # copy mac ports tcl and tk into build
-        includeFiles.append(('/opt/local/lib/tcl8.6','tcl8.6'))
-        includeFiles.append(('/opt/local/lib/tk8.6','tk8.6'))
+        # copy tck and tk built as described: https://www.tcl.tk/doc/howto/compile.html#mac
+        #includeFiles.append(('/Library/Frameworks/Tcl.framework/Versions/8.6','tcl8.6'))
+        #includeFiles.append(('/Library/Frameworks/Tk.framework/Versions/8.6','tk8.6'))
     else: 
         includeFiles.append(('arelle/scripts-unix','scripts'))
         if os.path.exists("/etc/redhat-release"):
@@ -279,6 +279,8 @@ if sys.platform in ('darwin', 'linux2', 'linux', 'sunos5'):
             'pyparsing',
             'matplotlib'
         ]
+        import matplotlib
+        dataFiles += matplotlib.get_py2exe_datafiles()
 
     if sys.platform != 'sunos5':
         try:
@@ -366,7 +368,7 @@ elif sys.platform == 'win32':
         build_exe={
             "include_files": win32includeFiles,
             "include_msvcr": True,  # include MSVCR100
-            "icon": 'arelle\\images\\arelle16x16and32x32.ico',
+            # "icon": 'arelle\\images\\arelle16x16and32x32.ico',
             "packages": packages,
             #
             # rdflib & isodate egg files: rename .zip cpy lib & egg-info
@@ -381,6 +383,7 @@ elif sys.platform == 'win32':
         Executable(
             script="arelleGUI.pyw",
             base="Win32GUI",
+            icon='arelle\\images\\arelle16x16and32x32.ico',
         ),
         Executable(
             script="arelleCmdLine.py",
