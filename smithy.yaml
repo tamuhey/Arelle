@@ -1,0 +1,15 @@
+project: arelle
+language: wf_arelle
+runner_image: docker.webfilings.org/devops/smithy-runner:python34-327-2
+
+env:
+  - PATH=/tmp/virtualenv/bin:$PATH
+  - PYTHONPATH=.
+
+script:
+  - ./smithy_arelle.sh
+
+
+artifacts:
+  pypi:
+    - /dist/Arelle*.tar.gz
