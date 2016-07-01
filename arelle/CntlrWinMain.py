@@ -710,9 +710,7 @@ class CntlrWinMain (Cntlr.Cntlr):
                 if not isHttpUrl(filename):
                     self.config["fileOpenDir"] = os.path.dirname(filesource.baseurl if filesource.isArchive else filename)
             self.updateFileHistory(filename, importToDTS)
-            thread = threading.Thread(target=lambda: self.backgroundLoadXbrl(filesource,importToDTS,selectTopView))
-            thread.daemon = True
-            thread.start()
+            thread = threading.Thread(target=self.backgroundLoadXbrl, args=(filesource,importToDTS,selectTopView), daemon=True).start()
             
     def webOpen(self, *ignore):
         if not self.okayToContinue():
@@ -725,9 +723,7 @@ class CntlrWinMain (Cntlr.Cntlr):
                 from arelle import DialogOpenArchive
                 url = DialogOpenArchive.askArchiveFile(self, filesource)
             self.updateFileHistory(url, False)
-            thread = threading.Thread(target=lambda: self.backgroundLoadXbrl(filesource,False,False))
-            thread.daemon = True
-            thread.start()
+            thread = threading.Thread(target=self.backgroundLoadXbrl, args=(filesource,False,False), daemon=True).start()
             
     def importWebOpen(self, *ignore):
         if not self.modelManager.modelXbrl or self.modelManager.modelXbrl.modelDocument.type not in (
@@ -815,8 +811,8 @@ class CntlrWinMain (Cntlr.Cntlr):
                                                                treeColHdr="Table Index", showLinkroles=False, showColumns=False, expandAll=True)
                 elif modelXbrl.modelDocument.type in (ModelDocument.Type.INSTANCE, ModelDocument.Type.INLINEXBRL, ModelDocument.Type.INLINEXBRLDOCUMENTSET):
                     currentAction = "table index view"
-                    firstTableLinkroleURI, indexLinkroleURI = TableStructure.evaluateTableIndex(modelXbrl)
-                    if firstTableLinkroleURI:
+                    firstTableLinkroleURI, indexLinkroleURI = TableStructure.evaluateTableIndex(modelXbrl, lang=self.labelLang)
+                    if firstTableLinkroleURI is not None:
                         ViewWinRelationshipSet.viewRelationshipSet(modelXbrl, self.tabWinTopLeft, ("Tables", (XbrlConst.parentChild,)), lang=self.labelLang, linkrole=indexLinkroleURI,
                                                                    treeColHdr="Table Index", showRelationships=False, showColumns=False, expandAll=False, hasTableIndex=True)
                 '''
@@ -836,7 +832,7 @@ class CntlrWinMain (Cntlr.Cntlr):
                 if modelXbrl.modelDocument.type in (ModelDocument.Type.INSTANCE, ModelDocument.Type.INLINEXBRL, ModelDocument.Type.INLINEXBRLDOCUMENTSET):
                     currentAction = "table view of facts"
                     if not modelXbrl.hasTableRendering: # table view only if not grid rendered view
-                        ViewWinFactTable.viewFacts(modelXbrl, self.tabWinTopRt, linkrole=firstTableLinkroleURI, lang=self.labelLang, expandAll=firstTableLinkroleURI)
+                        ViewWinFactTable.viewFacts(modelXbrl, self.tabWinTopRt, linkrole=firstTableLinkroleURI, lang=self.labelLang, expandAll=firstTableLinkroleURI is not None)
                         if topView is None: topView = modelXbrl.views[-1]
                     currentAction = "tree/list of facts"
                     ViewWinFactList.viewFacts(modelXbrl, self.tabWinTopRt, lang=self.labelLang)
@@ -869,6 +865,7 @@ class CntlrWinMain (Cntlr.Cntlr):
             if selectTopView and topView:
                 topView.select()
             self.currentView = topView
+            currentAction = "plugin method CntlrWinMain.Xbrl.Loaded"
             for xbrlLoadedMethod in pluginClassMethods("CntlrWinMain.Xbrl.Loaded"):
                 xbrlLoadedMethod(self, modelXbrl, attach) # runs in GUI thread
         except Exception as err:
@@ -927,9 +924,7 @@ class CntlrWinMain (Cntlr.Cntlr):
                 if modelXbrl.modelDocument.type in ModelDocument.Type.TESTCASETYPES:
                     for pluginXbrlMethod in pluginClassMethods("Testcases.Start"):
                         pluginXbrlMethod(self, None, modelXbrl)
-                thread = threading.Thread(target=lambda: self.backgroundValidate())
-                thread.daemon = True
-                thread.start()
+                thread = threading.Thread(target=self.backgroundValidate, daemon=True).start()
             
     def backgroundValidate(self):
         startedAt = time.time()
@@ -961,9 +956,7 @@ class CntlrWinMain (Cntlr.Cntlr):
             return False
         self.config["versioningReportDir"] = os.path.dirname(versReportFile)
         self.saveConfig()
-        thread = threading.Thread(target=lambda: self.backgroundCompareDTSes(versReportFile))
-        thread.daemon = True
-        thread.start()
+        thread = threading.Thread(target=self.backgroundCompareDTSes, args=(versReportFile,), daemon=True).start()
             
     def backgroundCompareDTSes(self, versReportFile):
         startedAt = time.time()
@@ -1042,9 +1035,7 @@ class CntlrWinMain (Cntlr.Cntlr):
                 self.showStatus(_("Clearing internet cache"))
                 self.webCache.clear()
                 self.showStatus(_("Internet cache cleared"), 5000)
-            thread = threading.Thread(target=lambda: backgroundClearCache())
-            thread.daemon = True
-            thread.start()
+            thread = threading.Thread(target=backgroundClearCache, daemon=True).start()
             
     def manageWebCache(self):
         if sys.platform.startswith("win"):
@@ -1236,7 +1227,8 @@ class CntlrWinMain (Cntlr.Cntlr):
                               "\n   May include installable plug-in modules with author-specific license terms"
                               )
                             .format(self.__version__, self.systemWordSize, Version.version,
-                                    _("\n   Bottle \u00a9 2011-2013 Marcel Hellkamp") if self.hasWebServer else "",
+                                    _("\n   Bottle \u00a9 2011-2013 Marcel Hellkamp"
+                                      "\n   CherryPy \u00a9 2002-2013 CherryPy Team") if self.hasWebServer else "",
                                     sys.version_info, etree.LXML_VERSION, Tcl().eval('info patchlevel')
                                     ))
 
@@ -1450,6 +1442,18 @@ def main():
                 _tcltkDir = os.path.join(_resourcesDir, _tcltk + _tcltkVer)
                 if os.path.exists(_tcltkDir): 
                     os.environ[_tcltk.upper() + "_LIBRARY"] = _tcltkDir
+    elif sys.platform == 'win32':
+        if getattr(sys, 'frozen', False): # windows requires fake stdout/stderr because no write/flush (e.g., EdgarRenderer LocalViewer pybottle)
+            class dummyFrozenStream:
+                def __init__(self): pass
+                def write(self,data): pass
+                def read(self,data): pass
+                def flush(self): pass
+                def close(self): pass
+            sys.stdout = dummyFrozenStream()
+            sys.stderr = dummyFrozenStream()
+            sys.stdin = dummyFrozenStream()
+        
     global restartMain
     while restartMain:
         restartMain = False

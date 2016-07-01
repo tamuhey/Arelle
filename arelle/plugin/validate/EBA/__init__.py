@@ -15,6 +15,7 @@ from arelle.ModelRelationshipSet import ModelRelationshipSet
 from arelle.ModelValue import qname, qnameEltPfxName
 from arelle.ValidateUtr import ValidateUtr
 from arelle.XbrlConst import qnEnumerationItemType
+from arelle.ModelInstanceObject import ModelFact
 try:
     import regex as re
 except ImportError:
@@ -89,7 +90,7 @@ def validateSetup(val, parameters=None, *args, **kwargs):
                         val.isEIOPA_2_0_1 = _match.group(1) >= "2015-10-21"
                         break
                     else:
-                        val.modelXbrl.error("EIOPA.S.1.5.a/EIOPA.S.1.5.b",
+                        val.modelXbrl.error( ("EBA.S.1.5.a/EBA.S.1.5.b", "EIOPA.S.1.5.a/EIOPA.S.1.5.b"),
                                         _('The link:schemaRef element in submitted instances MUST resolve to the full published entry point URL, this schemaRef is missing date portion: %(schemaRef)s.'),
                                         modelObject=modelDocument, schemaRef=doc.uri)
                         
@@ -113,6 +114,11 @@ def validateSetup(val, parameters=None, *args, **kwargs):
         val.qnDimAF = qname("s2c_dim:AF", _nsmap)
         val.qnDimOC = qname("s2c_dim:OC", _nsmap)
         val.qnCAx1 = qname("s2c_CA:x1", _nsmap)
+    elif val.validateEBA:
+        val.eba_qnDimCUS = qname("eba_dim:CUS", _nsmap)
+        val.eba_qnDimCCA = qname("eba_dim:CCA", _nsmap)
+        val.eba_qnCAx1 = qname("eba_CA:x1", _nsmap)
+        
 
     val.prefixNamespace = {}
     val.namespacePrefix = {}
@@ -144,6 +150,14 @@ def validateSetup(val, parameters=None, *args, **kwargs):
     val.firstFactObjectIndex = sys.maxsize
     val.firstFact = None
     val.footnotesRelationshipSet = ModelRelationshipSet(val.modelXbrl, "XBRL-footnotes")
+    # re-init batch flag to enable more than one context/unit validation sessions for the same instance.
+    # (note that this monkey-patching would give trouble on two concurrent validation sessions of the same instance)
+    for cntx in val.modelXbrl.contexts.values():
+        if hasattr(cntx, "_batchChecked"):
+            cntx._batchChecked = False
+    for unit in val.modelXbrl.units.values():
+        if hasattr(unit, "_batchChecked"):
+            unit._batchChecked = False
     
 def prefixUsed(val, ns, prefix):
     val.namespacePrefixesUsed[ns].add(prefix)
@@ -236,10 +250,15 @@ def validateFacts(val, factsToCheck):
                 modelXbrl.error("EIOPA.N.1.6.d" if val.isEIOPAfullVersion else "EIOPA.S.1.6.d",
                         _('Filing indicators must not contain segment or scenario elements %(filingIndicator)s.'),
                         modelObject=fIndicator, filingIndicator=_value)
-        if fIndicators.objectIndex > val.firstFactObjectIndex:
-            modelXbrl.warning("EIOPA.1.6.2",
-                    _('Filing indicators should precede first fact %(firstFact)s.'),
-                    modelObject=(fIndicators, val.firstFact), firstFact=val.firstFact.qname)
+        # Using model object id's is not accurate in case of edition
+        prevObj = fIndicators.getprevious()
+        while prevObj is not None:
+            if isinstance(prevObj, ModelFact) and prevObj.qname != qnFIndicators:
+                modelXbrl.warning("EIOPA.1.6.2",
+                              _('Filing indicators should precede first fact %(firstFact)s.'),
+                              modelObject=(fIndicators, val.firstFact), firstFact=val.firstFact.qname)
+                break
+            prevObj = prevObj.getprevious()
     
     if val.isEIOPAfullVersion:
         for fIndicator in factsByQname[qnFilingIndicator]:
@@ -257,8 +276,8 @@ def validateFacts(val, factsToCheck):
     nonMonetaryNonPureFacts = []
     for qname, facts in factsByQname.items():
         for f in facts:
-            if f.qname == qnFilingIndicator:
-                continue # skip erroneous root-level filing indicators
+            if f.qname == qnFIndicators or f.qname == qnFIndicators:
+                continue # skip root-level and non-root-level filing indicators
             if modelXbrl.skipDTS:
                 c = f.qname.localName[0]
                 isNumeric = c in ('m', 'p', 'r', 'i')
@@ -283,9 +302,7 @@ def validateFacts(val, factsToCheck):
                  f.context.contextDimAwareHash if f.context is not None else None,
                  f.unit.hash if f.unit is not None else None,
                  hash(f.xmlLang))
-            if f.qname == qnFIndicators and val.validateEIOPA:
-                pass
-            elif k not in otherFacts:
+            if k not in otherFacts:
                 otherFacts[k] = {f}
             else:
                 matches = [o
@@ -402,6 +419,15 @@ def validateFacts(val, factsToCheck):
                                         modelXbrl.error("EIOPA.3.1",
                                             _("There MUST be only one currency but metric %(metric)s reported OC dimension currency %(ocCurrency)s differs from unit currency: %(unitCurrency)s."),
                                             modelObject=f, metric=f.qname, ocCurrency=_ocCurrency, unitCurrency=_currencyMeasure.localName)
+                                else:
+                                    val.currenciesUsed[_currencyMeasure] = unit
+                            elif val.validateEBA and f.context is not None:
+                                if f.context.dimMemberQname(val.eba_qnDimCCA) == val.eba_qnCAx1 and val.eba_qnDimCUS in f.context.qnameDims:
+                                    currency = f.context.dimMemberQname(val.eba_qnDimCUS).localName
+                                    if _currencyMeasure.localName != currency:
+                                        modelXbrl.error("EBA.3.1",
+                                            _("There MUST be only one currency but metric %(metric)s reported CCA dimension currency %(currency)s differs from unit currency: %(unitCurrency)s."),
+                                            modelObject=f, metric=f.qname, currency=currency, unitCurrency=_currencyMeasure.localName)
                                 else:
                                     val.currenciesUsed[_currencyMeasure] = unit
                             else:
@@ -649,19 +675,19 @@ def final(val):
         for _scheme, _LEI in val.cntxEntities:
             if (_scheme in ("http://standards.iso.org/iso/17442", "http://standard.iso.org/iso/17442", "LEI") or
                 (not val.isEIOPAfullVersion and _scheme == "PRE-LEI")):
+                if _scheme == "http://standard.iso.org/iso/17442":
+                    modelXbrl.warning(("EBA.3.6", "EIOPA.S.2.8.c"),
+                        _("Warning, context has entity scheme %(scheme)s should be plural: http://standards.iso.org/iso/17442."),
+                        modelObject=modelDocument, scheme=_scheme)
                 result = LeiUtil.checkLei(_LEI)
                 if result == LeiUtil.LEI_INVALID_LEXICAL:
                     modelXbrl.error("EIOPA.S.2.8.c",
-                        _("Context has lexically invalid LEI %(lei)s."),
-                        modelObject=modelDocument, lei=_LEI)
+                                    _("Context has lexically invalid LEI %(lei)s."),
+                                    modelObject=modelDocument, lei=_LEI)
                 elif result == LeiUtil.LEI_INVALID_CHECKSUM:
                     modelXbrl.error("EIOPA.S.2.8.c",
-                        _("Context has LEI checksum error in %(lei)s."),
-                        modelObject=modelDocument, lei=_LEI)
-                if _scheme == "http://standard.iso.org/iso/17442":
-                    modelXbrl.warning("EIOPA.S.2.8.c",
-                        _("Warning, context has entity scheme %(scheme)s should be plural: http://standards.iso.org/iso/17442."),
-                        modelObject=modelDocument, scheme=_scheme)
+                                    _("Context has LEI checksum error in %(lei)s."),
+                                    modelObject=modelDocument, lei=_LEI)
             elif _scheme == "SC":
                 pass # anything is ok for Specific Code
             else:
