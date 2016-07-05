@@ -41,6 +41,7 @@ qnXbrliDecimalsUnion = qname("{http://www.xbrl.org/2003/instance}xbrli:decimalsT
 qnXbrliPrecisionUnion = qname("{http://www.xbrl.org/2003/instance}xbrli:precisionType")
 qnXbrliNonZeroDecimalUnion = qname("{http://www.xbrl.org/2003/instance}xbrli:nonZeroDecimal")
 link = "http://www.xbrl.org/2003/linkbase"
+qnLinkLinkbase = qname("{http://www.xbrl.org/2003/linkbase}link:linkbase")
 qnLinkLoc = qname("{http://www.xbrl.org/2003/linkbase}link:loc")
 qnLinkLabelLink = qname("{http://www.xbrl.org/2003/linkbase}link:labelLink")
 qnLinkLabelArc = qname("{http://www.xbrl.org/2003/linkbase}link:labelArc")
@@ -220,10 +221,10 @@ qnAssertion = qname("{http://xbrl.org/2008/validation}validation:assertion")
 qnVariableSetAssertion = qname("{http://xbrl.org/2008/validation}validation:variableSetAssertion")
 qnAssertionSet = qname("{http://xbrl.org/2008/validation}validation:assertionSet")
 assertionSet = "http://xbrl.org/arcrole/2008/assertion-set"
-assertionUnsatisfiedSeverity = "http://xbrl.org/arcrole/PR/2015-11-18/assertion-unsatisfied-severity"
-qnAssertionSeverityError = qname("{http://xbrl.org/PR/2015-11-18/assertion-severity}sev:error")
-qnAssertionSeverityWarning = qname("{http://xbrl.org/PR/2015-11-18/assertion-severity}sev:warning")
-qnAssertionSeverityOk = qname("{http://xbrl.org/PR/2015-11-18/assertion-severity}sev:ok")
+assertionUnsatisfiedSeverity = "http://xbrl.org/arcrole/2016/assertion-unsatisfied-severity"
+qnAssertionSeverityError = qname("{http://xbrl.org/2016/assertion-severity}sev:error")
+qnAssertionSeverityWarning = qname("{http://xbrl.org/2016/assertion-severity}sev:warning")
+qnAssertionSeverityOk = qname("{http://xbrl.org/2016/assertion-severity}sev:ok")
 
 acf = "http://xbrl.org/2010/filter/aspect-cover"
 qnAspectCover = qname("{http://xbrl.org/2010/filter/aspect-cover}acf:aspectCover")
@@ -313,23 +314,23 @@ xpath2err = "http://www.w3.org/2005/xqt-errors"
 variablesScope = "http://xbrl.org/arcrole/2010/variables-scope"
 
 # 2014-MM-DD current IWD
-tableMMDD = "http://xbrl.org/PWD/2014-MM-DD/table"
-tableModelMMDD = "http://xbrl.org/PWD/2014-MM-DD/table/model"
+tableMMDD = "http://xbrl.org/PWD/2016-MM-DD/table"
+tableModelMMDD = "http://xbrl.org/PWD/2016-MM-DD/table/model"
 tableBreakdownMMDD = "http://xbrl.org/arcrole/PWD/2014-MM-DD/table-breakdown"
 tableBreakdownTreeMMDD = "http://xbrl.org/arcrole/PWD/2014-MM-DD/breakdown-tree"
 tableDefinitionNodeSubtreeMMDD = "http://xbrl.org/arcrole/PWD/2014-MM-DD/definition-node-subtree"
 tableFilterMMDD = "http://xbrl.org/arcrole/PWD/2014-MM-DD/table-filter"
 tableAspectNodeFilterMMDD = "http://xbrl.org/arcrole/PWD/2014-MM-DD/aspect-node-filter"
 tableParameterMMDD = "http://xbrl.org/arcrole/PWD/2014-MM-DD/table-parameter"
-qnTableTableMMDD = qname("{http://xbrl.org/PWD/2014-MM-DD/table}table:table")
-qnTableBreakdownMMDD = qname("{http://xbrl.org/PWD/2014-MM-DD/table}table:breakdown")
-qnTableRuleNodeMMDD = qname("{http://xbrl.org/PWD/2014-MM-DD/table}table:ruleNode")
-qnTableRuleSetMMDD = qname("{http://xbrl.org/PWD/2014-MM-DD/table}table:ruleSet")
-qnTableDefinitionNodeMMDD = qname("{http://xbrl.org/PWD/2014-MM-DD/table}table:definitionNode")
-qnTableClosedDefinitionNodeMMDD = qname("{http://xbrl.org/PWD/2014-MM-DD/table}table:closedDefinitionNode")
-qnTableConceptRelationshipNodeMMDD = qname("{http://xbrl.org/PWD/2014-MM-DD/table}table:conceptRelationshipNode")
-qnTableDimensionRelationshipNodeMMDD = qname("{http://xbrl.org/PWD/2014-MM-DD/table}table:dimensionRelationshipNode")
-qnTableAspectNodeMMDD = qname("{http://xbrl.org/PWD/2014-MM-DD/table}table:aspectNode")
+qnTableTableMMDD = qname("{http://xbrl.org/PWD/2016-MM-DD/table}table:table")
+qnTableBreakdownMMDD = qname("{http://xbrl.org/PWD/2016-MM-DD/table}table:breakdown")
+qnTableRuleNodeMMDD = qname("{http://xbrl.org/PWD/2016-MM-DD/table}table:ruleNode")
+qnTableRuleSetMMDD = qname("{http://xbrl.org/PWD/2016-MM-DD/table}table:ruleSet")
+qnTableDefinitionNodeMMDD = qname("{http://xbrl.org/PWD/2016-MM-DD/table}table:definitionNode")
+qnTableClosedDefinitionNodeMMDD = qname("{http://xbrl.org/PWD/2016-MM-DD/table}table:closedDefinitionNode")
+qnTableConceptRelationshipNodeMMDD = qname("{http://xbrl.org/PWD/2016-MM-DD/table}table:conceptRelationshipNode")
+qnTableDimensionRelationshipNodeMMDD = qname("{http://xbrl.org/PWD/2016-MM-DD/table}table:dimensionRelationshipNode")
+qnTableAspectNodeMMDD = qname("{http://xbrl.org/PWD/2016-MM-DD/table}table:aspectNode")
 
 # REC
 table = "http://xbrl.org/2014/table"
@@ -485,7 +486,7 @@ errMsgPrefixNS = {
     "utre": "http://www.xbrl.org/2009/utr/errors",
     "enumte": "http://xbrl.org/2014/extensible-enumerations/taxonomy-errors",
     "enumie": "http://xbrl.org/2014/extensible-enumerations/instance-errors",
-    "seve": "http://xbrl.org/PR/2015-11-18/assertion-severity/error",
+    "seve": "http://xbrl.org/2016/assertion-severity/error",
     "tpe": "http://xbrl.org/WGWD/YYYY-MM-DD/taxonomy-package/errors"
     }
 
