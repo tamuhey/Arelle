@@ -1,5 +1,5 @@
 """
 Package version information module.
 """
-version_info = (0, 9, 23) # Major, Minor, Fix
+version_info = (0, 9, 25) # Major, Minor, Fix
 version = ".".join(map(str, version_info))
