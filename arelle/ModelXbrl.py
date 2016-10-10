@@ -5,7 +5,7 @@ Created on Oct 3, 2010
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
 from collections import defaultdict
-import os, sys, traceback, uuid
+import os, sys, re, traceback, uuid
 import logging
 from decimal import Decimal
 from arelle import UrlUtil, XmlUtil, ModelValue, XbrlConst, XmlValidate
@@ -369,19 +369,23 @@ class ModelXbrl:
                 return modelLink
         return None
     
-    def roleTypeDefinition(self, roleURI):
+    def roleUriTitle(self, roleURI):
+        return re.sub(r"([A-Z])",r" \1", os.path.basename(roleURI)).title()
+    
+    def roleTypeDefinition(self, roleURI, lang=None):
         modelRoles = self.roleTypes.get(roleURI, ())
         if modelRoles:
-            return modelRoles[0].definition or roleURI
-        return roleURI
+            _roleType = modelRoles[0]
+            return _roleType.genLabel(lang=lang, strip=True)  or _roleType.definition or self.roleUriTitle(roleURI)
+        return self.roleUriTitle(roleURI)
     
-    def roleTypeName(self, roleURI):
+    def roleTypeName(self, roleURI, lang=None):
         # authority-specific role type name
         for pluginXbrlMethod in pluginClassMethods("ModelXbrl.RoleTypeName"):
-            _roleTypeName = pluginXbrlMethod(self, roleURI)
+            _roleTypeName = pluginXbrlMethod(self, roleURI, lang)
             if _roleTypeName:
                 return _roleTypeName
-        return self.roleTypeDefinition(roleURI)
+        return self.roleTypeDefinition(roleURI, lang)
     
     def matchSubstitutionGroup(self, elementQname, subsGrpMatchTable):
         """Resolve a subsitutionGroup for the elementQname from the match table
@@ -428,19 +432,33 @@ class ModelXbrl:
         :type url: str
         """
         from arelle import (ModelDocument, FileSource)
-        if self.modelDocument.type == ModelDocument.Type.INSTANCE: # entry already is an instance
-            return self.modelDocument # use existing instance entry point
-        priorFileSource = self.fileSource
-        self.fileSource = FileSource.FileSource(url, self.modelManager.cntlr)
-        if isHttpUrl(self.uri):
-            schemaRefUri = self.uri
-        else:   # relativize local paths
-            schemaRefUri = os.path.relpath(self.uri, os.path.dirname(url))
-        self.modelDocument = ModelDocument.create(self, ModelDocument.Type.INSTANCE, url, schemaRefs=[schemaRefUri], isEntry=True)
-        if priorFileSource:
-            priorFileSource.close()
-        self.closeFileSource= True
-        del self.entryLoadingUrl
+        if self.modelDocument.type == ModelDocument.Type.INSTANCE: 
+            # entry already is an instance, delete facts etc.
+            del self.facts[:]
+            self.factsInInstance.clear()
+            del self.undefinedFacts[:]
+            self.contexts.clear()
+            self.units.clear()
+            self.modelDocument.idObjects.clear
+            del self.modelDocument.hrefObjects[:]
+            self.modelDocument.schemaLocationElements.clear()
+            self.modelDocument.referencedNamespaces.clear()
+            for child in list(self.modelDocument.xmlRootElement):
+                if not (isinstance(child, ModelObject) and child.namespaceURI == XbrlConst.link and 
+                        child.localName.endswith("Ref")): # remove contexts, facts, footnotes
+                    self.modelDocument.xmlRootElement.remove(child)
+        else:
+            priorFileSource = self.fileSource
+            self.fileSource = FileSource.FileSource(url, self.modelManager.cntlr)
+            if isHttpUrl(self.uri):
+                schemaRefUri = self.uri
+            else:   # relativize local paths
+                schemaRefUri = os.path.relpath(self.uri, os.path.dirname(url))
+            self.modelDocument = ModelDocument.create(self, ModelDocument.Type.INSTANCE, url, schemaRefs=[schemaRefUri], isEntry=True)
+            if priorFileSource:
+                priorFileSource.close()
+            self.closeFileSource= True
+            del self.entryLoadingUrl
         # reload dts views
         from arelle import ViewWinDTS
         for view in self.views:
@@ -1095,7 +1113,10 @@ class ModelXbrl:
             numericLevel = logging._checkLevel(level)
             self.logCount[numericLevel] = self.logCount.get(numericLevel, 0) + 1
             if numericLevel >= self.errorCaptureLevel:
-                self.errors.append(messageCode)
+                try: # if there's a numeric errorCount arg, extend messages codes by count
+                    self.errors.extend([messageCode] * int(logArgs[1]["errorCount"]))
+                except (IndexError, KeyError, ValueError): # no msgArgs, no errorCount, or not int
+                    self.errors.append(messageCode) # assume one error occurence
             """@messageCatalog=[]"""
             logger.log(numericLevel, *logArgs, exc_info=args.get("exc_info"), extra=extras)
                     

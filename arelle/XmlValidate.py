@@ -136,9 +136,8 @@ def validate(modelXbrl, elt, recurse=True, attrQname=None, ixFacts=False):
                     errElt = elt.elementQname
                 modelXbrl.error("xmlSchema:nilNonNillableElement",
                     _("Element %(element)s fact %(fact)s type %(typeName)s is nil but element has not been defined nillable"),
-                    modelObject=elt, element=errElt, fact=elt.qname, transform=elt.format,
-                    typeName=modelConcept.baseXsdType if modelConcept is not None else "unknown",
-                    value=XmlUtil.innerText(elt, ixExclude=True))
+                    modelObject=elt, element=errElt, fact=elt.qname, 
+                    typeName=modelConcept.baseXsdType if modelConcept is not None else "unknown")
             try:
                 if isAbstract:
                     raise ValueError("element is abstract")
@@ -345,7 +344,7 @@ def validateValue(modelXbrl, elt, attrTag, baseXsdType, value, isNillable=False,
                         raise ValueError("pattern facet " + facets["pattern"].pattern if facets and "pattern" in facets else "pattern mismatch")
                 if facets:
                     if "enumeration" in facets and value not in facets["enumeration"]:
-                        raise ValueError("{0} is not in {1}".format(value, facets["enumeration"]))
+                        raise ValueError("{0} is not in {1}".format(value, facets["enumeration"].keys()))
                     if "length" in facets and len(value) != facets["length"]:
                         raise ValueError("length {0}, expected {1}".format(len(value), facets["length"]))
                     if "minLength" in facets and len(value) < facets["minLength"]:

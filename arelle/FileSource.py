@@ -325,10 +325,9 @@ class FileSource:
     
     @property
     def taxonomyPackageMetadataFiles(self):
-        _metaInfTxPkg = '{}/META-INF/taxonomyPackage.xml'.format(
-                        os.path.splitext(os.path.basename(self.basefile))[0])
-        if _metaInfTxPkg in self.dir:
-            return [_metaInfTxPkg]  # standard package
+        for f in (self.dir or []):
+            if f.endswith("/META-INF/taxonomyPackage.xml"):
+                return [f]  # standard package
         return [f for f in (self.dir or []) if os.path.split(f)[-1] in TAXONOMY_PACKAGE_FILE_NAMES]
     
     def isInArchive(self,filepath, checkExistence=False):
@@ -581,7 +580,7 @@ def openFileStream(cntlr, filepath, mode='r', encoding=None):
     if archiveFilenameParts(filepath): # file is in an archive
         return openFileSource(filepath, cntlr).file(filepath, binary='b' in mode, encoding=encoding)[0]
     if isHttpUrl(filepath) and cntlr:
-        _cacheFilepath = cntlr.webCache.getfilename(filepath)
+        _cacheFilepath = cntlr.webCache.getfilename(filepath, normalize=True) # normalize is separate step in ModelDocument retrieval, combined here
         if _cacheFilepath is None:
             raise IOError(_("Unable to open file: {0}.").format(filepath))
         filepath = _cacheFilepath
@@ -653,7 +652,7 @@ def stripDeclarationBytes(xml):
             return xml[indexOfDeclarationEnd + 2:]
     return xml
     
-def saveFile(cntlr, filepath, contents, encoding=None):
+def saveFile(cntlr, filepath, contents, encoding=None, mode='wt'):
     if isHttpUrl(filepath):
         _cacheFilepath = cntlr.webCache.getfilename(filepath)
         if _cacheFilepath is None:
@@ -665,7 +664,7 @@ def saveFile(cntlr, filepath, contents, encoding=None):
         if cntlr.isGAE: # check if in memcache
             gaeSet(cacheKey, contents.encode(encoding or 'utf-8'))
     else:
-        with io.open(filepath, 'wt', encoding=(encoding or 'utf-8')) as f:
+        with io.open(filepath, mode, encoding=(encoding or 'utf-8')) as f:
             f.write(contents)
                           
 # GAE Blobcache

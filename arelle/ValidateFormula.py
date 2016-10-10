@@ -225,6 +225,11 @@ def checkBaseSet(val, arcrole, ELR, relsSet):
                 val.modelXbrl.error("seve:multipleSeveritiesForAssertionError",
                     _("Assertion-unsatisfied-severity relationship from %(xlinkLabel)s has more than one severity target"),
                      modelObject=[relFrom] + rels, xlinkLabel=relFrom.xlinkLabel)
+        for relTo, rels in relsSet.toModelObjects().items():
+            if relTo.modelDocument.basename != "severities.xml" or relTo.getparent().qname != XbrlConst.qnGenLink or relTo.getparent().getparent().qname != XbrlConst.qnLinkLinkbase:
+                val.modelXbrl.error("seve:assertionSeverityTargetError",
+                    _("Target of assertion-unsatisfied-severity relationship must be a severity element in the published severities linkbase."),
+                     modelObject=[relTo] + rels)
                 
 def executeCallTest(val, name, callTuple, testTuple):
     if callTuple:
@@ -736,7 +741,7 @@ def validate(val, xpathContext=None, parametersOnly=False, statusMsg='', compile
 
     # linked consistency assertions
     for modelRel in val.modelXbrl.relationshipSet(XbrlConst.consistencyAssertionFormula).modelRelationships:
-        if (modelRel.fromModelObject is not None and modelRel.toModelObject is not None and 
+        if (isinstance(modelRel.fromModelObject, ModelConsistencyAssertion) and 
             isinstance(modelRel.toModelObject,ModelFormula)):
             consisAsser = modelRel.fromModelObject
             consisAsser.countSatisfied = 0
@@ -789,7 +794,7 @@ def validate(val, xpathContext=None, parametersOnly=False, statusMsg='', compile
     for instanceQname, modelVariableSets in instanceProducingVariableSets.items():
         for modelVariableSet in modelVariableSets:
             for varScopeRel in val.modelXbrl.relationshipSet(XbrlConst.variablesScope).toModelObject(modelVariableSet):
-                if varScopeRel.fromModelObject is not None:
+                if isinstance(varScopeRel.fromModelObject, ModelVariableSet):
                     sourceVariableSet = varScopeRel.fromModelObject
                     if sourceVariableSet.outputInstanceQname != instanceQname:
                         val.modelXbrl.error("xbrlvarscopee:differentInstances",
@@ -905,8 +910,8 @@ def validate(val, xpathContext=None, parametersOnly=False, statusMsg='', compile
                     id=exisValAsser.id, satisfiedCount=exisValAsser.countSatisfied, notSatisfiedCount=exisValAsser.countNotSatisfied)
 
     for modelRel in val.modelXbrl.relationshipSet(XbrlConst.consistencyAssertionFormula).modelRelationships:
-        if modelRel.fromModelObject is not None and modelRel.toModelObject is not None and \
-           isinstance(modelRel.toModelObject,ModelFormula) and \
+        if isinstance(modelRel.fromModelObject, ModelConsistencyAssertion) and \
+           isinstance(modelRel.toModelObject, ModelFormula) and \
            (not runIDs or modelRel.fromModelObject.id in runIDs):
             consisAsser = modelRel.fromModelObject
             asserTests[consisAsser.id] = (consisAsser.countSatisfied, consisAsser.countNotSatisfied)

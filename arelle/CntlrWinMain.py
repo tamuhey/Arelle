@@ -8,15 +8,20 @@ This module is Arelle's controller in windowing interactive UI mode
 '''
 from arelle import PythonUtil # define 2.x or 3.x string types
 import os, sys, subprocess, pickle, time, locale, re
-from tkinter import (Tk, TclError, Toplevel, Menu, PhotoImage, StringVar, BooleanVar, N, S, E, W, EW, 
+from tkinter import (Tk, Tcl, TclError, Toplevel, Menu, PhotoImage, StringVar, BooleanVar, N, S, E, W, EW, 
                      HORIZONTAL, VERTICAL, END, font as tkFont)
 try:
     from tkinter.ttk import Frame, Button, Label, Combobox, Separator, PanedWindow, Notebook
 except ImportError:  # 3.0 versions of tkinter
     from ttk import Frame, Button, Label, Combobox, Separator, PanedWindow, Notebook
+try:
+    import syslog
+except ImportError:
+    syslog = None
 import tkinter.tix
 import tkinter.filedialog
 import tkinter.messagebox, traceback
+from arelle.FileSource import saveFile as writeToFile
 from arelle.Locale import format_string
 from arelle.CntlrWinTooltip import ToolTip
 from arelle import XbrlConst
@@ -705,9 +710,7 @@ class CntlrWinMain (Cntlr.Cntlr):
                 if not isHttpUrl(filename):
                     self.config["fileOpenDir"] = os.path.dirname(filesource.baseurl if filesource.isArchive else filename)
             self.updateFileHistory(filename, importToDTS)
-            thread = threading.Thread(target=lambda: self.backgroundLoadXbrl(filesource,importToDTS,selectTopView))
-            thread.daemon = True
-            thread.start()
+            thread = threading.Thread(target=self.backgroundLoadXbrl, args=(filesource,importToDTS,selectTopView), daemon=True).start()
             
     def webOpen(self, *ignore):
         if not self.okayToContinue():
@@ -720,9 +723,7 @@ class CntlrWinMain (Cntlr.Cntlr):
                 from arelle import DialogOpenArchive
                 url = DialogOpenArchive.askArchiveFile(self, filesource)
             self.updateFileHistory(url, False)
-            thread = threading.Thread(target=lambda: self.backgroundLoadXbrl(filesource,False,False))
-            thread.daemon = True
-            thread.start()
+            thread = threading.Thread(target=self.backgroundLoadXbrl, args=(filesource,False,False), daemon=True).start()
             
     def importWebOpen(self, *ignore):
         if not self.modelManager.modelXbrl or self.modelManager.modelXbrl.modelDocument.type not in (
@@ -810,8 +811,8 @@ class CntlrWinMain (Cntlr.Cntlr):
                                                                treeColHdr="Table Index", showLinkroles=False, showColumns=False, expandAll=True)
                 elif modelXbrl.modelDocument.type in (ModelDocument.Type.INSTANCE, ModelDocument.Type.INLINEXBRL, ModelDocument.Type.INLINEXBRLDOCUMENTSET):
                     currentAction = "table index view"
-                    firstTableLinkroleURI, indexLinkroleURI = TableStructure.evaluateTableIndex(modelXbrl)
-                    if firstTableLinkroleURI:
+                    firstTableLinkroleURI, indexLinkroleURI = TableStructure.evaluateTableIndex(modelXbrl, lang=self.labelLang)
+                    if firstTableLinkroleURI is not None:
                         ViewWinRelationshipSet.viewRelationshipSet(modelXbrl, self.tabWinTopLeft, ("Tables", (XbrlConst.parentChild,)), lang=self.labelLang, linkrole=indexLinkroleURI,
                                                                    treeColHdr="Table Index", showRelationships=False, showColumns=False, expandAll=False, hasTableIndex=True)
                 '''
@@ -831,7 +832,7 @@ class CntlrWinMain (Cntlr.Cntlr):
                 if modelXbrl.modelDocument.type in (ModelDocument.Type.INSTANCE, ModelDocument.Type.INLINEXBRL, ModelDocument.Type.INLINEXBRLDOCUMENTSET):
                     currentAction = "table view of facts"
                     if not modelXbrl.hasTableRendering: # table view only if not grid rendered view
-                        ViewWinFactTable.viewFacts(modelXbrl, self.tabWinTopRt, linkrole=firstTableLinkroleURI, lang=self.labelLang, expandAll=firstTableLinkroleURI)
+                        ViewWinFactTable.viewFacts(modelXbrl, self.tabWinTopRt, linkrole=firstTableLinkroleURI, lang=self.labelLang, expandAll=firstTableLinkroleURI is not None)
                         if topView is None: topView = modelXbrl.views[-1]
                     currentAction = "tree/list of facts"
                     ViewWinFactList.viewFacts(modelXbrl, self.tabWinTopRt, lang=self.labelLang)
@@ -864,6 +865,7 @@ class CntlrWinMain (Cntlr.Cntlr):
             if selectTopView and topView:
                 topView.select()
             self.currentView = topView
+            currentAction = "plugin method CntlrWinMain.Xbrl.Loaded"
             for xbrlLoadedMethod in pluginClassMethods("CntlrWinMain.Xbrl.Loaded"):
                 xbrlLoadedMethod(self, modelXbrl, attach) # runs in GUI thread
         except Exception as err:
@@ -922,9 +924,7 @@ class CntlrWinMain (Cntlr.Cntlr):
                 if modelXbrl.modelDocument.type in ModelDocument.Type.TESTCASETYPES:
                     for pluginXbrlMethod in pluginClassMethods("Testcases.Start"):
                         pluginXbrlMethod(self, None, modelXbrl)
-                thread = threading.Thread(target=lambda: self.backgroundValidate())
-                thread.daemon = True
-                thread.start()
+                thread = threading.Thread(target=self.backgroundValidate, daemon=True).start()
             
     def backgroundValidate(self):
         startedAt = time.time()
@@ -956,9 +956,7 @@ class CntlrWinMain (Cntlr.Cntlr):
             return False
         self.config["versioningReportDir"] = os.path.dirname(versReportFile)
         self.saveConfig()
-        thread = threading.Thread(target=lambda: self.backgroundCompareDTSes(versReportFile))
-        thread.daemon = True
-        thread.start()
+        thread = threading.Thread(target=self.backgroundCompareDTSes, args=(versReportFile,), daemon=True).start()
             
     def backgroundCompareDTSes(self, versReportFile):
         startedAt = time.time()
@@ -1037,9 +1035,7 @@ class CntlrWinMain (Cntlr.Cntlr):
                 self.showStatus(_("Clearing internet cache"))
                 self.webCache.clear()
                 self.showStatus(_("Internet cache cleared"), 5000)
-            thread = threading.Thread(target=lambda: backgroundClearCache())
-            thread.daemon = True
-            thread.start()
+            thread = threading.Thread(target=backgroundClearCache, daemon=True).start()
             
     def manageWebCache(self):
         if sys.platform.startswith("win"):
@@ -1223,15 +1219,18 @@ class CntlrWinMain (Cntlr.Cntlr):
                               "See the License for the specific language governing permissions and "
                               "limitations under the License."
                               "\n\nIncludes:"
-                              "\n   Python\u00ae {4[0]}.{4[1]}.{4[2]} \u00a9 2001-2013 Python Software Foundation"
+                              "\n   Python\u00ae {4[0]}.{4[1]}.{4[2]} \u00a9 2001-2016 Python Software Foundation"
+                              "\n   Tcl/Tk {6} \u00a9 Univ. of Calif., Sun, Scriptics, ActiveState, and others"
                               "\n   PyParsing \u00a9 2003-2013 Paul T. McGuire"
                               "\n   lxml {5[0]}.{5[1]}.{5[2]} \u00a9 2004 Infrae, ElementTree \u00a9 1999-2004 by Fredrik Lundh"
                               "{3}"
                               "\n   May include installable plug-in modules with author-specific license terms"
                               )
                             .format(self.__version__, self.systemWordSize, Version.version,
-                                    _("\n   Bottle \u00a9 2011-2013 Marcel Hellkamp") if self.hasWebServer else "",
-                                    sys.version_info, etree.LXML_VERSION))
+                                    _("\n   Bottle \u00a9 2011-2013 Marcel Hellkamp"
+                                      "\n   CherryPy \u00a9 2002-2013 CherryPy Team") if self.hasWebServer else "",
+                                    sys.version_info, etree.LXML_VERSION, Tcl().eval('info patchlevel')
+                                    ))
 
     # worker threads addToLog        
     def addToLog(self, message, messageCode="", messageArgs=None, file="", refs=[], level=logging.INFO):
@@ -1436,19 +1435,58 @@ class TkinterCallWrapper:
 
 def main():
     # this is the entry called by arelleGUI.pyw for windows
+    if sys.platform == "darwin": 
+        _resourcesDir = Cntlr.resourcesDir()
+        for _tcltk in ("tcl", "tk"):
+            for _tcltkVer in ("8.5", "8.6"):
+                _tcltkDir = os.path.join(_resourcesDir, _tcltk + _tcltkVer)
+                if os.path.exists(_tcltkDir): 
+                    os.environ[_tcltk.upper() + "_LIBRARY"] = _tcltkDir
+    elif sys.platform == 'win32':
+        if getattr(sys, 'frozen', False): # windows requires fake stdout/stderr because no write/flush (e.g., EdgarRenderer LocalViewer pybottle)
+            class dummyFrozenStream:
+                def __init__(self): pass
+                def write(self,data): pass
+                def read(self,data): pass
+                def flush(self): pass
+                def close(self): pass
+            sys.stdout = dummyFrozenStream()
+            sys.stderr = dummyFrozenStream()
+            sys.stdin = dummyFrozenStream()
+        
     global restartMain
     while restartMain:
         restartMain = False
-        application = Tk()
-        cntlrWinMain = CntlrWinMain(application)
-        application.protocol("WM_DELETE_WINDOW", cntlrWinMain.quit)
-        if sys.platform == "darwin" and not __file__.endswith(".app/Contents/MacOS/arelle"):
-            # not built app - launches behind python or eclipse
-            application.lift()
-            application.call('wm', 'attributes', '.', '-topmost', True)
-            cntlrWinMain.uiThreadQueue.put((application.call, ['wm', 'attributes', '.', '-topmost', False]))
-            os.system('''/usr/bin/osascript -e 'tell app "Finder" to set frontmost of process "Python" to true' ''')
-        application.mainloop()            
+        try:
+            application = Tk()
+            cntlrWinMain = CntlrWinMain(application)
+            application.protocol("WM_DELETE_WINDOW", cntlrWinMain.quit)
+            if sys.platform == "darwin" and not __file__.endswith(".app/Contents/MacOS/arelle"):
+                # not built app - launches behind python or eclipse
+                application.lift()
+                application.call('wm', 'attributes', '.', '-topmost', True)
+                cntlrWinMain.uiThreadQueue.put((application.call, ['wm', 'attributes', '.', '-topmost', False]))
+                os.system('''/usr/bin/osascript -e 'tell app "Finder" to set frontmost of process "Python" to true' ''')
+            application.mainloop()            
+        except Exception: # unable to start Tk or other fatal error
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            msg = ''.join(traceback.format_exception_only(exc_type, exc_value))
+            tracebk = ''.join(traceback.format_tb(exc_traceback, limit=7))
+            logMsg = "{}\nCall Trace\n{}\nEnvironment {}".format(msg, tracebk, os.environ)
+            print(logMsg, file=sys.stderr)
+            if syslog is not None:
+                syslog.openlog("Arelle")
+                syslog.syslog(syslog.LOG_ALERT, logMsg)
+            try: # this may crash.  Note syslog has 1k message length
+                logMsg = "tcl_pkgPath {} tcl_library {} tcl version {}".format(
+                    Tcl().getvar("tcl_pkgPath"), Tcl().getvar("tcl_library"), Tcl().eval('info patchlevel'))
+                if syslog is not None:
+                    syslog.syslog(syslog.LOG_ALERT, logMsg)
+                print(logMsg, file=sys.stderr)
+            except:
+                pass
+            if syslog is not None:
+                syslog.closelog()
 
 if __name__ == "__main__":
     # this is the entry called by MacOS open and MacOS shell scripts
