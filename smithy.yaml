@@ -1,6 +1,6 @@
 project: arelle
 language: wf_arelle
-runner_image: drydock.workiva.org/workiva/smithy-runner-python:71440
+runner_image: drydock-prod.workiva.org/workiva/smithy-runner-python:71440
 env:
   - PATH=/tmp/virtualenv/bin:$PATH
   - PYTHONPATH=.
