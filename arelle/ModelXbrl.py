@@ -26,6 +26,9 @@ AUTO_LOCATE_ELEMENT = '771407c0-1d0c-11e1-be5e-028037ec0200' # singleton meaning
 DEFAULT = sys.intern(_STR_8BIT("default"))
 NONDEFAULT = sys.intern(_STR_8BIT("non-default"))
 DEFAULTorNONDEFAULT = sys.intern(_STR_8BIT("default-or-non-default"))
+
+import logging
+logger = logging.getLogger('ModelXbrl.py')
     
 
 def load(modelManager, url, nextaction=None, base=None, useFileSource=None, errorCaptureLevel=None, **kwargs):
@@ -65,7 +68,9 @@ def load(modelManager, url, nextaction=None, base=None, useFileSource=None, erro
     #from arelle import XmlValidate
     #uncomment for trial use of lxml xml schema validation of entry document
     #XmlValidate.xmlValidate(modelXbrl.modelDocument)
+    logger.debug('Arelle Load Detail - ModelXbrl  modelManager.cntlr.webCache.saveUrlCheckTimes() start')
     modelManager.cntlr.webCache.saveUrlCheckTimes()
+    logger.debug('Arelle Load Detail - ModelXbrl  modelManager.cntlr.webCache.saveUrlCheckTimes() end')
     modelManager.showStatus(_("xbrl loading finished, {0}...").format(nextaction))
     return modelXbrl
 
@@ -84,6 +89,7 @@ def create(modelManager, newDocumentType=None, url=None, schemaRefs=None, create
     return modelXbrl
     
 def loadSchemalocatedSchemas(modelXbrl):
+    logger.debug('Arelle Load Detail - ModelXbrl loadSchemalocatedSchemas start')
     from arelle import ModelDocument
     if modelXbrl.modelDocument is not None and modelXbrl.modelDocument.type < ModelDocument.Type.DTSENTRIES:
         # at this point DTS is fully discovered but schemaLocated xsd's are not yet loaded
@@ -95,6 +101,7 @@ def loadSchemalocatedSchemas(modelXbrl):
             modelDocument = modelDocuments.pop()
             modelDocumentsSchemaLocated.add(modelDocument)
             modelDocument.loadSchemalocatedSchemas()
+    logger.debug('Arelle Load Detail - ModelXbrl loadSchemalocatedSchemas end')
         
 class ModelXbrl:
     """
