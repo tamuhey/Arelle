@@ -44,7 +44,7 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
     :param reloadCache: True if desired to reload the web cache for any web-referenced files.
     :type reloadCache: bool
     """
-    
+    print('Arelle Load Detail - In load method.')
     if referringElement is None: # used for error messages
         referringElement = modelXbrl
     normalizedUri = modelXbrl.modelManager.cntlr.webCache.normalizeUrl(uri, base)
