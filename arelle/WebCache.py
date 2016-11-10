@@ -21,9 +21,18 @@ from arelle.FileSource import SERVER_WEB_CACHE
 from arelle.PluginManager import pluginClassMethods
 from arelle.UrlUtil import isHttpUrl
 addServerWebCache = None
-    
+
+logger = logging.getLogger('WebCache.py')
+current_milli_time = lambda: int(round(time.time() * 1000))
+
 DIRECTORY_INDEX_FILE = "!~DirectoryIndex~!"
 INF = float("inf")
+
+
+def logIfTimeElapsed(start, msg):
+    if current_milli_time() > 500 + start:
+        logger.info(msg)
+
 
 def proxyDirFmt(httpProxyTuple):
     if isinstance(httpProxyTuple,(tuple,list)) and len(httpProxyTuple) == 5:
@@ -102,11 +111,13 @@ class WebCache:
         self.maxAgeSeconds = 60.0 * 60.0 * 24.0 * 7.0 # seconds before checking again for file
         if cntlr.hasFileSystem:
             self.urlCheckJsonFile = cntlr.userAppDir + os.sep + "cachedUrlCheckTimes.json"
+            logger.debug('Arelle Load Detail - About to open and load the url check json.')
             try:
                 with io.open(self.urlCheckJsonFile, 'rt', encoding='utf-8') as f:
                     self.cachedUrlCheckTimes = json.load(f)
             except Exception:
                 self.cachedUrlCheckTimes = {}
+            logger.debug('Arelle Load Detail - Loaded the url check json.')
         else:
             self.cachedUrlCheckTimes = {}
         self.cachedUrlCheckTimesModified = False
@@ -156,6 +167,7 @@ class WebCache:
         
     def resetProxies(self, httpProxyTuple):
         # for ntlm user and password are required
+        logger.debug('Arelle Load Detail - Resetproxies enter')
         self.hasNTLM = False
         if isinstance(httpProxyTuple,(tuple,list)) and len(httpProxyTuple) == 5:
             useOsProxy, _urlAddr, _urlPort, user, password = httpProxyTuple
@@ -185,7 +197,7 @@ class WebCache:
             self.proxy_auth_handler = proxyhandlers.ProxyBasicAuthHandler()
             self.http_auth_handler = proxyhandlers.HTTPBasicAuthHandler()
             self.opener = proxyhandlers.build_opener(self.proxy_handler, self.proxy_auth_handler, self.http_auth_handler)
-
+        logger.debug('Arelle Load Detail - Resetproxies exit.')
         #self.opener.close()
         #self.opener = WebCacheUrlOpener(self.cntlr, proxyDirFmt(httpProxyTuple))
         
@@ -262,6 +274,7 @@ class WebCache:
                          urlpart) for urlpart in urlparts)
     
     def getfilename(self, url, base=None, reload=False, checkModifiedTime=False, normalize=False, filenameOnly=False):
+        start_time = current_milli_time()
         if url is None:
             return url
         if base is not None or normalize:
@@ -462,7 +475,8 @@ class WebCache:
                             os.remove(filepathtmp)
                         return None
                 
-                # rename temporarily named downloaded file to desired name                
+                # rename temporarily named downloaded file to desired name
+                logger.debug('Arelle Load Detail - About to rename temp files.')
                 if os.path.exists(filepath):
                     try:
                         if os.path.isfile(filepath) or os.path.islink(filepath):
@@ -486,7 +500,9 @@ class WebCache:
                                         messageCode="webCache:cacheDownloadRenamingError",
                                         messageArgs={"error": err, "filepath": filepath},
                                         level=logging.ERROR)
+                logger.debug('Arelle Load Detail - About to call lastModifiedTime')
                 webFileTime = lastModifiedTime(headers)
+                logger.debug('Arelle Load Detail - Done with lastModifiedTime')
                 if webFileTime: # set mtime to web mtime
                     os.utime(filepath,(webFileTime,webFileTime))
                 self.cachedUrlCheckTimes[url] = timeNowStr
@@ -497,6 +513,7 @@ class WebCache:
         elif url.startswith("file:\\"): url = url[6:]
         if os.sep == '\\':
             url = url.replace('/', '\\')
+        logIfTimeElapsed(start_time, 'Arelle Load Detail - self.retrieve while loop done.  returning... url={}'.format(url))
         return url
     
     def internetRecheckFailedRecovery(self, filepath, url, err, timeNowStr):
