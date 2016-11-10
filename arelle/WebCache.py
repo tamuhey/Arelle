@@ -274,6 +274,7 @@ class WebCache:
                          urlpart) for urlpart in urlparts)
     
     def getfilename(self, url, base=None, reload=False, checkModifiedTime=False, normalize=False, filenameOnly=False):
+        start_time = current_milli_time()
         if url is None:
             return url
         if base is not None or normalize:
@@ -329,7 +330,6 @@ class WebCache:
             
             # download to a temporary name so it is not left readable corrupted if download fails
             retryCount = 5
-            start_time = current_milli_time()
             while retryCount > 0:
                 try:
                     self.progressUrl = url
