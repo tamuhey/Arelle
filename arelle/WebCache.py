@@ -22,11 +22,17 @@ from arelle.PluginManager import pluginClassMethods
 from arelle.UrlUtil import isHttpUrl
 addServerWebCache = None
 
-import logging
 logger = logging.getLogger('WebCache.py')
-    
+current_milli_time = lambda: int(round(time.time() * 1000))
+
 DIRECTORY_INDEX_FILE = "!~DirectoryIndex~!"
 INF = float("inf")
+
+
+def logIfTimeElapsed(start, msg):
+    if current_milli_time() > 500 + start:
+        logger.info(msg)
+
 
 def proxyDirFmt(httpProxyTuple):
     if isinstance(httpProxyTuple,(tuple,list)) and len(httpProxyTuple) == 5:
@@ -268,6 +274,7 @@ class WebCache:
                          urlpart) for urlpart in urlparts)
     
     def getfilename(self, url, base=None, reload=False, checkModifiedTime=False, normalize=False, filenameOnly=False):
+        start_time = current_milli_time()
         if url is None:
             return url
         if base is not None or normalize:
@@ -323,7 +330,6 @@ class WebCache:
             
             # download to a temporary name so it is not left readable corrupted if download fails
             retryCount = 5
-            logger.debug('Arelle Load Detail - Executing self.retrieve while loop.')
             while retryCount > 0:
                 try:
                     self.progressUrl = url
@@ -507,7 +513,7 @@ class WebCache:
         elif url.startswith("file:\\"): url = url[6:]
         if os.sep == '\\':
             url = url.replace('/', '\\')
-        logger.debug('Arelle Load Detail - self.retrieve while loop done.  returning..')
+        logIfTimeElapsed(start_time, 'Arelle Load Detail - self.retrieve while loop done.  returning... url={}'.format(url))
         return url
     
     def internetRecheckFailedRecovery(self, filepath, url, err, timeNowStr):

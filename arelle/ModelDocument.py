@@ -111,7 +111,7 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
         logIfTimeElapsed(start_time, 'Arelle Load Detail - done modelXbrl.fileSource.isInArchive(mappedUri):')
         logIfTimeElapsed(start_time, 'Arelle Load Detail - calling modelXbrl.modelManager.cntlr.webCache.getfilename(mappedUri, reload=reloadCache) reload={}'.format(reloadCache))
         filepath = modelXbrl.modelManager.cntlr.webCache.getfilename(mappedUri, reload=reloadCache)
-        logIfTimeElapsed(start_time, 'Arelle Load Detail - Done with the webcache getFilename')
+        logIfTimeElapsed(start_time, 'Arelle Load Detail - Done with the webcache getFilename, mappedUri = {}'.format(mappedUri))
         if filepath:
             uri = modelXbrl.modelManager.cntlr.webCache.normalizeUrl(filepath)
     if filepath is None: # error such as HTTPerror is already logged
@@ -164,7 +164,7 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
         _parser, _parserLookupName, _parserLookupClass = parser(modelXbrl,filepath)
         logIfTimeElapsed(start_time, 'Arelle Load Detail - Calling etree.parse')
         xmlDocument = etree.parse(file,parser=_parser,base_url=filepath)
-        logIfTimeElapsed(start_time, 'Arelle Load Detail - done with etree.parse')
+        logIfTimeElapsed(start_time, 'Arelle Load Detail - done with etree.parse, filepath={}'.format(filepath))
         for error in _parser.error_log:
             modelXbrl.error("xmlSchema:syntax",
                     _("%(error)s, %(fileName)s, line %(line)s, column %(column)s, %(sourceAction)s source element"),
@@ -297,9 +297,9 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
                     if XbrlConst.ixbrlAll.intersection(nestedInline.nsmap.values()):
                         _type = Type.INLINEXBRL
                         rootNode = nestedInline
-        logIfTimeElapsed(start_time, 'Arelle Load Detail - Calling modelDocument = _class(modelXbrl, _type, normalizedUri, filepath, xmlDocument)')
+        logIfTimeElapsed(start_time, 'Arelle Load Detail - creating class {}'.format(_class))
         modelDocument = _class(modelXbrl, _type, normalizedUri, filepath, xmlDocument)
-        logIfTimeElapsed(start_time, 'Arelle Load Detail - Done with modelDocument = _class(modelXbrl, _type, normalizedUri, filepath, xmlDocument)')
+        logIfTimeElapsed(start_time, 'Arelle Load Detail - created class, normalizedUri = {}'.format(normalizedUri))
         rootNode.init(modelDocument)
         modelDocument.parser = _parser # needed for XmlUtil addChild's makeelement 
         modelDocument.parserLookupName = _parserLookupName
@@ -342,11 +342,12 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
             for pi in modelDocument.processingInstructions:
                 if pi.target == "arelle-unit-test":
                     modelXbrl.arelleUnitTests[pi.get("location")] = pi.get("action")
+
+            logIfTimeElapsed(start_time, 'Arelle Load Detail - Calling XmlValidateSchema.validate on {} docs'.format(len(modelXbrl.schemaDocsToValidate)))
             while modelXbrl.schemaDocsToValidate:
                 doc = modelXbrl.schemaDocsToValidate.pop()
-                logIfTimeElapsed(start_time, 'Arelle Load Detail - Calling XmlValidateSchema.validate')
                 XmlValidateSchema.validate(doc, doc.xmlRootElement, doc.targetNamespace) # validate schema elements
-                logIfTimeElapsed(start_time, 'Arelle Load Detail - done with XmlValidateSchema.validate')
+            logIfTimeElapsed(start_time, 'Arelle Load Detail - done with XmlValidateSchema.validate')
             if hasattr(modelXbrl, "ixdsHtmlElements"):
                 logIfTimeElapsed(start_time, 'Arelle Load Detail - calling inlineIxsdsDiscover')
                 inlineIxdsDiscover(modelXbrl) # compile cross-document IXDS references
