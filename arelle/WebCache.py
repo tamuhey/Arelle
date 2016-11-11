@@ -273,6 +273,9 @@ class WebCache:
                          urlpart) for urlpart in urlparts)
     
     def getfilename(self, url, base=None, reload=False, checkModifiedTime=False, normalize=False, filenameOnly=False):
+        """
+        :param reload: True if desired to reload the web cache for any web-referenced files.
+        """
         start_time = current_milli_time()
         if url is None:
             return url
@@ -300,7 +303,7 @@ class WebCache:
             timeNowStr = time.strftime('%Y-%m-%dT%H:%M:%S UTC', time.gmtime(timeNow))
             retrievingDueToRecheckInterval = False
             logger.debug('Arelle Webcache Detail - reload: {reload} filepath: {path}.  exists={exists}'.format(reload=reload, path=filepath, exists=os.path.exists(filepath)))
-            if not reload and os.path.exists(filepath):
+            if reload and os.path.exists(filepath):
                 if url in self.cachedUrlCheckTimes and not checkModifiedTime:
                     cachedTime = calendar.timegm(time.strptime(self.cachedUrlCheckTimes[url], '%Y-%m-%dT%H:%M:%S UTC'))
                 else:
