@@ -302,7 +302,6 @@ class WebCache:
             timeNow = time.time()
             timeNowStr = time.strftime('%Y-%m-%dT%H:%M:%S UTC', time.gmtime(timeNow))
             retrievingDueToRecheckInterval = False
-            logger.debug('Arelle Webcache Detail - reload: {reload} filepath: {path}.  exists={exists}'.format(reload=reload, path=filepath, exists=os.path.exists(filepath)))
             if reload and os.path.exists(filepath):
                 if url in self.cachedUrlCheckTimes and not checkModifiedTime:
                     cachedTime = calendar.timegm(time.strptime(self.cachedUrlCheckTimes[url], '%Y-%m-%dT%H:%M:%S UTC'))
@@ -338,13 +337,11 @@ class WebCache:
             while retryCount > 0:
                 try:
                     self.progressUrl = url
-                    logger.debug('Arelle Webcache Detail - calling retrieve. quotedurl={url}, filename={name}'.format(url=quotedUrl,name=filepathtmp))
                     savedfile, headers, initialBytes = self.retrieve(
                     #savedfile, headers = self.opener.retrieve(
                                       quotedUrl,
                                       filename=filepathtmp,
                                       reporthook=self.reportProgress)
-                    logger.debug('Arelle Webcache Detail - retrieve done')
                     # check if this is a real file or a wifi or web logon screen
                     if fileExt in {".xsd", ".xml", ".xbrl"}:
                         if b"<html" in initialBytes:
@@ -482,7 +479,6 @@ class WebCache:
                         return None
                 
                 # rename temporarily named downloaded file to desired name
-                logger.debug('Arelle Load Detail - About to rename temp files.')
                 if os.path.exists(filepath):
                     try:
                         if os.path.isfile(filepath) or os.path.islink(filepath):
