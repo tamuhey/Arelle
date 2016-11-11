@@ -111,16 +111,15 @@ class WebCache:
         self.maxAgeSeconds = 60.0 * 60.0 * 24.0 * 7.0 # seconds before checking again for file
         if cntlr.hasFileSystem:
             self.urlCheckJsonFile = cntlr.userAppDir + os.sep + "cachedUrlCheckTimes.json"
-            logger.debug('Arelle Load Detail - About to open and load the url check json.')
             try:
                 with io.open(self.urlCheckJsonFile, 'rt', encoding='utf-8') as f:
                     self.cachedUrlCheckTimes = json.load(f)
             except Exception:
                 self.cachedUrlCheckTimes = {}
-            logger.debug('Arelle Load Detail - Loaded the url check json.')
         else:
             self.cachedUrlCheckTimes = {}
         self.cachedUrlCheckTimesModified = False
+        logger.debug('Arelle Webcache Detail - self.cachedUrlCheckTimes: {}'.format(self.cachedUrlCheckTimes))
             
 
     @property
@@ -300,7 +299,7 @@ class WebCache:
             timeNow = time.time()
             timeNowStr = time.strftime('%Y-%m-%dT%H:%M:%S UTC', time.gmtime(timeNow))
             retrievingDueToRecheckInterval = False
-            logger.debug('Arelle Webcache Detail - filepath: {path}.  exists={exists}'.format(path=filepath, exists=os.path.exists(filepath)))
+            logger.debug('Arelle Webcache Detail - reload: {reload} filepath: {path}.  exists={exists}'.format(reload=reload, path=filepath, exists=os.path.exists(filepath)))
             if not reload and os.path.exists(filepath):
                 if url in self.cachedUrlCheckTimes and not checkModifiedTime:
                     cachedTime = calendar.timegm(time.strptime(self.cachedUrlCheckTimes[url], '%Y-%m-%dT%H:%M:%S UTC'))
@@ -310,7 +309,9 @@ class WebCache:
                     # weekly check if newer file exists
                     newerOnWeb = False
                     try: # no provision here for proxy authentication!!!
+                        logger.debug('Arelle GetHeaders Detail - start')
                         remoteFileTime = lastModifiedTime( self.getheaders(quotedUrl) )
+                        logger.debug('Arelle GetHeaders Detail - stop')
                         if remoteFileTime and remoteFileTime > os.path.getmtime(filepath):
                             newerOnWeb = True
                     except:
