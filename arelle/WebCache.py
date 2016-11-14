@@ -111,16 +111,15 @@ class WebCache:
         self.maxAgeSeconds = 60.0 * 60.0 * 24.0 * 7.0 # seconds before checking again for file
         if cntlr.hasFileSystem:
             self.urlCheckJsonFile = cntlr.userAppDir + os.sep + "cachedUrlCheckTimes.json"
-            logger.debug('Arelle Load Detail - About to open and load the url check json.')
             try:
                 with io.open(self.urlCheckJsonFile, 'rt', encoding='utf-8') as f:
                     self.cachedUrlCheckTimes = json.load(f)
             except Exception:
                 self.cachedUrlCheckTimes = {}
-            logger.debug('Arelle Load Detail - Loaded the url check json.')
         else:
             self.cachedUrlCheckTimes = {}
         self.cachedUrlCheckTimesModified = False
+        logger.debug('Arelle Webcache Detail - self.cachedUrlCheckTimes: {}'.format(self.cachedUrlCheckTimes))
             
 
     @property
@@ -274,6 +273,9 @@ class WebCache:
                          urlpart) for urlpart in urlparts)
     
     def getfilename(self, url, base=None, reload=False, checkModifiedTime=False, normalize=False, filenameOnly=False):
+        """
+        :param reload: True if desired to reload the web cache for any web-referenced files.
+        """
         start_time = current_milli_time()
         if url is None:
             return url
@@ -300,26 +302,31 @@ class WebCache:
             timeNow = time.time()
             timeNowStr = time.strftime('%Y-%m-%dT%H:%M:%S UTC', time.gmtime(timeNow))
             retrievingDueToRecheckInterval = False
-            if not reload and os.path.exists(filepath):
-                if url in self.cachedUrlCheckTimes and not checkModifiedTime:
-                    cachedTime = calendar.timegm(time.strptime(self.cachedUrlCheckTimes[url], '%Y-%m-%dT%H:%M:%S UTC'))
-                else:
-                    cachedTime = 0
-                if timeNow - cachedTime > self.maxAgeSeconds:
-                    # weekly check if newer file exists
-                    newerOnWeb = False
-                    try: # no provision here for proxy authentication!!!
-                        remoteFileTime = lastModifiedTime( self.getheaders(quotedUrl) )
-                        if remoteFileTime and remoteFileTime > os.path.getmtime(filepath):
-                            newerOnWeb = True
-                    except:
-                        pass # for now, forget about authentication here
-                    if not newerOnWeb:
-                        # update ctime by copying file and return old file
-                        self.cachedUrlCheckTimes[url] = timeNowStr
-                        self.cachedUrlCheckTimesModified = True
+            if os.path.exists(filepath):
+                if reload:
+                    if url in self.cachedUrlCheckTimes and not checkModifiedTime:
+                        cachedTime = calendar.timegm(time.strptime(self.cachedUrlCheckTimes[url], '%Y-%m-%dT%H:%M:%S UTC'))
+                    else:
+                        cachedTime = 0
+                    if timeNow - cachedTime > self.maxAgeSeconds:
+                        # weekly check if newer file exists
+                        newerOnWeb = False
+                        try: # no provision here for proxy authentication!!!
+                            logger.debug('Arelle GetHeaders Detail - start')
+                            remoteFileTime = lastModifiedTime( self.getheaders(quotedUrl) )
+                            logger.debug('Arelle GetHeaders Detail - stop')
+                            if remoteFileTime and remoteFileTime > os.path.getmtime(filepath):
+                                newerOnWeb = True
+                        except:
+                            pass # for now, forget about authentication here
+                        if not newerOnWeb:
+                            # update ctime by copying file and return old file
+                            self.cachedUrlCheckTimes[url] = timeNowStr
+                            self.cachedUrlCheckTimesModified = True
+                            return filepath
+                        retrievingDueToRecheckInterval = True
+                    else:
                         return filepath
-                    retrievingDueToRecheckInterval = True
                 else:
                     return filepath
             filedir = os.path.dirname(filepath)
@@ -338,7 +345,6 @@ class WebCache:
                                       quotedUrl,
                                       filename=filepathtmp,
                                       reporthook=self.reportProgress)
-                    
                     # check if this is a real file or a wifi or web logon screen
                     if fileExt in {".xsd", ".xml", ".xbrl"}:
                         if b"<html" in initialBytes:
@@ -476,7 +482,6 @@ class WebCache:
                         return None
                 
                 # rename temporarily named downloaded file to desired name
-                logger.debug('Arelle Load Detail - About to rename temp files.')
                 if os.path.exists(filepath):
                     try:
                         if os.path.isfile(filepath) or os.path.islink(filepath):
