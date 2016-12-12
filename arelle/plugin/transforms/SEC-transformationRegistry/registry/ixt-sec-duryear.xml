@@ -59,6 +59,10 @@ Duration in years
 
 The duration in xs:duration.
 
+Number of months are computed as 30.4375 days.
+
+Transformed value is in integer years/months/days, days are rounded (no value smaller than a day).
+
       </xhtml:p>
     </output>
   </signature>

@@ -10,11 +10,13 @@ from arelle import (ModelDocument, ModelValue, ModelRelationshipSet,
                     XmlUtil, XbrlConst, ValidateFilingText)
 from arelle.ValidateXbrlCalcs import insignificantDigits
 from arelle.ModelObject import ModelObject
-from arelle.ModelInstanceObject import ModelFact
+from arelle.ModelInstanceObject import ModelFact, ModelInlineFootnote
 from arelle.ModelDtsObject import ModelConcept, ModelResource
 from arelle.PluginManager import pluginClassMethods
+from arelle.PrototypeDtsObject import LinkPrototype, LocPrototype, ArcPrototype
 from arelle.PythonUtil import pyNamedObject, strTruncate
 from arelle.UrlUtil import isHttpUrl
+from arelle.ValidateXbrlCalcs import inferredDecimals
 from arelle.XmlValidate import VALID
 from .DTS import checkFilingDTS
 from .Dimensions import checkFilingDimensions
@@ -35,6 +37,7 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
     efmCIKpattern = re.compile(r"^[0-9]{10}$")
     instantPreferredLabelRolePattern = re.compile(r".*[pP]eriod(Start|End)")
     embeddingCommandPattern = re.compile(r"[^~]*~\s*()[^~]*~")
+    styleIxHiddenPattern = re.compile(r"(.*[^\w]|^)-sec-ix-hidden\s*:\s*([\w.-]+).*")
     
     val._isStandardUri = {}
     modelXbrl.modelManager.disclosureSystem.loadStandardTaxonomiesDict()
@@ -75,13 +78,13 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
     val.requiredContext = None
     val.standardNamespaceConflicts = defaultdict(set)
     documentType = None # needed for non-instance validation too
-    if modelXbrl.modelDocument.type == ModelDocument.Type.INSTANCE or \
-       modelXbrl.modelDocument.type == ModelDocument.Type.INLINEXBRL:
+    isInlineXbrl = modelXbrl.modelDocument.type == ModelDocument.Type.INLINEXBRL
+    if modelXbrl.modelDocument.type == ModelDocument.Type.INSTANCE or isInlineXbrl:
         instanceName = modelXbrl.modelDocument.basename
         
         #6.3.3 filename check
         m = instanceFileNamePattern.match(instanceName)
-        if modelXbrl.modelDocument.type == ModelDocument.Type.INLINEXBRL:
+        if isInlineXbrl:
             m = htmlFileNamePattern.match(instanceName)
             if m:
                 val.fileNameBasePart     = None # html file name not necessarily parseable.
@@ -159,6 +162,7 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
         uniqueContextHashes = {}
         contextsWithDisallowedOCEs = []
         contextsWithDisallowedOCEcontent = []
+        nonStandardTypedDimensions = defaultdict(set)
         for context in contexts:
             contextID = context.id
             contextIDs.add(contextID)
@@ -211,7 +215,8 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                     if isinstance(segScenElt,ModelObject):
                         childTags = ", ".join([child.prefixedName for child in segScenElt.iterchildren()
                                                if isinstance(child,ModelObject) and 
-                                               child.tag != "{http://xbrl.org/2006/xbrldi}explicitMember"])
+                                               child.tag not in ("{http://xbrl.org/2006/xbrldi}explicitMember",
+                                                                 "{http://xbrl.org/2006/xbrldi}typedMember")])
                         if len(childTags) > 0:
                             if validateEFMpragmatic:
                                 contextsWithDisallowedOCEcontent.append(context)
@@ -220,6 +225,9 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                                                 _("%(elementName)s of context Id %(context)s has disallowed content: %(content)s"),
                                                 modelObject=context, context=contextID, content=childTags, 
                                                 elementName=contextName.partition("}")[2].title())
+            for dim in context.qnameDims.values():
+                if dim.isTyped and dim.dimensionQname.namespaceURI not in disclosureSystem.standardTaxonomiesDict:
+                    nonStandardTypedDimensions[dim.dimensionQname].add(context)
             #6.5.38 period forever
             if context.isForeverPeriod:
                 val.modelXbrl.error("EFM.6.05.38",
@@ -236,7 +244,13 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                     _("%(count)s contexts contain disallowed %(elementName)s content: %(context)s"),
                     modelObject=contextsWithDisallowedOCEcontent, elementName=disclosureSystem.contextElement, 
                     count=len(contextsWithDisallowedOCEcontent), context=', '.join(c.id for c in contextsWithDisallowedOCEcontent))
-        del uniqueContextHashes, contextsWithDisallowedOCEs, contextsWithDisallowedOCEcontent
+        if nonStandardTypedDimensions:
+            val.modelXbrl.error("EFM.6.05.39",
+                _("Typed dimensions must be defined in standard taxonomy schemas, contexts: %(contextIDs)s dimensions: %(dimensions)s."),
+                modelObject=set.union(*nonStandardTypedDimensions.values()), 
+                contextIDs=", ".join(sorted(cntx.id for cntx in set.union(*nonStandardTypedDimensions.values()))),
+                dimensions=", ".join(sorted(str(qn) for qn in nonStandardTypedDimensions.keys())))
+        del uniqueContextHashes, contextsWithDisallowedOCEs, contextsWithDisallowedOCEcontent, nonStandardTypedDimensions
         val.modelXbrl.profileActivity("... filer context checks", minTimeToShow=1.0)
 
 
@@ -335,7 +349,8 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                                     conceptsUsed[dConcept] = False
                             if (isEntityCommonStockSharesOutstanding and
                                 dimConcept is not None and
-                                dimConcept.name == "StatementClassOfStockAxis"):
+                                dimConcept.name in ("StatementClassOfStockAxis", "ClassesOfShareCapitalAxis") and
+                                dimConcept.modelDocument.targetNamespace in disclosureSystem.standardTaxonomiesDict):
                                 commonSharesItemsByStockClass[memConcept.qname].append(f)
                                 ''' per discussion with Dean R, remove use of LB defined members from this test
                                 if commonSharesClassMembers is None:
@@ -592,6 +607,7 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                 for f in hashEquivalentFacts:
                     aspectEqualFacts[(f.qname,f.contextID,f.unitID,f.xmlLang)].append(f)
                 for fList in aspectEqualFacts.values():
+                    fList.sort(key=lambda f: inferredDecimals(f), reverse=True)
                     f0 = fList[0]
                     if any(not f.isVEqualTo(f0) for f in fList[1:]):
                         modelXbrl.error(("EFM.6.05.12", "GFM.1.02.11"),
@@ -702,22 +718,29 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                                         "8-K12G3/A",
                                         "8-K15D5",
                                         "8-K15D5/A",
+                                        "F-1",
                                         "F-1/A",
-                                        "F-10",
-                                        "F-10/A",
-                                        "F-10EF",
-                                        "F-10POS",
+                                        "F-1MEF",
+                                        "F-3",
                                         "F-3/A",
                                         "F-3ASR",
                                         "F-3D",
                                         "F-3DPOS",
+                                        "F-3MEF",
+                                        "F-4",
                                         "F-4 POS",
                                         "F-4/A",
                                         "F-4EF",
+                                        "F-4MEF",
+                                        "F-6",
                                         "F-9 POS",
                                         "F-9/A",
                                         "F-9",
                                         "F-9EF",
+                                        "F-10",
+                                        "F-10/A",
+                                        "F-10EF",
+                                        "F-10POS",
                                         "N-1A",
                                         "N-1A/A",
                                         "N-CSR",
@@ -726,20 +749,14 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                                         "N-CSRS/A",
                                         "N-Q",
                                         "N-Q/A",
-                                        "F-1",
-                                        "F-6",
                                         "POS AM",
                                         "SD",
                                         "SD/A",
                                         "S-20",
                                         "S-B",
-                                        "F-4",
                                         "K SDR",
                                         "L SDR",
                                         "POS EX",
-                                        "F-1MEF",
-                                        "F-3MEF",
-                                        "F-4MEF",
                                         "POS462B",
                                         "POS462C",
                                         "S-BMEF",
@@ -1273,8 +1290,17 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
 
         #6.5.27 footnote elements, etc
         footnoteLinkNbr = 0
-        for footnoteLinkElt in xbrlInstDoc.iterdescendants(tag="{http://www.xbrl.org/2003/linkbase}footnoteLink"):
-            if isinstance(footnoteLinkElt,ModelObject):
+        if isInlineXbrl and isEFM:
+            _linkEltIter = (linkPrototype
+                            for linkKey, links in modelXbrl.baseSets.items()
+                            for linkPrototype in links
+                            if linkPrototype.modelDocument.type == ModelDocument.Type.INLINEXBRL
+                            and linkKey[1] and linkKey[2] and linkKey[3]  # fully specified roles
+                            and linkKey[0] != "XBRL-footnotes")
+        else: 
+            _linkEltIter = xbrlInstDoc.iterdescendants(tag="{http://www.xbrl.org/2003/linkbase}footnoteLink")
+        for footnoteLinkElt in _linkEltIter:
+            if isinstance(footnoteLinkElt, (ModelObject,LinkPrototype)):
                 footnoteLinkNbr += 1
                 
                 linkrole = footnoteLinkElt.get("{http://www.w3.org/1999/xlink}role")
@@ -1291,11 +1317,12 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                 locNbr = 0
                 arcNbr = 0
                 for child in footnoteLinkElt:
-                    if isinstance(child,ModelObject):
+                    if isinstance(child,(ModelObject,LocPrototype,ArcPrototype)):
                         xlinkType = child.get("{http://www.w3.org/1999/xlink}type")
-                        if child.namespaceURI != XbrlConst.link or \
-                           xlinkType not in ("locator", "resource", "arc") or \
-                           child.localName not in ("loc", "footnote", "footnoteArc"):
+                        if (not isinstance(child,ModelInlineFootnote) and
+                            (child.namespaceURI != XbrlConst.link or 
+                             xlinkType not in ("locator", "resource", "arc") or
+                             child.localName not in ("loc", "footnote", "footnoteArc"))):
                                 modelXbrl.error(("EFM.6.05.27", "GFM.1.02.19"),
                                     _("FootnoteLink %(footnoteLinkNumber)s has disallowed child element %(elementName)s"),
                                     modelObject=child, footnoteLinkNumber=footnoteLinkNbr, elementName=child.prefixedName)
@@ -1327,23 +1354,23 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                                     modelObject=child, footnoteLinkNumber=footnoteLinkNbr, arcNumber=arcNbr, 
                                     arcToLabel=child.get("{http://www.w3.org/1999/xlink}to"),
                                     arcrole=arcrole)
-                        elif xlinkType == "resource": # footnote
-                            footnoterole = child.get("{http://www.w3.org/1999/xlink}role")
+                        elif xlinkType == "resource" or isinstance(child,ModelInlineFootnote): # footnote
+                            footnoterole = child.role if isinstance(child,ModelInlineFootnote) else child.get("{http://www.w3.org/1999/xlink}role")
                             if footnoterole == "":
                                 modelXbrl.error(("EFM.6.05.28.missingRole", "GFM.1.2.20"),
                                     _("Footnote %(xlinkLabel)s is missing a role"),
-                                    modelObject=child, xlinkLabel=child.get("{http://www.w3.org/1999/xlink}label"))
+                                    modelObject=child, xlinkLabel=getattr(child, "xlinkLabel", None))
                             elif (isEFM and not disclosureSystem.uriAuthorityValid(footnoterole)) or \
                                  (disclosureSystem.GFM  and footnoterole != XbrlConst.footnote): 
                                 modelXbrl.error(("EFM.6.05.28", "GFM.1.2.20"),
                                     _("Footnote %(xlinkLabel)s has disallowed role %(role)s"),
-                                    modelObject=child, xlinkLabel=child.get("{http://www.w3.org/1999/xlink}label"),
+                                    modelObject=child, xlinkLabel=getattr(child, "xlinkLabel", None),
                                     role=footnoterole)
-                            if isEFM:
+                            if isEFM and not isInlineXbrl: # inline content was validated before and needs continuations assembly
                                 ValidateFilingText.validateFootnote(modelXbrl, child)
                             # find modelResource for this element
                             foundFact = False
-                            if XmlUtil.text(child) != "":
+                            if XmlUtil.text(child) != "" and not isInlineXbrl:
                                 if relationshipSet:
                                     for relationship in relationshipSet.toModelObject(child):
                                         if isinstance(relationship.fromModelObject, ModelFact):
@@ -1353,7 +1380,7 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                                     modelXbrl.error(("EFM.6.05.33", "GFM.1.02.24"),
                                         _("FootnoteLink %(footnoteLinkNumber)s footnote %(footnoteLabel)s has no linked fact"),
                                         modelObject=child, footnoteLinkNumber=footnoteLinkNbr, 
-                                        footnoteLabel=child.get("{http://www.w3.org/1999/xlink}label"),
+                                        footnoteLabel=getattr(child, "xlinkLabel", None),
                                         text=XmlUtil.text(child)[:100])
         val.modelXbrl.profileActivity("... filer rfootnotes checks", minTimeToShow=1.0)
 
@@ -1368,6 +1395,19 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
             modelXbrl.error("EFM.5.02.05.xhtmlNamespaceMissing",
                 _("InlineXBRL root element <%(element)s> MUST be html and have the xhtml namespace."),
                 modelObject=elt, element=elt.tag)
+        nsRequiredPrefixes = {"http://www.w3.org/1999/xhtml": "xhtml",
+                              "http://www.xbrl.org/2013/inlineXBRL": "ix",
+                              "http://www.xbrl.org/inlineXBRL/transformation/2015-02-26": "ixt",
+                              "http://www.sec.gov/inlineXBRL/transformation/2015-08-31": "ixt-sec"}
+        for prefix, ns in ((None, "http://www.w3.org/1999/xhtml"),
+                           ("ix", "http://www.xbrl.org/2013/inlineXBRL"),
+                           ("ixt", "http://www.xbrl.org/inlineXBRL/transformation/2015-02-26"),
+                           ("ixt-sec", "http://www.sec.gov/inlineXBRL/transformation/2015-08-31")):
+            for _prefix, _ns in elt.nsmap.items():
+                if _ns == ns and _prefix != prefix:
+                    modelXbrl.error("EFM.5.02.05.standardNamespacePrefix",
+                        _("The prefix %(submittedPrefix)s must be replaced by %(recommendedPrefix)s for standard namespace %(namespace)s."),
+                        modelObject=elt, submittedPrefix=_prefix, recommendedPrefix=prefix, namespace=ns)
         ixNStag = modelXbrl.modelDocument.ixNStag
         ixTags = set(ixNStag + ln for ln in ("nonNumeric", "nonFraction", "references", "relationship"))
         for tag in ixTags:
@@ -1391,6 +1431,62 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
             modelXbrl.error("EFM.5.02.05.doctypeDisallowed",
                 _("Inline HTML %(doctype)s is disallowed."),
                 modelObject=ixElt, doctype=modelXbrl.modelDocument.xmlDocument.docinfo.doctype)
+
+        # hidden references
+        untransformableTypes = {"anyURI", "base64Binary", "hexBinary", "NOTATION", "QName", "time",
+                                "token", "language"}
+        hiddenEltIds = {}
+        presentedHiddenEltIds = defaultdict(list)
+        eligibleForTransformHiddenFacts = []
+        requiredToDisplayFacts = []
+        requiredToDisplayFactIds = {}
+        for ixHiddenElt in modelXbrl.modelDocument.xmlRootElement.iterdescendants(tag=ixNStag + "hidden"):
+            for tag in (ixNStag + "nonNumeric", ixNStag+"nonFraction"):
+                for ixElt in ixHiddenElt.iterdescendants(tag=tag):
+                    if (getattr(ixElt, "xValid", 0) >= VALID and # may not be validated
+                        not ixElt.qname.namespaceURI.startswith("http://xbrl.sec.gov/dei/")):
+                        if (ixElt.concept.baseXsdType not in untransformableTypes and
+                            not ixElt.isNil):
+                            eligibleForTransformHiddenFacts.append(ixElt)
+                        elif ixElt.id is None:
+                            requiredToDisplayFacts.append(ixElt)
+                    if ixElt.id:
+                        hiddenEltIds[ixElt.id] = ixElt
+        if eligibleForTransformHiddenFacts:
+            modelXbrl.warning("EFM.5.02.05.14.hidden-fact-eligible-for-transform",
+                _("%(countEligible)s fact(s) appearing in ix:hidden were eligible for transformation: %(elements)s"),
+                modelObject=eligibleForTransformHiddenFacts, 
+                countEligible=len(eligibleForTransformHiddenFacts),
+                elements=", ".join(sorted(set(str(f.qname) for f in eligibleForTransformHiddenFacts))))
+        for ixElt in modelXbrl.modelDocument.xmlDocument.iterfind("//{http://www.w3.org/1999/xhtml}*[@style]"):
+            hiddenFactRefMatch = styleIxHiddenPattern.match(ixElt.get("style",""))
+            if hiddenFactRefMatch:
+                hiddenFactRef = hiddenFactRefMatch.group(2)
+                if hiddenFactRef not in hiddenEltIds:
+                    modelXbrl.error("EFM.5.02.05.14.hidden-fact-not-found",
+                        _("The value of the -sec-ix-hidden style property, %(id)s, does not correspond to the id of any hidden fact."),
+                        modelObject=ixElt, id=hiddenFactRef)
+                else:
+                    presentedHiddenEltIds[hiddenFactRef].append(ixElt)
+        for hiddenFactRef, ixElts in presentedHiddenEltIds.items():
+            if len(ixElts) > 1 and hiddenFactRef in hiddenEltIds:
+                fact = hiddenEltIds[hiddenFactRef]
+                modelXbrl.warning("EFM.5.02.05.14.hidden-fact-multiple-references",
+                    _("Fact %(element)s, id %(id)s, is referenced from %(countReferences)s elements."),
+                    modelObject=ixElts + [fact], id=hiddenFactRef, element=fact.qname, countReferences=len(ixElts))
+        for hiddenEltId, ixElt in hiddenEltIds.items():
+            if (hiddenEltId not in presentedHiddenEltIds and
+                getattr(ixElt, "xValid", 0) >= VALID and # may not be validated
+                not ixElt.qname.namespaceURI.startswith("http://xbrl.sec.gov/dei/") and
+                (ixElt.concept.baseXsdType in untransformableTypes or ixElt.isNil)):
+                requiredToDisplayFacts.append(ixElt)
+        if requiredToDisplayFacts:
+            modelXbrl.warning("EFM.5.02.05.14.hidden-fact-not-referenced",
+                _("%(countUnreferenced)s fact(s) appearing in ix:hidden were not referenced by any -sec-ix-hidden style property: %(elements)s"),
+                modelObject=requiredToDisplayFacts, 
+                countUnreferenced=len(requiredToDisplayFacts),
+                elements=", ".join(sorted(set(str(f.qname) for f in requiredToDisplayFacts))))
+        del eligibleForTransformHiddenFacts, hiddenEltIds, presentedHiddenEltIds, requiredToDisplayFacts
     # all-labels and references checks
     defaultLangStandardLabels = {}
     for concept in modelXbrl.qnameConcepts.values():
@@ -1574,14 +1670,14 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                                         linkroleName=modelXbrl.roleTypeName(rel.linkrole),
                                         conceptTo2=orderRels[order].toModelObject.qname, 
                                         preferredLabel=preferredLabel, preferredLabelValue=preferredLabel.rpartition("/")[2])
-                                if (relTo.isDimensionItem and not any(
+                                if (relTo.isExplicitDimension and not any(
                                     isinstance(_rel.toModelObject, ModelConcept) and _rel.toModelObject.type is not None and _rel.toModelObject.type.isDomainItemType
                                     for _rel in parentChildRels.fromModelObject(relTo))):
                                         modelXbrl.warning("EFM.6.12.08",
                                             _("In \"%(linkrole)s\" axis %(axis)s has no domain element children, which effectively filters out every fact."),
                                             modelObject=relFrom, axis=relFrom.qname, 
                                             linkrole=ELR, linkroleDefinition=modelXbrl.roleTypeDefinition(ELR), linkroleName=modelXbrl.roleTypeName(ELR))
-                                if (relFrom.isDimensionItem and not any(
+                                if (relFrom.isExplicitDimension and not any(
                                     isinstance(_rel.toModelObject, ModelConcept) and _rel.toModelObject.type is not None and _rel.toModelObject.type.isDomainItemType
                                     for _rel in siblingRels)):
                                         modelXbrl.warning("EFM.6.12.08",

@@ -359,8 +359,8 @@ class ModelFact(ModelObject):
                 if self.xValid >= VALID:
                     return str(self.xValue)
                 return "/".join(self.fractionValue)
+            val = self.value
             if concept.isNumeric:
-                val = self.value
                 try:
                     # num = float(val)
                     dec = self.decimals
@@ -381,7 +381,9 @@ class ModelFact(ModelObject):
                         return Locale.format(self.modelXbrl.locale, "{:.{}f}", (num,dec), True)
                 except ValueError: 
                     return "(error)"
-            return self.value
+            if len(val) == 0: # zero length string for HMRC fixed fact
+                return "(reported)"
+            return val
         except Exception as ex:
             return str(ex)  # could be transform value of inline fact
 
@@ -579,7 +581,7 @@ class ModelInlineValueObject:
             self.xValid = UNVALIDATED # may not be initialized otherwise
             self.xValue = None
             v = XmlUtil.innerText(self, 
-                                  ixExclude=True, 
+                                  ixExclude="html", 
                                   ixEscape=(self.get("escape") in ("true","1")), 
                                   ixContinuation=(self.elementQname == XbrlConst.qnIXbrl11NonNumeric),
                                   strip=True) # transforms are whitespace-collapse
@@ -1476,8 +1478,9 @@ class ModelInlineFootnote(ModelResource):
         except AttributeError:
             self._ixValue = XmlUtil.innerText(self, 
                                   ixExclude=True, 
+                                  ixEscape="html", 
                                   ixContinuation=(self.namespaceURI != XbrlConst.ixbrl),
-                                  strip=True) # transforms are whitespace-collapse
+                                  strip=True) # include HTML constructs
 
             return self._ixValue
         

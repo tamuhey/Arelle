@@ -2013,7 +2013,7 @@ class ModelExplicitDimension(ModelFilter):
     @property
     def dimQnameExpression(self):
         qnameExpression = XmlUtil.descendant(XmlUtil.child(self,XbrlConst.df,"dimension"), XbrlConst.df, "qnameExpression")
-        if qnameExpression:
+        if qnameExpression is not None:
             return XmlUtil.text(qnameExpression)
         return None    
 
@@ -2658,6 +2658,11 @@ class ModelMessage(ModelFormulaResource):
     def clear(self):
         XPathParser.clearNamedProgs(self, "expressionProgs")
         super(ModelMessage, self).clear()
+
+    @property
+    def xmlLang(self):
+        """(str) -- xml:lang attribute"""
+        return XmlUtil.ancestorOrSelfAttr(self, "{http://www.w3.org/XML/1998/namespace}lang")
     
     @property
     def separator(self):

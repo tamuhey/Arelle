@@ -539,7 +539,7 @@ class ModelConcept(ModelNamableTerm, ModelParticle):
         """(bool) -- True if element has form attribute qualified or its document default"""
         if self.get("form") is not None: # form is almost never used
             return self.get("form") == "qualified"
-        return self.modelDocument.isQualifiedElementFormDefault
+        return getattr(self.modelDocument, "isQualifiedElementFormDefault", False) # parent might not be a schema document
         
     @property
     def nillable(self):
@@ -711,17 +711,19 @@ class ModelConcept(ModelNamableTerm, ModelParticle):
     
     @property
     def isEnumeration(self):
-        """(bool) -- True if derived from enum:enumerationItemType"""
+        """(bool) -- True if derived from enum:enumerationItemType or enum:enumerationsItemType"""
         try:
             return self._isEnum
         except AttributeError:
-            self._isEnum = self.instanceOfType(XbrlConst.qnEnumerationItemType)
+            self._isEnum = (self.instanceOfType(XbrlConst.qnEnumerationItemType2014) or
+                            self.instanceOfType(XbrlConst.qnEnumerationItemType2016) or
+                            self.instanceOfType(XbrlConst.qnEnumerationsItemType2016))
             return self._isEnum
         
     @property
     def enumDomainQname(self):
         """(QName) -- enumeration domain qname """
-        return self.schemaNameQname(self.get(XbrlConst.attrEnumerationDomain))
+        return self.schemaNameQname(self.get(XbrlConst.attrEnumerationDomain2014) or self.get(XbrlConst.attrEnumerationDomain2016))
 
     @property
     def enumDomain(self):
@@ -735,12 +737,12 @@ class ModelConcept(ModelNamableTerm, ModelParticle):
     @property
     def enumLinkrole(self):
         """(anyURI) -- enumeration linkrole """
-        return self.get(XbrlConst.attrEnumerationLinkrole)
+        return self.get(XbrlConst.attrEnumerationLinkrole2014) or self.get(XbrlConst.attrEnumerationLinkrole2016)
     
     @property
     def enumDomainUsable(self):
         """(string) -- enumeration usable attribute """
-        return self.get(XbrlConst.attrEnumerationUsable) or "false"
+        return self.get(XbrlConst.attrEnumerationUsable2014) or self.get(XbrlConst.attrEnumerationUsable2016) or "false"
 
     @property
     def isEnumDomainUsable(self):
@@ -1553,7 +1555,10 @@ class ModelResource(ModelObject):
     
     def viewText(self, labelrole=None, lang=None):
         """(str) -- Text of contained (inner) text nodes except for any whose localName 
-        starts with URI, for label and reference parts displaying purposes."""
+        starts with URI, for label and reference parts displaying purposes.
+        (Footnotes, which return serialized html content of footnote.)"""
+        if self.qname == XbrlConst.qnLinkFootnote:
+            return XmlUtil.innerText(self, ixEscape="html", strip=True) # include HTML construct
         return " ".join([XmlUtil.text(resourceElt)
                            for resourceElt in self.iter()
                               if isinstance(resourceElt,ModelObject) and 

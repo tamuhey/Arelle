@@ -121,9 +121,14 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
                     modelObject=referringElement, fileName=mappedUri)
             raise LoadingException()
         if normalizedUri not in modelXbrl.urlUnloadableDocs:
-            modelXbrl.error("FileNotLoadable",
-                    _("File can not be loaded: %(fileName)s"),
-                    modelObject=referringElement, fileName=normalizedUri)
+            if "referringElementUrl" in kwargs:
+                modelXbrl.error("FileNotLoadable",
+                        _("File can not be loaded: %(fileName)s, referenced from %(referencingFileName)s"),
+                        modelObject=referringElement, fileName=normalizedUri, referencingFileName=kwargs["referringElementUrl"])
+            else:
+                modelXbrl.error("FileNotLoadable",
+                        _("File can not be loaded: %(fileName)s"),
+                        modelObject=referringElement, fileName=normalizedUri)
             modelXbrl.urlUnloadableDocs[normalizedUri] = True # always blocked if not loadable on this error
         return None
     
@@ -245,9 +250,13 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
                 _type = Type.LINKBASE
             elif ln == "xbrl":
                 _type = Type.INSTANCE
+            else:
+                _type = Type.UnknownXML
         elif isEntry and ns == XbrlConst.xbrli:
             if ln == "xbrl":
                 _type = Type.INSTANCE
+            else:
+                _type = Type.UnknownXML
         elif ns == XbrlConst.xhtml and \
              (ln == "html" or ln == "xhtml"):
             _type = Type.UnknownXML
@@ -364,7 +373,7 @@ def loadSchemalocatedSchema(modelXbrl, element, relativeUrl, namespace, baseUrl)
     if namespace == XbrlConst.xhtml: # block loading xhtml as a schema (e.g., inline which is xsd validated instead)
         return None
     importSchemaLocation = modelXbrl.modelManager.cntlr.webCache.normalizeUrl(relativeUrl, baseUrl)
-    doc = load(modelXbrl, importSchemaLocation, isIncluded=False, isDiscovered=False, namespace=namespace, referringElement=element)
+    doc = load(modelXbrl, importSchemaLocation, isIncluded=False, isDiscovered=False, namespace=namespace, referringElement=element, referringElementUrl=baseUrl)
     if doc:
         if doc.targetNamespace != namespace:
             modelXbrl.error("xmlSchema1.4.2.3:refSchemaNamespace",
@@ -445,6 +454,10 @@ def create(modelXbrl, type, uri, schemaRefs=None, isEntry=False, initialXml=None
                 if isinstance(semanticRoot, ModelObject):
                     modelDocument.xmlRootElement = semanticRoot
                     break
+        # init subtree
+        for elt in xmlDocument.iter():
+            if isinstance(elt, ModelObject):
+                elt.init(modelDocument)
     if type == Type.INSTANCE and discover:
         modelDocument.instanceDiscover(modelDocument.xmlRootElement)
     elif type == Type.RSSFEED and discover:
@@ -693,7 +706,7 @@ class ModelDocument:
             except AttributeError:
                 pass
 
-    def save(self, overrideFilepath=None, outputZip=None, updateFileHistory=True, encoding="utf-8"):
+    def save(self, overrideFilepath=None, outputZip=None, updateFileHistory=True, encoding="utf-8", **kwargs):
         """Saves current document file.
         
         :param overrideFilepath: specify to override saving in instance's modelDocument.filepath
@@ -702,7 +715,7 @@ class ModelDocument:
             fh = io.StringIO();
         else:
             fh = open( (overrideFilepath or self.filepath), "w", encoding='utf-8')
-        XmlUtil.writexml(fh, self.xmlDocument, encoding=encoding)
+        XmlUtil.writexml(fh, self.xmlDocument, encoding=encoding, **kwargs)
         if outputZip:
             fh.seek(0)
             outputZip.writestr(os.path.basename(overrideFilepath or self.filepath),fh.read())
@@ -1559,7 +1572,8 @@ def inlineIxdsDiscover(modelXbrl):
                 fromLabels = set()
                 for fromId in modelInlineRel.get("fromRefs","").split():
                     fromLabels.add(fromId)
-                    if fromId not in linkModelLocIds:
+                    if fromId not in linkModelLocIds[linkrole]:
+                        linkModelLocIds[linkrole].add(fromId)
                         locPrototype = LocPrototype(mdlDoc, linkPrototype, fromId, fromId, sourceElement=modelInlineRel)
                         linkPrototype.childElements.append(locPrototype)
                         linkPrototype.labeledResources[fromId].append(locPrototype)
@@ -1575,12 +1589,14 @@ def inlineIxdsDiscover(modelXbrl):
                         if toId not in linkModelInlineFootnoteIds[linkrole]:
                             linkPrototype.childElements.append(modelInlineFootnote)
                             linkModelInlineFootnoteIds[linkrole].add(toId)
-                        linkPrototype.labeledResources[toId].append(modelInlineFootnote)
+                            linkPrototype.labeledResources[toId].append(modelInlineFootnote)
                     elif toId in factsByFactID:
-                        locPrototype = LocPrototype(mdlDoc, linkPrototype, toId, toId, sourceElement=modelInlineRel)
-                        toFactQnames.add(str(locPrototype.dereference().qname))
-                        linkPrototype.childElements.append(locPrototype)
-                        linkPrototype.labeledResources[toId].append(locPrototype)
+                        if toId not in linkModelLocIds[linkrole]:
+                            linkModelLocIds[linkrole].add(toId)
+                            locPrototype = LocPrototype(mdlDoc, linkPrototype, toId, toId, sourceElement=modelInlineRel)
+                            toFactQnames.add(str(locPrototype.dereference().qname))
+                            linkPrototype.childElements.append(locPrototype)
+                            linkPrototype.labeledResources[toId].append(locPrototype)
                     else: 
                         toIdsNotFound.append(toId)
                 if toIdsNotFound:
