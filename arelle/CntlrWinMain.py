@@ -7,7 +7,7 @@ This module is Arelle's controller in windowing interactive UI mode
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
 from arelle import PythonUtil # define 2.x or 3.x string types
-import os, sys, subprocess, pickle, time, locale, re
+import os, sys, subprocess, pickle, time, locale, re, fnmatch
 from tkinter import (Tk, Tcl, TclError, Toplevel, Menu, PhotoImage, StringVar, BooleanVar, N, S, E, W, EW, 
                      HORIZONTAL, VERTICAL, END, font as tkFont)
 try:
@@ -102,6 +102,7 @@ class CntlrWinMain (Cntlr.Cntlr):
                 (_("Open Web..."), self.webOpen, "Shift+Alt+O", "<Shift-Alt-o>"),
                 (_("Import File..."), self.importFileOpen, None, None),
                 (_("Import Web..."), self.importWebOpen, None, None),
+                (_("Reopen"), self.fileReopen, None, None),
                 ("PLUG-IN", "CntlrWinMain.Menu.File.Open", None, None),
                 (_("Save"), self.fileSaveExistingFile, "Ctrl+S", "<Control-s>"),
                 (_("Save As..."), self.fileSave, None, None),
@@ -145,6 +146,10 @@ class CntlrWinMain (Cntlr.Cntlr):
         self.validateInferDecimals = BooleanVar(value=self.modelManager.validateInferDecimals)
         self.validateInferDecimals.trace("w", self.setValidateInferDecimals)
         validateMenu.add_checkbutton(label=_("Infer Decimals in calculations"), underline=0, variable=self.validateInferDecimals, onvalue=True, offvalue=False)
+        self.modelManager.validateDedupCalcs = self.config.setdefault("validateDedupCalcs",False)
+        self.validateDedupCalcs = BooleanVar(value=self.modelManager.validateDedupCalcs)
+        self.validateDedupCalcs.trace("w", self.setValidateDedupCalcs)
+        validateMenu.add_checkbutton(label=_("De-duplicate calculations"), underline=0, variable=self.validateDedupCalcs, onvalue=True, offvalue=False)
         self.modelManager.validateUtr = self.config.setdefault("validateUtr",True)
         self.validateUtr = BooleanVar(value=self.modelManager.validateUtr)
         self.validateUtr.trace("w", self.setValidateUtr)
@@ -252,6 +257,7 @@ class CntlrWinMain (Cntlr.Cntlr):
                 #("images/toolbarNewFile.gif", self.fileNew),
                 ("toolbarOpenFile.gif", self.fileOpen, _("Open local file"), _("Open by choosing a local XBRL file, testcase, or archive file")),
                 ("toolbarOpenWeb.gif", self.webOpen, _("Open web file"), _("Enter an http:// URL of an XBRL file or testcase")),
+                ("toolbarReopen.gif", self.fileReopen, _("Reopen"), _("Reopen last opened XBRL file or testcase(s)")),
                 ("toolbarSaveFile.gif", self.fileSaveExistingFile, _("Save file"), _("Saves currently selected local XBRL file")),
                 ("toolbarClose.gif", self.fileClose, _("Close"), _("Closes currently selected instance/DTS or testcase(s)")),
                 (None,None,None,None),
@@ -394,6 +400,16 @@ class CntlrWinMain (Cntlr.Cntlr):
         if not self.modelManager.disclosureSystem.select(self.config.setdefault("disclosureSystem", None)):
             self.validateDisclosureSystem.set(False)
             self.modelManager.validateDisclosureSystem = False
+            
+        # load argv overrides for modelManager options
+        lastArg = None
+        for arg in sys.argv:
+            if not arg: continue
+            if lastArg == "--skipLoading": # skip loading matching files (list of unix patterns)
+                self.modelManager.skipLoading = re.compile('|'.join(fnmatch.translate(f) for f in arg.split('|')))
+            elif arg == "--skipDTS": # skip DTS loading, discovery, etc
+                self.modelManager.skipDTS = True    
+            lastArg = arg
         self.setValidateTooltipText()
         
         
@@ -911,6 +927,12 @@ class CntlrWinMain (Cntlr.Cntlr):
         self.parent.title(_("arelle - Unnamed"))
         self.setValidateTooltipText()
         self.currentView = None
+        
+    def fileReopen(self, *ignore):
+        self.fileClose()
+        fileHistory = self.config.setdefault("fileHistory", [])
+        if len(fileHistory) > 0:
+            self.fileOpenFile(fileHistory[0])
 
     def validate(self):
         modelXbrl = self.modelManager.modelXbrl
@@ -1153,6 +1175,8 @@ class CntlrWinMain (Cntlr.Cntlr):
                         c = _("\nCheck calculations (infer decimals)")
                     else:
                         c = _("\nCheck calculations (infer precision)")
+                    if self.modelManager.validateDedupCalcs:
+                        c += _("\nDeduplicate calculations")
                 else:
                     c = ""
                 if self.modelManager.validateUtr:
@@ -1177,6 +1201,12 @@ class CntlrWinMain (Cntlr.Cntlr):
     def setValidateInferDecimals(self, *args):
         self.modelManager.validateInferDecimals = self.validateInferDecimals.get()
         self.config["validateInferDecimals"] = self.modelManager.validateInferDecimals
+        self.saveConfig()
+        self.setValidateTooltipText()
+            
+    def setValidateDedupCalcs(self, *args):
+        self.modelManager.validateDedupCalcs = self.validateDedupCalcs.get()
+        self.config["validateDedupCalcs"] = self.modelManager.validateDedupCalcs
         self.saveConfig()
         self.setValidateTooltipText()
             
@@ -1427,7 +1457,7 @@ class TkinterCallWrapper:
             # this was tkinter's standard coding: self.widget._report_exception()
             exc_type, exc_value, exc_traceback = sys.exc_info()
             msg = ''.join(traceback.format_exception_only(exc_type, exc_value))
-            tracebk = ''.join(traceback.format_tb(exc_traceback, limit=7))
+            tracebk = ''.join(traceback.format_tb(exc_traceback, limit=30))
             tkinter.messagebox.showerror(_("Exception"), 
                                          _("{0}\nCall trace\n{1}").format(msg, tracebk))
                 

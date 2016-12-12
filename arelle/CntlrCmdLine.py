@@ -104,6 +104,9 @@ def parseAndRun(args):
     parser.add_option("--calcPrecision", action="store_true", dest="calcPrecision",
                       help=_("Specify calculation linkbase validation inferring precision."))
     parser.add_option("--calcprecision", action="store_true", dest="calcPrecision", help=SUPPRESS_HELP)
+    parser.add_option("--calcDeduplicate", action="store_true", dest="calcDeduplicate",
+                      help=_("Specify de-duplication of consistent facts when performing calculation validation, chooses most accurate fact."))
+    parser.add_option("--calcdeduplicate", action="store_true", dest="calcDeduplicate", help=SUPPRESS_HELP)
     parser.add_option("--efm", action="store_true", dest="validateEFM",
                       help=_("Select Edgar Filer Manual (U.S. SEC) disclosure system validation (strict)."))
     parser.add_option("--gfm", action="store", dest="disclosureSystemName", help=SUPPRESS_HELP)
@@ -695,6 +698,8 @@ class CntlrCmdLine(Cntlr.Cntlr):
         elif options.calcPrecision:
             self.modelManager.validateInferDecimals = False
             self.modelManager.validateCalcLB = True
+        if options.calcDeduplicate:
+            self.modelManager.validateDedupCalcs = True
         if options.utrValidate:
             self.modelManager.validateUtr = True
         if options.infosetValidate:
@@ -771,10 +776,12 @@ class CntlrCmdLine(Cntlr.Cntlr):
         # entrypointFile may be absent (if input is a POSTED zip or file name ending in .zip)
         #    or may be a | separated set of file names
         _entryPoints = []
+        _checkIfXmlIsEis = self.modelManager.disclosureSystem and self.modelManager.disclosureSystem.validationType == "EFM"
         if options.entrypointFile:
             _f = options.entrypointFile
             try: # may be a json list
                 _entryPoints = json.loads(_f)
+                _checkIfXmlIsEis = False # json entry objects never specify an xml EIS archive
             except ValueError:
                 # is it malformed json?
                 if _f.startswith("[{") or _f.endswith("]}") or '"file:"' in _f:
@@ -790,8 +797,8 @@ class CntlrCmdLine(Cntlr.Cntlr):
         filesource = None # file source for all instances if not None
         if sourceZipStream:
             filesource = FileSource.openFileSource(None, self, sourceZipStream)
-        elif len(_entryPoints) == 1: # check if a zip and need to discover entry points
-            filesource = FileSource.openFileSource(_entryPoints[0].get("file",None), self)
+        elif len(_entryPoints) == 1: # check if an archive and need to discover entry points
+            filesource = FileSource.openFileSource(_entryPoints[0].get("file",None), self, checkIfXmlIsEis=_checkIfXmlIsEis)
         _entrypointFiles = _entryPoints
         if filesource and not filesource.selection:
             if filesource.isArchive:

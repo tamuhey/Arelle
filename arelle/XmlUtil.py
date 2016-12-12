@@ -10,7 +10,7 @@ try:
 except ImportError:
     import re
 from lxml import etree
-from arelle.XbrlConst import ixbrlAll, qnLinkFootnote, xhtml, xml, xsd
+from arelle.XbrlConst import ixbrlAll, qnLinkFootnote, xhtml, xml, xsd, xhtml
 from arelle.ModelObject import ModelObject, ModelComment
 from arelle.ModelValue import qname, QName
 
@@ -149,7 +149,8 @@ def textNotStripped(element):
         return ""
     return element.textValue  # allows embedded comment nodes, returns '' if None
 
-def innerText(element, ixExclude=False, ixEscape=False, ixContinuation=False, strip=True):   
+# ixEscape can be None, "html" (xhtml namespace becomes default), "xhtml", or "xml"
+def innerText(element, ixExclude=False, ixEscape=None, ixContinuation=False, strip=True):   
     try:
         text = "".join(text for text in innerTextNodes(element, ixExclude, ixEscape, ixContinuation))
         if strip:
@@ -158,7 +159,7 @@ def innerText(element, ixExclude=False, ixEscape=False, ixContinuation=False, st
     except (AttributeError, TypeError):
         return ""
 
-def innerTextList(element, ixExclude=False, ixEscape=False, ixContinuation=False):   
+def innerTextList(element, ixExclude=False, ixEscape=None, ixContinuation=False):   
     try:
         return ", ".join(text.strip() for text in innerTextNodes(element, ixExclude, ixEscape, ixContinuation) if len(text.strip()) > 0)
     except (AttributeError, TypeError):
@@ -166,7 +167,7 @@ def innerTextList(element, ixExclude=False, ixEscape=False, ixContinuation=False
 
 def innerTextNodes(element, ixExclude, ixEscape, ixContinuation):
     if element.text:
-        yield element.text
+        yield escapedText(element.text) if ixEscape else element.text
     for child in element.iterchildren():
         if isinstance(child,ModelObject) and (
            not ixExclude or 
@@ -174,34 +175,44 @@ def innerTextNodes(element, ixExclude, ixEscape, ixContinuation):
             firstChild = True
             for nestedText in innerTextNodes(child, ixExclude, ixEscape, False): # nested elements don't participate in continuation chain
                 if firstChild and ixEscape:
-                    yield escapedNode(child, True, False)
+                    yield escapedNode(child, True, False, ixEscape)
                     firstChild = False
                 yield nestedText
             if ixEscape:
-                yield escapedNode(child, False, firstChild)
+                yield escapedNode(child, False, firstChild, ixEscape)
         if child.tail:
-            yield child.tail
+            yield escapedText(child.tail) if ixEscape else child.tail
     if ixContinuation:
         contAt = getattr(element, "_continuationElement", None)
         if contAt is not None:
             for contText in innerTextNodes(contAt, ixExclude, ixEscape, ixContinuation):
                 yield contText
             
-def escapedNode(elt, start, empty):
+def escapedNode(elt, start, empty, ixEscape):
     if elt.namespaceURI in ixbrlAll:
         return ''  # do not yield XML for nested facts
     s = ['<']
     if not start and not empty:
         s.append('/')
-    s.append(str(elt.qname))
+    if ixEscape == "html" and elt.qname.namespaceURI == xhtml:
+        s.append(elt.qname.localName) # force xhtml prefix to be default
+    else:
+        s.append(str(elt.qname))
     if start or empty:
-        for n,v in elt.items():
+        for n,v in sorted(elt.items(), key=lambda item: item[0]):
             s.append(' {0}="{1}"'.format(qname(elt,n),
                                          v.replace("&","&amp;").replace('"','&quot;')))
     if not start and empty:
         s.append('/')
     s.append('>')
     return ''.join(s)
+
+def escapedText(text):
+    return ''.join("&amp;" if c == "&"
+                   else "&lt;" if c == "<"
+                   else "&gt;" if c == ">"
+                   else c
+                   for c in text)
 
 def collapseWhitespace(s):
     return ' '.join( nonSpacePattern.findall(s) ) 
@@ -547,40 +558,42 @@ def copyChildren(parent, elt):
         if isinstance(childNode,ModelObject):
             copyNodes(parent, childNode)
 
-def copyIxFootnoteHtml(sourceXml, targetHtml, targetModelDocument=None, withText=False, isContinChainElt=True):
-    if not (isinstance(sourceXml,ModelObject) and sourceXml.localName == "exclude" and sourceXml.namespaceURI in ixbrlAll):
+def copyIxFootnoteHtml(srcXml, tgtHtml, targetModelDocument=None, withText=False, isContinChainElt=True, tgtStack=None, srcLevel=0):
+    if tgtStack is None:
+        tgtStack = [[tgtHtml, "text"]] # stack of current targetStack element, and current text attribute
+    if not (isinstance(srcXml,ModelObject) and srcXml.localName == "exclude" and srcXml.namespaceURI in ixbrlAll):
+        tgtStackLen = len(tgtStack)
         if withText:
-            _tx = sourceXml.text
+            _tx = srcXml.text            
             if _tx:
-                try: # if target has a last child already with a tail, add to tail instead of to text
-                    targetLastchild = next(targetHtml.iterchildren(reversed=True))
-                    targetLastchild.tail = (targetLastchild.tail or "") + _tx
-                except StopIteration: # no children
-                    targetHtml.text = (targetHtml.text or "") + _tx
-        for sourceChild in sourceXml.iterchildren():
-            if isinstance(sourceChild,ModelObject):
-                if not sourceChild.namespaceURI in ixbrlAll:
+                tgtElt, tgtNode = tgtStack[-1]
+                setattr(tgtElt, tgtNode, (getattr(tgtElt, tgtNode) or "") + _tx)
+        for srcChild in srcXml.iterchildren():
+            if isinstance(srcChild,ModelObject):
+                if not srcChild.namespaceURI in ixbrlAll:
                     # ensure xhtml has an xmlns
-                    if targetModelDocument is not None and sourceChild.namespaceURI == xhtml and xhtml not in targetHtml.nsmap.values():
+                    if targetModelDocument is not None and srcChild.namespaceURI == xhtml and xhtml not in tgtHtml.nsmap.values():
                         setXmlns(targetModelDocument, "xhtml", xhtml)
-                    targetChild = etree.SubElement(targetHtml, sourceChild.tag)
-                    for attrTag, attrValue in sourceChild.items():
-                        targetChild.set(attrTag, attrValue)
-                    copyIxFootnoteHtml(sourceChild, targetChild, targetModelDocument, withText=withText, isContinChainElt=False)
+                    tgtChild = etree.SubElement(tgtHtml, srcChild.tag)
+                    for attrTag, attrValue in srcChild.items():
+                        tgtChild.set(attrTag, attrValue)
+                    tgtStack.append([tgtChild, "text"])
+                    copyIxFootnoteHtml(srcChild, tgtChild, targetModelDocument, withText=withText, isContinChainElt=False, tgtStack=tgtStack, srcLevel=srcLevel+1)
+                    tgtStack[-1][1] = "tail"
                 else:
-                    copyIxFootnoteHtml(sourceChild, targetHtml, targetModelDocument, withText=withText, isContinChainElt=False)
-    if withText:
-        _tl = sourceXml.tail
+                    copyIxFootnoteHtml(srcChild, tgtHtml, targetModelDocument, withText=withText, isContinChainElt=False, tgtStack=tgtStack, srcLevel=srcLevel+1)
+        if not (isinstance(srcXml,ModelObject) and srcXml.namespaceURI in ixbrlAll):
+            del tgtStack[tgtStackLen:]
+            tgtStack[-1][1] = "tail"
+    if withText and srcLevel > 0: # don't take tail of entry level ix:footnote or ix:continuatino
+        _tl = srcXml.tail
         if _tl:
-            try: # if target has a last child already with a tail, add to tail instead of to text
-                targetLastchild = next(targetHtml.iterchildren(reversed=True))
-                targetLastchild.tail = (targetLastchild.tail or "") + _tl
-            except StopIteration: # no children
-                targetHtml.text = (targetHtml.text or "") + _tl
+            tgtElt, tgtNode = tgtStack[-1]
+            setattr(tgtElt, tgtNode, (getattr(tgtElt, tgtNode) or "") + _tl)
     if isContinChainElt: # for inline continuation chain elements, follow chain (but not for nested elements)
-        contAt = getattr(sourceXml, "_continuationElement", None)
+        contAt = getattr(srcXml, "_continuationElement", None)
         if contAt is not None:
-            copyIxFootnoteHtml(contAt, targetHtml, targetModelDocument, withText=withText, isContinChainElt=True)
+            copyIxFootnoteHtml(contAt, tgtHtml, targetModelDocument, withText=withText, isContinChainElt=True, tgtStack=tgtStack, srcLevel=0)
         
 def addComment(parent, commentText):
     comment = str(commentText)
@@ -843,6 +856,7 @@ def xmlstring(elt, stripXmlns=False, prettyPrint=False, contentsOnly=False, incl
 
 def writexml(writer, node, encoding=None, indent='', xmlcharrefreplace=False, parentNsmap=None):
     # customized from xml.minidom to provide correct indentation for data items
+    # when indent is None, preserve original whitespace and don't pretty print
     if isinstance(node,etree._ElementTree):
         if encoding:
             writer.write('<?xml version="1.0" encoding="%s"?>\n' % (encoding,))
@@ -918,13 +932,17 @@ def writexml(writer, node, encoding=None, indent='', xmlcharrefreplace=False, pa
         for aName,aValue in attrs.items():
             numAttrs += 1
             lenAttrs += 4 + len(aName) + len(aValue)
-        indentAttrs = ("\n" + indent + "  ") if numAttrs > 1 and lenAttrs > 60 else " "
+        indentAttrs = ("\n" + indent + "  ") if indent is not None and numAttrs > 1 and lenAttrs > 60 and not isFootnote else " "
         for aName in aSortedNames:
             writer.write("%s%s=\"" % (indentAttrs, aName))
             if aName != "xsi:schemaLocation":
-                writer.write(attrs[aName].replace("&","&amp;").replace('"','&quot;'))
+                writer.write(''.join("&amp;" if c == "&"
+                                     else '&quot;' if c == '"'
+                                     else "&#x%x;" % ord(c) if c >= '\x80' and xmlcharrefreplace
+                                     else c
+                                     for c in attrs[aName]))
             else:
-                indentUri = "\n" + indent + "                      "
+                indentUri = "\n" + indent + "                      " if indent is not None else " "
                 for i, a_uri in enumerate(attrs[aName].split()):
                     if i & 1:   #odd
                         writer.write(" " + a_uri)
@@ -939,20 +957,20 @@ def writexml(writer, node, encoding=None, indent='', xmlcharrefreplace=False, pa
         text = node.text
         if text is not None:
             text = ''.join("&amp;" if c == "&"
-                           else ("&nbsp;" if xmlcharrefreplace else "&#160;") if c == "\u00A0" 
+                           else "&#160;" if c == "\u00A0" 
                            else "&lt;" if c == "<"
                            else "&gt;" if c == ">"
-                           else ("&shy;" if xmlcharrefreplace else "&#173;") if c == "\u00AD"
+                           else "&#173;" if c == "\u00AD"
                            else "&#x%x;" % ord(c) if c >= '\x80' and xmlcharrefreplace
                            else c
                            for c in text)
         tail = node.tail
         if tail is not None:
             tail = ''.join("&amp;" if c == "&"
-                           else ("&nbsp;" if xmlcharrefreplace else "&#160;") if c == "\u00A0" 
+                           else "&#160;" if c == "\u00A0" 
                            else "&lt;" if c == "<"
                            else "&gt;" if c == ">"
-                           else ("&shy;" if xmlcharrefreplace else "&#173;") if c == "\u00AD"
+                           else "&#173;" if c == "\u00AD"
                            else "&#x%x;" % ord(c) if c >= '\x80' and xmlcharrefreplace
                            else c
                            for c in tail)
@@ -961,12 +979,14 @@ def writexml(writer, node, encoding=None, indent='', xmlcharrefreplace=False, pa
             if firstChild:
                 writer.write(">")
                 if isXmlElement and not isFootnote: writer.write("\n")
-                if text and not text.isspace():
+                if text and (indent is None or not text.isspace()):
                     writer.write(text)
                 firstChild = False
-            writexml(writer, child, indent=indent+'    ', xmlcharrefreplace=xmlcharrefreplace)
+            writexml(writer, child, 
+                     indent=indent+'    ' if indent is not None and not isFootnote else None, 
+                     xmlcharrefreplace=xmlcharrefreplace)
         if hasChildNodes:
-            if isXmlElement and not isFootnote:
+            if isXmlElement and not isFootnote and indent is not None:
                 writer.write("%s</%s>" % (indent, tag))
             else:
                 writer.write("</%s>" % (tag,))
@@ -974,6 +994,6 @@ def writexml(writer, node, encoding=None, indent='', xmlcharrefreplace=False, pa
             writer.write(">%s</%s>" % (text, tag))
         else:
             writer.write("/>")
-        if tail and not tail.isspace():
+        if tail and (indent is None or not tail.isspace()):
             writer.write(tail)
-        if isXmlElement: writer.write("\n")
+        if isXmlElement and indent is not None: writer.write("\n")

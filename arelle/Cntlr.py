@@ -19,6 +19,8 @@ isPy3 = (sys.version[0] >= '3')
 
 def resourcesDir():
     _moduleDir = os.path.dirname(__file__)
+    if not os.path.isabs(_moduleDir):
+        _moduleDir = os.path.abspath(_moduleDir)
     # for python 3.2 remove __pycache__
     if _moduleDir.endswith("__pycache__"):
         _moduleDir = os.path.dirname(_moduleDir)
@@ -29,6 +31,9 @@ def resourcesDir():
         _resourcesDir = os.path.dirname(os.path.dirname(_moduleDir))
     else:
         _resourcesDir = _moduleDir
+    if not os.path.exists(os.path.join(_resourcesDir,"images")) and \
+       os.path.exists(os.path.join(os.path.dirname(_resourcesDir),"images")):
+        _resourcesDir = os.path.dirname(_resourcesDir)
     return _resourcesDir
 
 class Cntlr:
