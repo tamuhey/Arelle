@@ -794,19 +794,15 @@ class ModelConcept(ModelNamableTerm, ModelParticle):
             _labelProperty = ("label", _labelDefault, sorted(_labels))
         else:
             _labelProperty = ("label", _labelDefault)
-        _refs = defaultdict(dict)
-        for refRel in self.modelXbrl.relationshipSet(XbrlConst.conceptReference).fromModelObject(self):
-            _ref = refRel.toModelObject
-            for _refPart in _ref.iterchildren():
-                _refs[self.modelXbrl.roleTypeDefinition(_ref.role, _lang)][_refPart.localName] = _refPart.stringValue.strip()
-        _refT = tuple((_refRole, " ",#.join(_refPartValue 
-                                     #      for _refPartName, _refPartValue in sorted(_refParts.items())), 
-                       tuple((_refPartName, _refPartValue)
-                            for _refPartName, _refPartValue in sorted(_refParts.items())))
-                      for _refRole, _refParts in sorted(_refs.items()))
-        _refsStrung = " ".join(_refPartValue
-                               for _refRole, _refParts in sorted(_refs.items())
-                               for _refPartName, _refPartValue in sorted(_refParts.items()))
+        _refT = tuple((self.modelXbrl.roleTypeDefinition(_ref.role, _lang), " ",
+                       tuple((_refPart.localName, _refPart.stringValue.strip())
+                             for _refPart in _ref.iterchildren()))
+                      for _refRel in sorted(self.modelXbrl.relationshipSet(XbrlConst.conceptReference).fromModelObject(self),
+                                            key=lambda r:r.toModelObject.roleRefPartSortKey())
+                      for _ref in (_refRel.toModelObject,))
+        _refsStrung = " ".join(_refPart.stringValue.strip()
+                               for _refRel in self.modelXbrl.relationshipSet(XbrlConst.conceptReference).fromModelObject(self)
+                               for _refPart in _refRel.toModelObject.iterchildren())
         _refProperty = ("references", _refsStrung, _refT) if _refT else ()
         _facets = ("facets", ", ".join(sorted(self.facets.keys())), tuple(
                     (_name, sorted(_value.keys()), 
@@ -1563,6 +1559,12 @@ class ModelResource(ModelObject):
                            for resourceElt in self.iter()
                               if isinstance(resourceElt,ModelObject) and 
                                   not resourceElt.localName.startswith("URI")])
+        
+    def roleRefPartSortKey(self):
+        return "{} {}".format(self.role,
+                              " ".join("{} {}".format(_refPart.localName, _refPart.stringValue.strip())
+                                       for _refPart in self.iterchildren()))[:200] # limit length of sort
+        
     def dereference(self):
         return self
         
