@@ -5,7 +5,7 @@ Created on Oct 3, 2010
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
 import gc, sys, traceback, logging
-from arelle import ModelXbrl, Validate, DisclosureSystem
+from arelle import ModelXbrl, Validate, DisclosureSystem, PackageManager
 from arelle.PluginManager import pluginClassMethods
 
 def initialize(cntlr):
@@ -117,7 +117,7 @@ class ModelManager:
         """
         self.cntlr.reloadViews(modelXbrl)
         
-    def load(self, filesource, nextaction=None):
+    def load(self, filesource, nextaction=None, taxonomyPackages=None, **kwargs):
         """Load an entry point modelDocument object(s), which in turn load documents they discover 
         (for the case of instance, taxonomies, and versioning reports), but defer loading instances 
         for test case and RSS feeds.  
@@ -130,7 +130,15 @@ class ModelManager:
         :type filesource: FileSource or str
         :param nextAction: status line text string, if any, to show upon completion
         :type nextAction: str
+        :param taxonomyPackages: array of URLs of taxonomy packages required for load operation
         """
+        if taxonomyPackages:
+            resetPackageMappings = False
+            for pkgUrl in taxonomyPackages:
+                if PackageManager.addPackage(self.cntlr, pkgUrl):
+                    resetPackageMappings = True
+            if resetPackageMappings:
+                PackageManager.rebuildRemappings(self.cntlr)
         try:
             if filesource.url.startswith("urn:uuid:"): # request for an open modelXbrl
                 for modelXbrl in self.loadedModelXbrls:
@@ -146,7 +154,7 @@ class ModelManager:
             if modelXbrl is not None:
                 break # custom loader did the loading
         if modelXbrl is None:  # use default xbrl loader
-            modelXbrl = ModelXbrl.load(self, filesource, nextaction)
+            modelXbrl = ModelXbrl.load(self, filesource, nextaction, **kwargs)
         self.modelXbrl = modelXbrl
         self.loadedModelXbrls.append(self.modelXbrl)
         return self.modelXbrl

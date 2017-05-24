@@ -17,22 +17,17 @@ else: # python 2.7.2
     from httplib import IncompleteRead
     from urllib2 import URLError, HTTPError
     import urllib2 as proxyhandlers
+try:
+    import ssl
+except ImportError:
+    ssl = None
 from arelle.FileSource import SERVER_WEB_CACHE
 from arelle.PluginManager import pluginClassMethods
 from arelle.UrlUtil import isHttpUrl
 addServerWebCache = None
-
-logger = logging.getLogger('WebCache.py')
-current_milli_time = lambda: int(round(time.time() * 1000))
-
+    
 DIRECTORY_INDEX_FILE = "!~DirectoryIndex~!"
 INF = float("inf")
-
-
-def logIfTimeElapsed(start, msg):
-    if current_milli_time() > 500 + start:
-        logger.info(msg)
-
 
 def proxyDirFmt(httpProxyTuple):
     if isinstance(httpProxyTuple,(tuple,list)) and len(httpProxyTuple) == 5:
@@ -86,6 +81,7 @@ class WebCache:
         #self.proxies = {'ftp': 'ftp://63.192.17.1:3128', 'http': 'http://63.192.17.1:3128', 'https': 'https://63.192.17.1:3128'}
         self._timeout = None        
         
+        self._noCertificateCheck = False
         self.resetProxies(httpProxyTuple)
         
         #self.opener.addheaders = [('User-agent', 'Mozilla/5.0')]
@@ -119,9 +115,7 @@ class WebCache:
         else:
             self.cachedUrlCheckTimes = {}
         self.cachedUrlCheckTimesModified = False
-        logger.debug('Arelle Webcache Detail - self.cachedUrlCheckTimes: {}'.format(self.cachedUrlCheckTimes))
             
-
     @property
     def timeout(self):
         return self._timeout or WebCache.default_timeout
@@ -164,10 +158,21 @@ class WebCache:
                 f.write(jsonStr)  # 2.7 gets unicode this way
         self.cachedUrlCheckTimesModified = False
         
+    @property
+    def noCertificateCheck(self):
+        return self._noCertificateCheck
+    
+    @noCertificateCheck.setter
+    def noCertificateCheck(self, check):
+        priorValue = self._noCertificateCheck
+        self._noCertificateCheck = check
+        if priorValue != check:
+            self.resetProxies(self._httpProxyTuple)
+
     def resetProxies(self, httpProxyTuple):
         # for ntlm user and password are required
-        logger.debug('Arelle Load Detail - Resetproxies enter')
         self.hasNTLM = False
+        self._httpProxyTuple = httpProxyTuple # save for resetting in noCertificateCheck setter
         if isinstance(httpProxyTuple,(tuple,list)) and len(httpProxyTuple) == 5:
             useOsProxy, _urlAddr, _urlPort, user, password = httpProxyTuple
             _proxyDirFmt = proxyDirFmt(httpProxyTuple)
@@ -185,18 +190,24 @@ class WebCache:
                         pass
             if self.hasNTLM:    
                 pwrdmgr = proxyhandlers.HTTPPasswordMgrWithDefaultRealm()
-                pwrdmgr.add_password(None, _proxyDirFmt["http"], user, password)                
+                pwrdmgr.add_password(None, _proxyDirFmt["http"], user, password)
                 self.proxy_handler = proxyhandlers.ProxyHandler({})
                 self.proxy_auth_handler = proxyhandlers.ProxyBasicAuthHandler(pwrdmgr)
                 self.http_auth_handler = proxyhandlers.HTTPBasicAuthHandler(pwrdmgr)
-                self.ntlm_auth_handler = HTTPNtlmAuthHandler.HTTPNtlmAuthHandler(pwrdmgr)            
-                self.opener = proxyhandlers.build_opener(self.proxy_handler, self.ntlm_auth_handler, self.proxy_auth_handler, self.http_auth_handler)
+                self.ntlm_auth_handler = HTTPNtlmAuthHandler.HTTPNtlmAuthHandler(pwrdmgr)
+                proxyHandlers = [self.proxy_handler, self.ntlm_auth_handler, self.proxy_auth_handler, self.http_auth_handler]          
         if not self.hasNTLM:
             self.proxy_handler = proxyhandlers.ProxyHandler(proxyDirFmt(httpProxyTuple))
             self.proxy_auth_handler = proxyhandlers.ProxyBasicAuthHandler()
             self.http_auth_handler = proxyhandlers.HTTPBasicAuthHandler()
-            self.opener = proxyhandlers.build_opener(self.proxy_handler, self.proxy_auth_handler, self.http_auth_handler)
-        logger.debug('Arelle Load Detail - Resetproxies exit.')
+            proxyHandlers = [self.proxy_handler, self.proxy_auth_handler, self.http_auth_handler]
+        if ssl and self.noCertificateCheck:
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            proxyHandlers.append(proxyhandlers.HTTPSHandler(context=context))
+        self.opener = proxyhandlers.build_opener(*proxyHandlers)
+
         #self.opener.close()
         #self.opener = WebCacheUrlOpener(self.cntlr, proxyDirFmt(httpProxyTuple))
         
@@ -263,12 +274,13 @@ class WebCache:
     def cacheFilepathToUrl(self, cacheFilepath):
         urlparts = cacheFilepath[len(self.cacheDir)+1:].split(os.sep)
         urlparts[0] += ':/'  # add separator between http and file parts, less one '/'
-        if urlparts[2].startswith("^port"):
-            urlparts[1] += ":" + urlparts[2][5:]  # the port number
-            del urlparts[2]
-        if urlparts[2].startswith("^user"):
-            urlparts[1] = urlparts[2][5:] + "@" + urlparts[1]  # the user part
-            del urlparts[2]
+        if len(urlparts) > 2:
+            if urlparts[2].startswith("^port"):
+                urlparts[1] += ":" + urlparts[2][5:]  # the port number
+                del urlparts[2]
+            if urlparts[2].startswith("^user"):
+                urlparts[1] = urlparts[2][5:] + "@" + urlparts[1]  # the user part
+                del urlparts[2]
         if urlparts[-1] == DIRECTORY_INDEX_FILE:
             urlparts[-1] = ""  # restore default index file syntax
         return '/'.join(self.decodeFileChars  # remove cacheDir part
@@ -276,10 +288,6 @@ class WebCache:
                          urlpart) for urlpart in urlparts)
     
     def getfilename(self, url, base=None, reload=False, checkModifiedTime=False, normalize=False, filenameOnly=False):
-        """
-        :param reload: True if desired to reload the web cache for any web-referenced files.
-        """
-        start_time = current_milli_time()
         if url is None:
             return url
         if base is not None or normalize:
@@ -305,31 +313,26 @@ class WebCache:
             timeNow = time.time()
             timeNowStr = time.strftime('%Y-%m-%dT%H:%M:%S UTC', time.gmtime(timeNow))
             retrievingDueToRecheckInterval = False
-            if os.path.exists(filepath):
-                if reload:
-                    if url in self.cachedUrlCheckTimes and not checkModifiedTime:
-                        cachedTime = calendar.timegm(time.strptime(self.cachedUrlCheckTimes[url], '%Y-%m-%dT%H:%M:%S UTC'))
-                    else:
-                        cachedTime = 0
-                    if timeNow - cachedTime > self.maxAgeSeconds:
-                        # weekly check if newer file exists
-                        newerOnWeb = False
-                        try: # no provision here for proxy authentication!!!
-                            logger.debug('Arelle GetHeaders Detail - start')
-                            remoteFileTime = lastModifiedTime( self.getheaders(quotedUrl) )
-                            logger.debug('Arelle GetHeaders Detail - stop')
-                            if remoteFileTime and remoteFileTime > os.path.getmtime(filepath):
-                                newerOnWeb = True
-                        except:
-                            pass # for now, forget about authentication here
-                        if not newerOnWeb:
-                            # update ctime by copying file and return old file
-                            self.cachedUrlCheckTimes[url] = timeNowStr
-                            self.cachedUrlCheckTimesModified = True
-                            return filepath
-                        retrievingDueToRecheckInterval = True
-                    else:
+            if not reload and os.path.exists(filepath):
+                if url in self.cachedUrlCheckTimes and not checkModifiedTime:
+                    cachedTime = calendar.timegm(time.strptime(self.cachedUrlCheckTimes[url], '%Y-%m-%dT%H:%M:%S UTC'))
+                else:
+                    cachedTime = 0
+                if timeNow - cachedTime > self.maxAgeSeconds:
+                    # weekly check if newer file exists
+                    newerOnWeb = False
+                    try: # no provision here for proxy authentication!!!
+                        remoteFileTime = lastModifiedTime( self.getheaders(quotedUrl) )
+                        if remoteFileTime and remoteFileTime > os.path.getmtime(filepath):
+                            newerOnWeb = True
+                    except:
+                        pass # for now, forget about authentication here
+                    if not newerOnWeb:
+                        # update ctime by copying file and return old file
+                        self.cachedUrlCheckTimes[url] = timeNowStr
+                        self.cachedUrlCheckTimesModified = True
                         return filepath
+                    retrievingDueToRecheckInterval = True
                 else:
                     return filepath
             filedir = os.path.dirname(filepath)
@@ -348,6 +351,7 @@ class WebCache:
                                       quotedUrl,
                                       filename=filepathtmp,
                                       reporthook=self.reportProgress)
+                    
                     # check if this is a real file or a wifi or web logon screen
                     if fileExt in {".xsd", ".xml", ".xbrl"}:
                         if b"<html" in initialBytes:
@@ -453,7 +457,8 @@ class WebCache:
                         return self.internetRecheckFailedRecovery(filepath, url, err, timeNowStr) 
                     self.cntlr.addToLog(_("%(error)s \nretrieving %(URL)s"),
                                         messageCode="webCache:retrievalError",
-                                        messageArgs={"error": err, "URL": url},
+                                        messageArgs={"error": err.reason if hasattr(err, "reason") else err, 
+                                                     "URL": url},
                                         level=logging.ERROR)
                     return None
                 
@@ -484,7 +489,7 @@ class WebCache:
                             os.remove(filepathtmp)
                         return None
                 
-                # rename temporarily named downloaded file to desired name
+                # rename temporarily named downloaded file to desired name                
                 if os.path.exists(filepath):
                     try:
                         if os.path.isfile(filepath) or os.path.islink(filepath):
@@ -508,9 +513,7 @@ class WebCache:
                                         messageCode="webCache:cacheDownloadRenamingError",
                                         messageArgs={"error": err, "filepath": filepath},
                                         level=logging.ERROR)
-                logger.debug('Arelle Load Detail - About to call lastModifiedTime')
                 webFileTime = lastModifiedTime(headers)
-                logger.debug('Arelle Load Detail - Done with lastModifiedTime')
                 if webFileTime: # set mtime to web mtime
                     os.utime(filepath,(webFileTime,webFileTime))
                 self.cachedUrlCheckTimes[url] = timeNowStr
@@ -521,7 +524,6 @@ class WebCache:
         elif url.startswith("file:\\"): url = url[6:]
         if os.sep == '\\':
             url = url.replace('/', '\\')
-        logIfTimeElapsed(start_time, 'Arelle Load Detail - self.retrieve while loop done.  returning... url={}'.format(url))
         return url
     
     def internetRecheckFailedRecovery(self, filepath, url, err, timeNowStr):

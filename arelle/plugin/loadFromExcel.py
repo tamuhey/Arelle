@@ -104,6 +104,7 @@ def loadFromExcel(cntlr, modelXbrl, excelFile, mappedUri):
         "ELR": "linkrole"
         # reference ("reference", reference http resource role, reference part QName)
         # reference, required": ("reference", "http://treasury.gov/dataact/role/taxonomyImplementationNote", qname("{http://treasury.gov/dataact/parts-2015-12-31}dataact-part:Required"))
+        # attribute, qname (attribute on element in xsd)
         }
     
     fatalLoadingErrors = []
@@ -199,19 +200,36 @@ def loadFromExcel(cntlr, modelXbrl, excelFile, mappedUri):
     thisDoc = newDoc(None)
     
     isUSGAAP = False
+    dtsActionColIndex = 0
+    dtsFiletypeColIndex = 1
+    dtsPrefixColIndex = 2
+    dtsFilenameColIndex = 3
+    dtsNamespaceURIColIndex = 4
     for iRow, row in enumerate(dtsWs.rows if dtsWs else ()):
         try:
-            if (len(row) < 1 or row[0].value is None):  # skip if col 1 is empty
+            if (len(row) < 1):  # skip if col 1 is non-existent
+                continue
+            _col0 = row[0].value
+            if isinstance(_col0, str) and _col0.startswith("#"): # empty or "#"
+                continue
+            if iRow == 0:
+                # title row may have columns differently laid out
+                for i, col in enumerate(row):
+                    v = xlValue(col)
+                    if isinstance(v, str):
+                        if v == "specification": dtsActionColIndex = i
+                        if v.startswith("file type"): dtsFiletypeColIndex = i
+                        if v.startswith("prefix"): dtsPrefixColIndex = i
+                        if v.startswith("file, href or role definition"): dtsFilenameColIndex = i
+                        if v.startswith("namespace URI"): dtsNamespaceURIColIndex = i
                 continue
             action = filetype = prefix = filename = namespaceURI = None
-            if len(row) > 0: action = xlValue(row[0])
-            if len(row) > 1: filetype = xlValue(row[1])
-            if len(row) > 2: prefix = xlValue(row[2])
-            if len(row) > 3: filename = xlValue(row[5])
-            if len(row) > 4: namespaceURI = xlValue(row[6])
+            if len(row) > dtsActionColIndex: action = xlValue(row[dtsActionColIndex])
+            if len(row) > dtsFiletypeColIndex: filetype = xlValue(row[dtsFiletypeColIndex])
+            if len(row) > dtsPrefixColIndex: prefix = xlValue(row[dtsPrefixColIndex])
+            if len(row) > dtsFilenameColIndex: filename = xlValue(row[dtsFilenameColIndex])
+            if len(row) > dtsNamespaceURIColIndex: namespaceURI = xlValue(row[dtsNamespaceURIColIndex])
             lbType = lang = None
-            if action is not None and action.startswith("#"):
-                continue # comment line
             if action == "import":
                 if filetype == "role":
                     continue
@@ -263,7 +281,7 @@ def loadFromExcel(cntlr, modelXbrl, excelFile, mappedUri):
                 elif filetype == "enumerationDocumentation":
                     thisDoc.hasEnumerationDocumentation = True
                 elif filetype == "role" and namespaceURI:
-                    thisDoc.extensionRoles[namespaceURI] = filename
+                    thisDoc.extensionRoles[namespaceURI] = (filename, prefix)
                 elif filetype == "schema-version" and filename:
                     thisDoc.extensionSchemaVersion = filename
                 elif filetype == "table-style" and filename == "xbrl-us":
@@ -294,7 +312,7 @@ def loadFromExcel(cntlr, modelXbrl, excelFile, mappedUri):
                 
         except Exception as err:
             fatalLoadingErrors.append("Exception: {error}, Excel row: {excelRow}, Traceback: {traceback}"
-                                      .format(error=err, excelRow=iRow, traceback=traceback.format_stack()))
+                                      .format(error=err, excelRow=iRow, traceback=traceback.format_tb(sys.exc_info()[2])))
             
     dtsWs = None # dereference
     
@@ -317,6 +335,11 @@ def loadFromExcel(cntlr, modelXbrl, excelFile, mappedUri):
             if s.endswith("Concepts"):
                 importSheetName = s
                 break
+        if not importSheetName:
+            for s in sheetNames:
+                if "xbrl" in s.lower() and "dts" not in s:
+                    importSheetName = s
+                    break
         if not importSheetName:   
             fatalLoadingErrors.append("Worksheet {} specified for Excel importing, but not present in workbook.".format(importSheetName))
 
@@ -328,6 +351,7 @@ def loadFromExcel(cntlr, modelXbrl, excelFile, mappedUri):
     headerCols = OrderedDict()
     hasLinkroleSeparateRow = True
     hasPreferredLabelTextColumn = False
+    hasConceptAttributeColumn = False
     headerRows = set()
     topDepth = 999999
     
@@ -419,6 +443,7 @@ def loadFromExcel(cntlr, modelXbrl, excelFile, mappedUri):
     for iRow, row in enumerate(conceptsWs.rows if conceptsWs else ()):
         if (iRow + 1) in headerRows:
             setHeaderCols(row)
+            hasConceptAttributeColumn = any(v.startswith("attribute, ") for v in headerCols if isinstance(v,str))
         elif not (hasLinkroleSeparateRow and (iRow + 1) in headerRows) and 'depth' in headerCols:
             depth = cellValue(row, 'depth')
             if isinstance(depth, int) and depth < topDepth:
@@ -493,7 +518,11 @@ def loadFromExcel(cntlr, modelXbrl, excelFile, mappedUri):
                 subsGrp = cellValue(row, 'substitutionGroup')
                 isConcept = subsGrp in ("xbrli:item", "xbrli:tuple", 
                                         "xbrldt:hypercubeItem", "xbrldt:dimensionItem")
-                if (not prefix or prefix in genDocs) and name not in genDocs[prefix].extensionElements and name:
+                try:
+                    _xx = (not prefix or prefix in genDocs) and name not in genDocs[prefix].extensionElements and name
+                except Exception as ex:
+                    print (str(ex))
+                if (prefix in genDocs) and name not in genDocs[prefix].extensionElements and name:
                     thisDoc = genDocs[prefix]
                     # elements row
                     eltType = cellValue(row, 'type')
@@ -523,6 +552,13 @@ def loadFromExcel(cntlr, modelXbrl, excelFile, mappedUri):
                         eltAttrs["{http://www.xbrl.org/2003/instance}balance"] = balance
                     if periodType:
                         eltAttrs["{http://www.xbrl.org/2003/instance}periodType"] = periodType
+                    if hasConceptAttributeColumn:
+                        # custom attributes (attribute, prefix:localName in header)
+                        for header in headerCols:
+                            if isinstance(header, str) and header.startswith("attribute, "):
+                                value = cellValue(row, header)
+                                if value not in (None, ""):
+                                    eltAttrs[header[11:]] = value # fix QName later after schemaElt exists
                     eltFacets = None
                     if eltType not in ("nonnum:domainItemType", "xbrli:booleanItemType", "xbrli:positiveIntegerItemType", "xbrli:dateItemType",
                                        "xbrli:gYearItemType"):
@@ -865,6 +901,11 @@ def loadFromExcel(cntlr, modelXbrl, excelFile, mappedUri):
             if eltFacets and "type" in eltAttrs:
                 eltType = eltAttrs["type"]
                 del eltAttrs["type"]
+            if hasConceptAttributeColumn: # fix up any prefixed attr names to be clark notation
+                for attrname, attrvalue in eltAttrs.copy().items():
+                    if not attrname.startswith('{') and ':' in attrname:
+                        del eltAttrs[attrname]
+                        eltAttrs[schemaElt.prefixedNameQname(attrname).clarkNotation] = attrvalue
             isConcept = eltAttrs.get('substitutionGroup') in (
                 "xbrli:item", "xbrli:tuple", "xbrldt:hypercubeItem", "xbrldt:dimensionItem")
             elt = XmlUtil.addChild(schemaElt, 
@@ -885,18 +926,22 @@ def loadFromExcel(cntlr, modelXbrl, excelFile, mappedUri):
                 del eltType
                 
         # add role definitions (for discovery)
-        for roleURI, roleDefinition in sorted(thisDoc.extensionRoles.items(), key=lambda rd: rd[1]):
+        for roleURI, (roleDefinition, usedOnRoles) in sorted(thisDoc.extensionRoles.items(), key=lambda rd: rd[1]):
             roleElt = XmlUtil.addChild(appinfoElt, XbrlConst.link, "roleType",
                                        attributes=(("roleURI",  roleURI),
                                                    ("id", "roleType_" + roleURI.rpartition("/")[2])))
             if roleDefinition:
                 XmlUtil.addChild(roleElt, XbrlConst.link, "definition", text=roleDefinition)
-            if hasPreLB:
-                XmlUtil.addChild(roleElt, XbrlConst.link, "usedOn", text="link:presentationLink")
-            if hasDefLB:
-                XmlUtil.addChild(roleElt, XbrlConst.link, "usedOn", text="link:definitionLink")
-            if hasCalLB:
-                XmlUtil.addChild(roleElt, XbrlConst.link, "usedOn", text="link:calculationLink")
+            if usedOnRoles:
+                for usedOnRole in usedOnRoles.split():
+                    XmlUtil.addChild(roleElt, XbrlConst.link, "usedOn", text=usedOnRole)
+            else:
+                if hasPreLB:
+                    XmlUtil.addChild(roleElt, XbrlConst.link, "usedOn", text="link:presentationLink")
+                if hasDefLB:
+                    XmlUtil.addChild(roleElt, XbrlConst.link, "usedOn", text="link:definitionLink")
+                if hasCalLB:
+                    XmlUtil.addChild(roleElt, XbrlConst.link, "usedOn", text="link:calculationLink")
             
         doc.schemaDiscover(schemaElt, False, thisDoc.extensionSchemaNamespaceURI)
 
@@ -1330,8 +1375,8 @@ def loadFromExcel(cntlr, modelXbrl, excelFile, mappedUri):
         os.chdir(priorCWD) # restore prior current working directory
     return modelXbrl.modelDocument
 
-def isExcelLoadable(modelXbrl, mappedUri, normalizedUri, **kwargs):
-    return os.path.splitext(mappedUri)[1] in (".xlsx", ".xls")
+def isExcelLoadable(modelXbrl, mappedUri, normalizedUri, filepath, **kwargs):
+    return os.path.splitext(mappedUri)[1] in (".xlsx", ".xls", ".xlsm")
 
 def excelLoaderFilingStart(cntlr, options, *args, **kwargs):
     global excludeDesignatedEnumerations, annotateEnumerationsDocumentation, annotateElementDocumentation, saveXmlLang
@@ -1341,7 +1386,7 @@ def excelLoaderFilingStart(cntlr, options, *args, **kwargs):
     saveXmlLang = options.ensure_value("saveLang", None)
 
 def excelLoader(modelXbrl, mappedUri, filepath, *args, **kwargs):
-    if os.path.splitext(filepath)[1] not in (".xlsx", ".xls"):
+    if os.path.splitext(filepath)[1] not in (".xlsx", ".xls", ".xlsm"):
         return None # not an OIM file
 
     cntlr = modelXbrl.modelManager.cntlr

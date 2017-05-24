@@ -672,6 +672,9 @@ def saveFile(cntlr, filepath, contents, encoding=None, mode='wt'):
         if cntlr.isGAE: # check if in memcache
             gaeSet(cacheKey, contents.encode(encoding or 'utf-8'))
     else:
+        _dirpath = os.path.dirname(filepath)
+        if not os.path.exists(_dirpath): # directory must exist before io.open
+            os.makedirs(_dirpath)
         with io.open(filepath, mode, encoding=(encoding or 'utf-8')) as f:
             f.write(contents)
                           

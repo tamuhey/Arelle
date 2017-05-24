@@ -181,6 +181,10 @@ class CntlrWinMain (Cntlr.Cntlr):
         self.workOffline = BooleanVar(value=self.webCache.workOffline)
         self.workOffline.trace("w", self.setWorkOffline)
         cacheMenu.add_checkbutton(label=_("Work offline"), underline=0, variable=self.workOffline, onvalue=True, offvalue=False)
+        self.webCache.noCertificateCheck = self.config.setdefault("noCertificateCheck",False) # resets proxy handler stack if true
+        self.noCertificateCheck = BooleanVar(value=self.webCache.noCertificateCheck)
+        self.noCertificateCheck.trace("w", self.setNoCertificateCheck)
+        cacheMenu.add_checkbutton(label=_("No certificate check"), underline=0, variable=self.noCertificateCheck, onvalue=True, offvalue=False)
         '''
         self.webCache.recheck  = self.config.setdefault("webRecheck",False)
         self.webRecheck = BooleanVar(value=self.webCache.webRecheck)
@@ -767,7 +771,8 @@ class CntlrWinMain (Cntlr.Cntlr):
             else:
                 action = _("loaded")
                 profileStat = "load"
-                modelXbrl = self.modelManager.load(filesource, _("views loading"))
+                modelXbrl = self.modelManager.load(filesource, _("views loading"),
+                                                   checkModifiedTime=isHttpUrl(filesource.url)) # check modified time if GUI-loading from web
         except ModelDocument.LoadingException:
             self.showStatus(_("Loading terminated, unrecoverable error"), 20000)
             return
@@ -1048,6 +1053,11 @@ class CntlrWinMain (Cntlr.Cntlr):
     def setWorkOffline(self, *args):
         self.webCache.workOffline = self.workOffline.get()
         self.config["workOffline"] = self.webCache.workOffline
+        self.saveConfig()
+                    
+    def setNoCertificateCheck(self, *args):
+        self.webCache.noCertificateCheck = self.noCertificateCheck.get() # resets proxy handlers
+        self.config["noCertificateCheck"] = self.webCache.noCertificateCheck
         self.saveConfig()
             
     def confirmClearWebCache(self):
