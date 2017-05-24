@@ -23,14 +23,6 @@ from arelle.XhtmlValidate import ixMsgCode
 from arelle.XmlValidate import VALID, validate as xmlValidate
 
 creationSoftwareNames = None
-import logging
-logger = logging.getLogger('ModelDocument.py')
-import time
-current_milli_time = lambda: int(round(time.time() * 1000))
-
-def logIfTimeElapsed(start, msg):
-    if current_milli_time() > 500 + start:
-        logger.info(msg)
 
 def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDiscovered=False, isIncluded=None, namespace=None, reloadCache=False, **kwargs):
     """Returns a new modelDocument, performing DTS discovery for instance, inline XBRL, schema, 
@@ -51,9 +43,10 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
     :type namespace: str
     :param reloadCache: True if desired to reload the web cache for any web-referenced files.
     :type reloadCache: bool
+    :param checkModifiedTime: True if desired to check modifed time of web cached entry point (ahead of usual time stamp checks).
+    :type checkModifiedTime: bool
     """
-    start_time = current_milli_time()
-
+    
     if referringElement is None: # used for error messages
         referringElement = modelXbrl
     normalizedUri = modelXbrl.modelManager.cntlr.webCache.normalizeUrl(uri, base)
@@ -101,17 +94,10 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
         
     # don't try reloading if not loadable
     
-    isPullLoadable = any(pluginMethod(modelXbrl, mappedUri, normalizedUri, isEntry=isEntry, namespace=namespace, **kwargs)
-                         for pluginMethod in pluginClassMethods("ModelDocument.IsPullLoadable"))
-    logIfTimeElapsed(start_time, 'Arelle Load Detail - calling modelXbrl.fileSource.isInArchive(mappedUri):')
     if modelXbrl.fileSource.isInArchive(mappedUri):
-        logIfTimeElapsed(start_time, 'Arelle Load Detail - done modelXbrl.fileSource.isInArchive(mappedUri):')
         filepath = mappedUri
     else:
-        logIfTimeElapsed(start_time, 'Arelle Load Detail - done modelXbrl.fileSource.isInArchive(mappedUri):')
-        logIfTimeElapsed(start_time, 'Arelle Load Detail - calling modelXbrl.modelManager.cntlr.webCache.getfilename(mappedUri, reload=reloadCache) reload={}'.format(reloadCache))
-        filepath = modelXbrl.modelManager.cntlr.webCache.getfilename(mappedUri, reload=reloadCache)
-        logIfTimeElapsed(start_time, 'Arelle Load Detail - Done with the webcache getFilename, mappedUri = {}'.format(mappedUri))
+        filepath = modelXbrl.modelManager.cntlr.webCache.getfilename(mappedUri, reload=reloadCache, checkModifiedTime=kwargs.get("checkModifiedTime",False))
         if filepath:
             uri = modelXbrl.modelManager.cntlr.webCache.normalizeUrl(filepath)
     if filepath is None: # error such as HTTPerror is already logged
@@ -132,6 +118,9 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
             modelXbrl.urlUnloadableDocs[normalizedUri] = True # always blocked if not loadable on this error
         return None
     
+    isPullLoadable = any(pluginMethod(modelXbrl, mappedUri, normalizedUri, filepath, isEntry=isEntry, namespace=namespace, **kwargs)
+                         for pluginMethod in pluginClassMethods("ModelDocument.IsPullLoadable"))
+    
     if not isPullLoadable and os.path.splitext(filepath)[1] in (".xlsx", ".xls", ".csv", ".json"):
         modelXbrl.error("FileNotLoadable",
                 _("File can not be loaded, requires loadFromExcel or loadFromOIM plug-in: %(fileName)s"),
@@ -145,7 +134,6 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
     try:
         for pluginMethod in pluginClassMethods("ModelDocument.PullLoader"):
             # assumes not possible to check file in string format or not all available at once
-            logIfTimeElapsed(start_time, 'Arelle Load Detail - ModelDocument.PullLoader: plugin: {}'.format(pluginMethod))
             modelDocument = pluginMethod(modelXbrl, normalizedUri, filepath, isEntry=isEntry, namespace=namespace, **kwargs)
             if isinstance(modelDocument, Exception):
                 return None
@@ -153,23 +141,18 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
                 return modelDocument
         if (modelXbrl.modelManager.validateDisclosureSystem and 
             modelXbrl.modelManager.disclosureSystem.validateFileText):
-            logIfTimeElapsed(start_time, 'Arelle Load Detail - Calling ValidateFilingText.checkFile')
             file, _encoding = ValidateFilingText.checkfile(modelXbrl,filepath)
-            logIfTimeElapsed(start_time, 'Arelle Load Detail - Done with ValidateFilingText.checkFile')
         else:
             file, _encoding = modelXbrl.fileSource.file(filepath, stripDeclaration=True)
         xmlDocument = None
         isPluginParserDocument = False
         for pluginMethod in pluginClassMethods("ModelDocument.CustomLoader"):
-            logIfTimeElapsed(start_time, 'Arelle Load Detail - ModelDocument.CustomLoader: plugin: {}'.format(pluginMethod))
             modelDocument = pluginMethod(modelXbrl, file, mappedUri, filepath)
             if modelDocument is not None:
                 file.close()
                 return modelDocument
         _parser, _parserLookupName, _parserLookupClass = parser(modelXbrl,filepath)
-        logIfTimeElapsed(start_time, 'Arelle Load Detail - Calling etree.parse')
         xmlDocument = etree.parse(file,parser=_parser,base_url=filepath)
-        logIfTimeElapsed(start_time, 'Arelle Load Detail - done with etree.parse, filepath={}'.format(filepath))
         for error in _parser.error_log:
             modelXbrl.error("xmlSchema:syntax",
                     _("%(error)s, %(fileName)s, line %(line)s, column %(column)s, %(sourceAction)s source element"),
@@ -306,9 +289,8 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
                     if XbrlConst.ixbrlAll.intersection(nestedInline.nsmap.values()):
                         _type = Type.INLINEXBRL
                         rootNode = nestedInline
-        logIfTimeElapsed(start_time, 'Arelle Load Detail - creating class {}'.format(_class))
+
         modelDocument = _class(modelXbrl, _type, normalizedUri, filepath, xmlDocument)
-        logIfTimeElapsed(start_time, 'Arelle Load Detail - created class, normalizedUri = {}'.format(normalizedUri))
         rootNode.init(modelDocument)
         modelDocument.parser = _parser # needed for XmlUtil addChild's makeelement 
         modelDocument.parserLookupName = _parserLookupName
@@ -351,16 +333,12 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
             for pi in modelDocument.processingInstructions:
                 if pi.target == "arelle-unit-test":
                     modelXbrl.arelleUnitTests[pi.get("location")] = pi.get("action")
-
-            logIfTimeElapsed(start_time, 'Arelle Load Detail - Calling XmlValidateSchema.validate on {} docs'.format(len(modelXbrl.schemaDocsToValidate)))
             while modelXbrl.schemaDocsToValidate:
                 doc = modelXbrl.schemaDocsToValidate.pop()
                 XmlValidateSchema.validate(doc, doc.xmlRootElement, doc.targetNamespace) # validate schema elements
-            logIfTimeElapsed(start_time, 'Arelle Load Detail - done with XmlValidateSchema.validate')
             if hasattr(modelXbrl, "ixdsHtmlElements"):
-                logIfTimeElapsed(start_time, 'Arelle Load Detail - calling inlineIxsdsDiscover')
                 inlineIxdsDiscover(modelXbrl) # compile cross-document IXDS references
-                logIfTimeElapsed(start_time, 'Arelle Load Detail - done inlineIxsdsDiscover')
+                
         if isEntry or kwargs.get("isSupplemental", False):  
             # re-order base set keys for entry point or supplemental linkbase addition
             modelXbrl.baseSets = OrderedDefaultDict( # order by linkRole, arcRole of key
@@ -1414,6 +1392,7 @@ def inlineIxdsDiscover(modelXbrl):
             tuple.unorderedTupleFacts.append((modelFact.order, modelFact.objectIndex))
         else:
             modelXbrl.modelXbrl.facts.append(modelFact)
+            
     def locateContinuation(element, chain=None):
         contAt = element.get("continuedAt")
         if contAt:
@@ -1454,8 +1433,7 @@ def inlineIxdsDiscover(modelXbrl):
                                         modelObject=(chainElt,chainEltAncestor), 
                                         ancestorElement=chainEltAncestor.id or chainEltAncestor.get("name",chainEltAncestor.get("continuedAt")),
                                         descendantElement=chainElt.id or chainElt.get("name",chainElt.get("continuedAt")))
-
-
+                        
 
     for htmlElement in modelXbrl.ixdsHtmlElements:  
         mdlDoc = htmlElement.modelDocument
