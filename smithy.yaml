@@ -11,4 +11,4 @@ script:
 
 artifacts:
   pypi:
-    - /dist/Arelle*.tar.gz
+    - /dist/w_versioned_arelle*.tar.gz
