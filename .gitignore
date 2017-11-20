@@ -7,4 +7,5 @@ buildRenameX86.bat
 arelle/Version.py
 arelle/plugin/EdgarRenderer
 arelle/plugin/validate/DQC_US_Rules
-
+.idea/*
+venv*

@@ -1426,5 +1426,3 @@ class VariableBinding:
                 return fact.unit.measures
         return None
 
-     
-    
