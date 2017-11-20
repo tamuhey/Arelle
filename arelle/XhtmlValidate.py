@@ -85,7 +85,7 @@ ixAttrRequired = {
     }
 ixAttrDefined = {
     XbrlConst.ixbrl: {
-        "footnote": ("footnoteID",),
+        "footnote": ("id", "footnoteID", "arcrole", "footnoteLinkRole", "footnoteRole", "title"),
         "fraction": ("id", "name", "target", "contextRef", "unitRef", "tupleRef", "order",
                      "footnoteRefs"),
         "denominator": ("format", "scale", "sign"),
@@ -121,12 +121,15 @@ allowedNonIxAttrNS = {
 ixHierarchyConstraints = {
     # localName: (-rel means doesnt't have relation, +rel means has rel,
     #   &rel means only listed rels
-    #   ^rel means must have one of listed rels and can't have any non-listed rels
+    #   ^rel means must have at least one of listed rels and can't have any non-listed rels
+    #   1rel means must have only one of listed rels
     #   ?rel means 0 or 1 cardinality
     #   +rel means 1 or more cardinality
     "continuation": (("-ancestor",("hidden",)),),
     "exclude": (("+ancestor",("continuation", "footnote", "nonNumeric")),),
     "denominator": (("-descendant",('*',)),),
+    "fraction": (("1descendant",('numerator',)),
+                 ("1descendant",('denominator',))),
     "header": (("&child-sequence", ('hidden','references','resources')), # can only have these children, in order, no others
                ("?child-choice", ('hidden',)),
                ("?child-choice", ('resources',))),
@@ -261,7 +264,7 @@ def xhtmlValidate(modelXbrl, elt):
             for _rel, names in constraints:
                 reqt = _rel[0]
                 rel = _rel[1:]
-                if reqt in ('&', '^'):
+                if reqt in ('&', '^', '1'):
                     nameFilter = ('*',)
                 else:
                     nameFilter = names
@@ -285,10 +288,14 @@ def xhtmlValidate(modelXbrl, elt):
                 if rel == "child-or-text":
                     relations += XmlUtil.innerTextNodes(elt, ixExclude=True, ixEscape=False, ixContinuation=False)
                 issue = ''
-                if reqt == '^':
+                if reqt in ('^',):
                     if not any(r.localName in names and r.namespaceURI == elt.namespaceURI
                                for r in relations):
                         issue = " and is missing one of " + ', '.join(names)
+                if reqt in ('1',):
+                    if sum(r.localName in names and r.namespaceURI == elt.namespaceURI
+                           for r in relations) != 1:
+                        issue = " and must have exactly one of " + ', '.join(names)
                 if reqt in ('&', '^'):
                     disallowed = [str(r.elementQname)
                                   for r in relations
@@ -308,9 +315,12 @@ def xhtmlValidate(modelXbrl, elt):
                     issue = " may only have 0 or 1 but {0} present ".format(len(relations))
                 if reqt == '+' and len(relations) == 0:
                     issue = " must have at least 1 but none present "
+                disallowedChildText = bool(reqt == '&' and 
+                                           rel in ("child-sequence", "child-choice") 
+                                           and elt.textValue.strip())
                 if ((reqt == '+' and not relations) or
                     (reqt == '-' and relations) or
-                    (issue)):
+                    (issue) or disallowedChildText):
                     code = "{}:{}".format(ixSect[elt.namespaceURI].get(elt.localName,"other")["constraint"], {
                            'ancestor': "ancestorNode",
                            'parent': "parentNode",
@@ -321,11 +331,12 @@ def xhtmlValidate(modelXbrl, elt):
                             '+': "Required",
                             '-': "Disallowed",
                             '&': "Allowed",
-                            '^': "Specified"}.get(reqt, "Specified"))
-                    msg = _("Inline XBRL ix:{0} {1} {2} {3} {4} element").format(
+                            '^': "Specified",
+                            '1': "Specified"}.get(reqt, "Specified"))
+                    msg = _("Inline XBRL ix:{0} {1} {2} {3} {4} element{5}").format(
                                 elt.localName,
                                 {'+': "must", '-': "may not", '&': "may only",
-                                 '?': "may", '+': "must"}[reqt],
+                                 '?': "may", '+': "must", '^': "must", '1': "must"}[reqt],
                                 {'ancestor': "be nested in",
                                  'parent': "have parent",
                                  'child-choice': "have child",
@@ -336,7 +347,8 @@ def xhtmlValidate(modelXbrl, elt):
                                 ', '.join(str(r.elementQname) for r in relations)
                                 if names == ('*',) and relations else
                                 ", ".join("{}:{}".format(namespacePrefix, n) for n in names),
-                                issue)
+                                issue,
+                                " and no child text" if disallowedChildText else "")
                     modelXbrl.error(code, msg, 
                                     modelObject=[elt] + relations, requirement=reqt,
                                     messageCodes=("ix{ver.sect}:ancestorNode{Required|Disallowed}",

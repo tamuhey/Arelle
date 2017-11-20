@@ -29,7 +29,7 @@ from arelle.ModelFormulaObject import (ModelValueAssertion, ModelExistenceAssert
                                        ModelCustomFunctionSignature, ModelCustomFunctionImplementation,
                                        ModelPeriod,
                                        ModelAndFilter, ModelOrFilter, ModelMessage)
-from arelle import XbrlConst, XmlUtil
+from arelle import XbrlConst, XmlUtil, XPathParser
 import os, datetime
 
 class NotExportable(Exception):
@@ -69,7 +69,7 @@ class GenerateXbrlFormula:
         if self.xmlns:
             self.xfLines.insert(0, "")
             for prefix, ns in sorted(self.xmlns.items(), reverse=True):
-                self.xfLines.insert(0, "namespace \"{}\" = \"{}\";".format(prefix, ns))
+                self.xfLines.insert(0, "namespace {} = \"{}\";".format(prefix, ns))
             
         self.xfLines.insert(0, "")
         self.xfLines.insert(0, "(: Generated from {} by Arelle on {} :)".format(modelXbrl.modelDocument.basename, XmlUtil.dateunionValue(datetime.datetime.now())))
@@ -137,9 +137,9 @@ class GenerateXbrlFormula:
                 for modelRel in self.modelXbrl.relationshipSet(arcrole).fromModelObject(fObj):
                     self.doObject(modelRel.toModelObject, modelRel, cIndent, visited)
             if isinstance(fObj, ModelValueAssertion):
-                self.xf = "{}test {{{}}}".format(cIndent, fObj.viewExpression)
+                self.xf = "{}test {{{}}};".format(cIndent, fObj.viewExpression)
             elif isinstance(fObj, ModelExistenceAssertion):
-                self.xf = "{}evaluation-count {{{}}}".format(cIndent, fObj.viewExpression or ". gt 0")
+                self.xf = "{}evaluation-count {{{}}};".format(cIndent, fObj.viewExpression or ". gt 0")
             self.xf = "{}}};".format(pIndent)
         elif isinstance(fObj, ModelConsistencyAssertion):
             self.xf = "{}consistency-assertion {} {{".format(pIndent, self.objectId(fObj, "consistencyAssertion"))
@@ -271,7 +271,8 @@ class GenerateXbrlFormula:
             elif isinstance(fObj, ModelInstantDuration):
                 self.xf = "{}instant-duration {} {};".format(pIndent, fObj.boundary, fObj.variable)
             elif isinstance(fObj, ModelSingleMeasure):
-                self.xf = "{}unit {} {};".format(pIndent, fObj.boundary, fObj.variable)
+                self.xf = "{}unit-single-measure {};".format(pIndent, 
+                                                             fObj.measureQname or ("{{{}}}".format(fObj.qnameExpression) if fObj.qnameExpression else ""))
             elif isinstance(fObj, ModelEntitySpecificIdentifier):
                 self.xf = "{}entity scheme {{{}}} value {{{}}};".format(pIndent, fObj.scheme, fObj.value)
             elif isinstance(fObj, ModelEntityScheme):
@@ -281,8 +282,8 @@ class GenerateXbrlFormula:
             elif isinstance(fObj, ModelEntityRegexpIdentifier):
                 self.xf = "{}entity-identifier-pattern \"{}\";".format(pIndent, fObj.pattern)
             elif isinstance(fObj, ModelMatchFilter):
-                self.xf = "{}{} ${} {}{};".format(pIndent, kebabCase(fObj.localName), fObj.variable, 
-                                                  fObj.dimension or "",
+                self.xf = "{}{} ${} {}{};".format(pIndent, kebabCase(fObj.localName), fObj.variable,
+                                                  " dimension {}".format(fObj.dimension) if fObj.get("dimension") else "",
                                                   " match-any" if fObj.matchAny else "")
             elif isinstance(fObj, ModelRelativeFilter):
                 self.xf = "{}relative ${};".format(pIndent, fObj.variable)
@@ -360,16 +361,18 @@ class GenerateXbrlFormula:
                     hasImplementation = True
                 visited.remove(fObj)
             if not hasImplementation:
+                self.xmlns[fObj.functionQname.prefix] = fObj.functionQname.namespaceURI
                 self.xf = "{}abstract-function {}({}) as {};".format(pIndent, fObj.name, 
                                                                       ", ".join(str(t) for t in fObj.inputTypes), 
                                                                       fObj.outputType)
         elif isinstance(fObj, ModelCustomFunctionImplementation):
             sigObj = fromRel.fromModelObject
-            self.xf = "{}function {}({}) as {} {{;".format(pIndent, 
-                                                            sigObj.name, 
-                                                            ", ".join("{} as {}".format(inputName, sigObj.inputTypes[i])
-                                                                      for i, inputName in enumerate(fObj.inputNames)),
-                                                            sigObj.outputType)
+            self.xmlns[sigObj.functionQname.prefix] = sigObj.functionQname.namespaceURI
+            self.xf = "{}function {}({}) as {} {{".format(pIndent, 
+                                                          sigObj.name, 
+                                                          ", ".join("{} as {}".format(inputName, sigObj.inputTypes[i])
+                                                                    for i, inputName in enumerate(fObj.inputNames)),
+                                                          sigObj.outputType)
             for name, stepExpr in fObj.stepExpressions:
                 if "\n" not in stepExpr:
                     self.xf = "{}step ${} {{{}}};".format(cIndent, name, stepExpr)
@@ -438,8 +441,13 @@ class GenerateXbrlFormula:
                     self.xf = "{}{}{};".format(cIndent, kebabCase(elt.localName), arg)
             if fObj.localName not in ("concept", "entityIdentifier", "period"):
                 self.xf = "{}}};".format(pIndent)
-            
-                
+        # check for prefixes in AST of programs of fObj
+        if hasattr(fObj, "compile") and type(fObj.compile).__name__ == "method":
+            fObj.compile()
+            for _prog, _ast in fObj.__dict__.items():
+                if _prog.endswith("Prog") and isinstance(_ast, list):
+                    XPathParser.prefixDeclarations(_ast, self.xmlns, fObj)
+
 
 def saveXfMenuEntender(cntlr, menu, *args, **kwargs):
     # Extend menu with an item for the savedts plugin
@@ -457,8 +465,8 @@ def saveXfMenuCommand(cntlr):
     xbrlFormulaFile = cntlr.uiFileDialog("save",
             title=_("arelle - Save XBRL Formula file"),
             initialdir=cntlr.config.setdefault("xbrlFormulaFileDir","."),
-            filetypes=[(_("Component file .xml"), "*.xml")],
-            defaultextension=".xml")
+            filetypes=[(_("XBRL formula file .xf"), "*.xf")],
+            defaultextension=".xf")
     if not xbrlFormulaFile:
         return False
     import os

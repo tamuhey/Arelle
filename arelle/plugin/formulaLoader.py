@@ -8,11 +8,11 @@ Loads xbrl formula file syntax into formula linkbase.
 
 To run as a main program and save xbrl formula files (.xf) into xbrl formula linkbase:
 
-   python3.5  formulaLoader.py {files} {debug}
-   where {files} are formula files separated by | characters (enclose in single quotes on unix)
+   python3.5  formulaLoader.py [--debug] {files}
+   where {files} are formula files 
    loads from {name}.xf file
    saves formula linkbase to {name}-formula.xml file
-   if arg2 is debug then parsing debug trace is printed (helpful to see where parsing got stuck if parse errors)
+   if --debug is specified then pyparsing debug trace is printed (helpful to see where parsing got stuck if parse errors)
    
 As a plugin this enables Arelle to load formula files (*.xf) into Arelle's object model for formula linkbases and execute them.
 When run from GUI first load the instance/DTS and then import the xf file(s).
@@ -396,6 +396,7 @@ def compileConceptFilter( sourceStr, loc, toks ):
             elif tok == "concept-data-type":
                 isDataType = True
                 filterEltQname = "cf:conceptDataType"
+                filterAttrib["strict"] = "false"
             elif tok == "concept-substitution-group":
                 isSubstitution = True
                 filterEltQname = "cf:conceptSubstitutionGroup"
@@ -405,26 +406,33 @@ def compileConceptFilter( sourceStr, loc, toks ):
             filterAttrib["balance"] = tok
         elif isSubstitution and tok == "strict":
             filterAttrib["strict"] = "true"
-        elif isSubstitution and prevTok == "not-strict":
+        elif isSubstitution and prevTok == "non-strict":
             filterAttrib["strict"] = "false"
         elif isName and not hasLocalName and isinstance(tok, str) and ":" not in tok:
             hasLocalName = True
         prevTok = tok
     filterElt = lbGen.subElement(lbGen.genLinkElement, filterEltQname, attrib=filterAttrib)
+    if isDataType:
+        subEltParent = lbGen.subElement(filterElt, "cf:type")
+    else:
+        subEltParent = filterElt
     # sub-elements of filter
-    if isName or isSubstitution:
+    if isName or isSubstitution or isDataType:
         useTok = False
         for tok in toks:
-            if not useTok and tok in ("concept-name", "concept-substitution-group"):
+            # "concept-name" (qname | local-name | enclosed-expression)+
+            # "concept-data-type" ("strict" | "not-strict") (qname | enclosed-expression)
+            # "concept-substitution-group" ("strict" | "not-strict") (qname | enclosed-expression)
+            if not useTok and tok in ("concept-name", "strict", "non-strict"):
                 useTok = True
             elif useTok:
                 if isinstance(tok, XPathExpression):
-                    lbGen.subElement(filterElt, "cf:qnameExpression", text=str(tok))
+                    lbGen.subElement(subEltParent, "cf:qnameExpression", text=str(tok))
                 elif ':' in tok: # it's a QName
-                    lbGen.subElement(filterElt, "cf:qname", text=tok)
+                    lbGen.subElement(subEltParent, "cf:qname", text=tok)
                 else: # it's a local name, requires general & aspect cover filter
                     lbGen.checkXmlns("xfi")
-                    lbGen.subElement(filterElt, "cf:qnameExpression", 
+                    lbGen.subElement(subEltParent, "cf:qnameExpression", 
                                      text="xfi:concepts-from-local-name('{}')".format(tok))
     return [FormulaArc("variable:variableFilterArc", attrib=arcAttrib),
             FormulaResourceElt(filterElt)]
@@ -646,13 +654,13 @@ def compileFactVariable( sourceStr, loc, toks ):
     varLabel = "variable{}".format(lbGen.labelNbr("variable"))
     attrib = {"xlink:type": "resource",
               "xlink:label": varLabel,
-              "bind-as-sequence": "false"}
+              "bindAsSequence": "false"}
     prevTok = name = None
     for tok in toks:
         if prevTok is None:
             name = tok[1:] # remove $ from variable name
         elif tok == "bind-as-sequence":
-            attrib["bind-as-sequence"] = "true"
+            attrib["bindAsSequence"] = "true"
         elif tok == "nils":
             attrib["nils"] = "true"
         elif tok == "matches":
@@ -759,13 +767,14 @@ def compileFunctionDeclaration( sourceStr, loc, toks ):
     prevTok = None
     for tok in toks:
         if isinstance(tok, FunctionParameter):
-            lbGen.subElement(signatureElt, "variable:input", attrib={"name": tok.qname,"type": tok.ptype})
+            lbGen.subElement(signatureElt, "variable:input", attrib={"type": tok.ptype})
     # function implementation
     if hasImplementation:
+        cfiLabel = "functionImplementation{}".format(lbGen.labelNbr("functionImplementation"))
+        lbGen.checkXmlns("cfi")
         cfiElt = lbGen.subElement(lbGen.genLinkElement, "cfi:implementation", attrib={
             "xlink:type": "resource",
-            "xlink:label": signatureLabel})
-        cfiLabel = "functionImplementation{}".format(lbGen.labelNbr("functionImplementation"))
+            "xlink:label": cfiLabel})
         lbGen.subElement(lbGen.genLinkElement, "generic:arc", attrib={
             "xlink:type": "arc",
             "xlink:arcrole": "function-implementation",
@@ -817,13 +826,13 @@ def compileGeneralVariable( sourceStr, loc, toks ):
     varLabel = "variable{}".format(lbGen.labelNbr("variable"))
     attrib = {"xlink:type": "resource",
               "xlink:label": varLabel,
-              "bind-as-sequence": "false"}
+              "bindAsSequence": "false"}
     prevTok = name = None
     for tok in toks:
         if prevTok is None:
             name = tok[1:] # remove $ from variable name
         elif tok == "bind-as-sequence":
-            attrib["bind-as-sequence"] = "true"
+            attrib["bindAsSequence"] = "true"
         elif prevTok == "select":
             attrib["select"] = str(tok)
         prevTok = tok
@@ -852,25 +861,29 @@ def compileLabel( sourceStr, loc, toks ):
     for tok in toks:
         if tok.startswith("(") and tok.endswith(")"):
             langTok = tok[1:-1]
-        if prevTok == "label":
-            labelType = "label"
-            arcrole = "element-label"
-            role = "label"
-            labelElt = "generic:label"
-            label = tok
-        elif prevTok == "satisfied-message":
-            labelType = "message"
-            arcrole = "assertion-satisfied-message"
-            role = "message"
-            labelElt = "msg:message"
-            label = tok
-        elif prevTok == "unsatisfied-message":
-            labelType = "message"
-            arcrole = "assertion-unsatisfied-message"
-            role = "message"
-            labelElt = "msg:message"
-            label = tok
-        prevTok = tok
+        else:
+            if prevTok == "label":
+                labelType = "label"
+                arcrole = "element-label"
+                role = "label"
+                labelElt = "generic:label"
+                label = tok
+            elif prevTok == "satisfied-message":
+                labelType = "message"
+                arcrole = "assertion-satisfied-message"
+                role = "message"
+                labelElt = "msg:message"
+                label = tok
+                lbGen.checkXmlns("msg")
+            elif prevTok == "unsatisfied-message":
+                labelType = "message"
+                arcrole = "assertion-unsatisfied-message"
+                role = "message"
+                labelElt = "msg:message"
+                label = tok
+                lbGen.checkXmlns("msg")
+            # Don't set prevTok if it was a language
+            prevTok = tok
     labelLabel = "{}{}".format(labelType, lbGen.labelNbr(labelType))
     arcAttrib={"xlink:type": "arc",
                "xlink:arcrole": arcrole,
@@ -1270,20 +1283,22 @@ def compileXfsGrammar( cntlr, debugParsing ):
                        Suppress(Literal("}"))).setParseAction(compileXPathExpression)
     separator = Suppress( Literal(";") )
     
-    namespaceDeclaration = (Suppress(Keyword("namespace")) + quotedString + Suppress(Literal("=")) + quotedString + separator
+    namespaceDeclaration = (Suppress(Keyword("namespace")) + ncName + Suppress(Literal("=")) + quotedString + separator
                             ).setParseAction(compileNamespaceDeclaration).ignore(xfsComment)
     defaultDeclaration = (Suppress(Keyword("unsatisfied-severity") | Keyword("default-language")) + ncName + separator
                          ).setParseAction(compileDefaults).ignore(xfsComment)
 
     parameterDeclaration = (Suppress(Keyword("parameter")) + qName  +  
                             Optional(Keyword("required")) +
+                            Suppress(Literal("{")) +
                             Optional(Keyword("select") + xpathExpression) +
-                            Optional(Keyword("as") + qName) + separator
+                            Optional(Keyword("as") + qName) + 
+                            Suppress(Literal("}")) + separator
                            ).setParseAction(compileParameterDeclaration).ignore(xfsComment)
                            
     occurenceIndicator = Literal("?") | Literal("*") | Literal("+")
                            
-    functionParameter = (variableRef + Suppress(Keyword("as")) + Combine(qName + Optional(occurenceIndicator))
+    functionParameter = (qName + Suppress(Keyword("as")) + Combine(qName + Optional(occurenceIndicator))
                          ).setParseAction(compileFunctionParameter).ignore(xfsComment)
                          
     functionStep = (Suppress(Keyword("step")) + variableRef + xpathExpression + 
@@ -1294,7 +1309,7 @@ def compileXfsGrammar( cntlr, debugParsing ):
                               Keyword("return") + xpathExpression + separator +
                               Suppress(Literal("}"))).ignore(xfsComment)
     
-    functionDeclaration = (Suppress(Keyword("function")) + ncName  + 
+    functionDeclaration = (Suppress(Keyword("function")) + qName  + 
                            Suppress(Literal("(")) + Optional(delimitedList(functionParameter)) + Suppress(Literal(")")) +
                               Keyword("as") + Combine(qName + Optional(occurenceIndicator)) +
                            Optional(functionImplementation) + separator
@@ -1372,8 +1387,8 @@ def compileXfsGrammar( cntlr, debugParsing ):
         (Keyword("concept-name") + OneOrMore(qName | xpathExpression) + separator) |
          Keyword("concept-period-type") + (Keyword("instant") | Keyword("duration")) + separator |
          Keyword("concept-balance") + (Keyword("credit") | Keyword("debit") | Keyword("none")) + separator |
-         Keyword("concept-data-type") + (Keyword("strict") | Keyword("not-strict")) + (qName | xpathExpression) + separator |
-         Keyword("concept-substitution-group") + (Keyword("strict") | Keyword("not-strict")) + (qName | xpathExpression) + separator
+         Keyword("concept-data-type") + (Keyword("strict") | Keyword("non-strict")) + (qName | xpathExpression) + separator |
+         Keyword("concept-substitution-group") + (Keyword("strict") | Keyword("non-strict")) + (qName | xpathExpression) + separator
         ).setParseAction(compileConceptFilter).ignore(xfsComment).setName("concept-filter").setDebug(debugParsing)
 
 
@@ -1586,7 +1601,7 @@ def compileXfsGrammar( cntlr, debugParsing ):
 
     return xfsProg
 
-def parse(cntlr, _logMessage, xfsFiles, modelXbrl=None, debugParsing=False):
+def parse(cntlr, _logMessage, xfFiles, modelXbrl=None, debugParsing=False):
     from pyparsing import ParseException, ParseSyntaxException
     
     global xc, logMessage
@@ -1692,7 +1707,7 @@ def parse(cntlr, _logMessage, xfsFiles, modelXbrl=None, debugParsing=False):
         return successful
           
     successful = True          
-    for filename in xfsFiles:
+    for filename in xfFiles:
         if not parseFile(filename):
             successful = False
                 
@@ -1716,7 +1731,6 @@ formulaPrefixes = {
     "ca": ('http://xbrl.org/2008/assertion/consistency', 'http://www.xbrl.org/2008/consistency-assertion.xsd'),
     "ea": ('http://xbrl.org/2008/assertion/existence', 'http://www.xbrl.org/2008/existence-assertion.xsd'),
     "va": ('http://xbrl.org/2008/assertion/value', 'http://www.xbrl.org/2008/value-assertion.xsd'),
-    "msg": ('http://xbrl.org/2010/message', 'http://www.xbrl.org/2010/generic-message.xsd'),
     "bf": ('http://xbrl.org/2008/filter/boolean', 'http://www.xbrl.org/2008/boolean-filter.xsd'),
     "cf": ('http://xbrl.org/2008/filter/concept', 'http://www.xbrl.org/2008/concept-filter.xsd'),
     "df": ('http://xbrl.org/2008/filter/dimension', 'http://www.xbrl.org/2008/dimension-filter.xsd'),
@@ -1744,7 +1758,7 @@ formulaArcroleRefs = {
     "variable-set": ('http://xbrl.org/arcrole/2008/variable-set', 'http://www.xbrl.org/2008/variable.xsd#variable-set'),
     "variable-set-precondition": ('http://xbrl.org/arcrole/2008/variable-set-precondition', 'http://www.xbrl.org/2008/variable.xsd#variable-set-precondition'),
     "consistency-assertion-formula": ('http://xbrl.org/arcrole/2008/consistency-assertion-formula', 'http://www.xbrl.org/2008/consistency-assertion.xsd#consistency-assertion-formula'),
-    "assertion-unsatisfied-message": ("http://xbrl.org/arcrole/2010/assertion-unsatisfied-message", "http://www.xbrl.org/2010/validation-message.xsd#assertion-satisfied-message"),
+    "assertion-unsatisfied-message": ("http://xbrl.org/arcrole/2010/assertion-unsatisfied-message", "http://www.xbrl.org/2010/validation-message.xsd#assertion-unsatisfied-message"),
     "assertion-satisfied-message": ("http://xbrl.org/arcrole/2010/assertion-satisfied-message", "http://www.xbrl.org/2010/validation-message.xsd#assertion-satisfied-message"),
     "boolean-filter": ('http://xbrl.org/arcrole/2008/boolean-filter', 'http://www.xbrl.org/2008/boolean-filter.xsd#boolean-filter'),
     "function-implementation": ('http://xbrl.org/arcrole/2010/function-implementation','http://www.xbrl.org/2010/custom-function-implementation.xsd#cfi-implementation')
@@ -1824,8 +1838,7 @@ class FormulaLbGenerator:
 <!--  Generated by Arelle(r) http://arelle.org --> 
 <link:linkbase
 {0}
-xsi:schemaLocation="http://www.xbrl.org/2003/linkbase http://www.xbrl.org/2003/xbrl-linkbase-2003-12-31.xsd
-   http://xbrl.org/2008/generic http://www.xbrl.org/2008/generic-link.xsd"
+xsi:schemaLocation=""
 >
 <link:roleRef roleURI='http://www.xbrl.org/2008/role/link'
     xlink:href='http://www.xbrl.org/2008/generic-link.xsd#standard-link-role'
@@ -1833,9 +1846,6 @@ xsi:schemaLocation="http://www.xbrl.org/2003/linkbase http://www.xbrl.org/2003/x
 <link:roleRef roleURI='http://www.xbrl.org/2008/role/label'
     xlink:href='http://www.xbrl.org/2008/generic-label.xsd#standard-label'
     xlink:type='simple'/>
-<link:roleRef roleURI="http://www.xbrl.org/2010/role/message"
-    xlink:type="simple"
-    xlink:href="http://www.xbrl.org/2010/generic-message.xsd#standard-message"/>
 <link:arcroleRef arcroleURI='http://xbrl.org/arcrole/2008/variable-set'
     xlink:href='http://www.xbrl.org/2008/variable.xsd#variable-set'
     xlink:type='simple'/>
@@ -1844,7 +1854,7 @@ xsi:schemaLocation="http://www.xbrl.org/2003/linkbase http://www.xbrl.org/2003/x
 </link:linkbase>
 '''.format('\n'.join("xmlns{0}='{1}'".format((":" + prefix) if prefix else "",
                                              namespace)           
-                     for prefix in ("xlink", "link", "xbrli", "xsi", "xs", "generic")
+                     for prefix in ("xlink", "link", "xbrli", "xsi", "xs", "generic", "xfi")
                      for namespace in (formulaPrefixes[prefix][0],))
            )
         if self.modelXbrl is None:
@@ -1891,6 +1901,11 @@ xsi:schemaLocation="http://www.xbrl.org/2003/linkbase http://www.xbrl.org/2003/x
                     schemaLoc = nsAndSchemaloc[1]
             if self.modelXbrl is not None:
                 self.arelleSetXmlns(self.modelDocument, prefix, ns)
+                if schemaLoc:
+                    self.modelDocument.xmlRootElement.set(
+                        "{http://www.w3.org/2001/XMLSchema-instance}schemaLocation",
+                        self.modelDocument.xmlRootElement.get("{http://www.w3.org/2001/XMLSchema-instance}schemaLocation", "")
+                        + " {} {}".format(ns, schemaLoc))
                 return
             newmap = root.nsmap
             newmap[prefix] = ns
@@ -1933,7 +1948,7 @@ xsi:schemaLocation="http://www.xbrl.org/2003/linkbase http://www.xbrl.org/2003/x
             return None
     
     def element(self, tag, attrib=None, text=None):
-        elt = self.xmlParser.makeelement(self.clarkName(tag), attrib=self.clarkAttrib(attrib))
+        elt = self.xmlParser.makeelement(self.clarkName(tag), attrib=self.clarkAttrib(attrib), nsmap=self.lbDocument.getroot().nsmap)
         if self.modelXbrl is not None:
             elt.init(self.modelDocument) # modelObject in arelle
         if text:
@@ -1943,6 +1958,8 @@ xsi:schemaLocation="http://www.xbrl.org/2003/linkbase http://www.xbrl.org/2003/x
     def subElement(self, parentElt, tag, attrib=None, text=None):
         elt = self.element(tag, attrib, text)
         parentElt.append(elt)
+        if self.modelXbrl is not None:
+            elt.setNamespaceLocalName() # correct prefixed name after adding to parent
         return elt
     
     def arcrole(self, arcrole):
@@ -1976,7 +1993,7 @@ xsi:schemaLocation="http://www.xbrl.org/2003/linkbase http://www.xbrl.org/2003/x
         return _labelNbr   
     
 # interfaces for Arelle plugin operation
-def isXfLoadable(modelXbrl, mappedUri, normalizedUri, **kwargs):
+def isXfLoadable(modelXbrl, mappedUri, normalizedUri, filepath, **kwargs):
     return os.path.splitext(mappedUri)[1] == ".xf"
 
 def xfLoader(modelXbrl, mappedUri, filepath, *args, **kwargs):
@@ -1993,13 +2010,13 @@ def xfLoader(modelXbrl, mappedUri, filepath, *args, **kwargs):
     return doc
 
 def guiXbrlLoaded(cntlr, modelXbrl, attach, *args, **kwargs):
-    return
+    #return
     #### disabled for future less annoying option
     if cntlr.hasGui and getattr(modelXbrl, "loadedFromXbrlFormula", False):
         from arelle import ModelDocument
         from tkinter.filedialog import askdirectory
         for doc in modelXbrl.urlDocs.values():
-            if getattr(doc,"loadedFromXbrlFormula"):
+            if getattr(doc,"loadedFromXbrlFormula", False):
                 linkbaseFile = cntlr.uiFileDialog("save",
                         title=_("arelle - Save XBRL formula linkbase"),
                         initialdir=cntlr.config.setdefault("outputInstanceDir","."),
@@ -2015,9 +2032,9 @@ def guiXbrlLoaded(cntlr, modelXbrl, attach, *args, **kwargs):
         cntlr.showStatus(_("XBRL formula loading completed"), 3500)
 
 def cmdLineXbrlLoaded(cntlr, options, modelXbrl, *args, **kwargs):
-    if options.saveFormulaLinkbase and getattr(modelXbrl, "loadedFromXf", False):
+    if options.saveFormulaLinkbase:
         for doc in modelXbrl.urlDocs.values():
-            if getattr(doc,"loadedFromXbrlFormula"):
+            if getattr(doc,"loadedFromXbrlFormula", False):
                 doc.save(options.saveFormulaLinkbase)
                 cntlr.showStatus(_("Saving XBRL formula linkbase: {0}").format(doc.basename))
 
@@ -2055,11 +2072,37 @@ if __name__ == "__main__":
     def _logMessage(severity, code, message, **kwargs):
         print("[{}] {}".format(code, message % kwargs))
         
-    xfiFilesList = sys.argv[1].split("|")
+    debugParsing = False
+    xfFiles = []
     
-    debugParsing = len(sys.argv) > 2 and sys.argv[2] == "debug"
-    
-    # load formula syntax
-    xfsProgs = parse(_cntlr(), _logMessage, xfiFilesList, debugParsing=debugParsing)
+    for arg in sys.argv[1:]:
+        if arg in ("-a", "--about"):
+            print("\narelle(r) xf formula loader"
+                  "(c) 2017 Mark V Systems Limited\n"
+                  "All rights reserved\nhttp://www.arelle.org\nsupport@arelle.org\n\n"
+                  "Licensed under the Apache License, Version 2.0 (the \"License\"); "
+                  "you may not \nuse this file except in compliance with the License.  "
+                  "You may obtain a copy \nof the License at "
+                  "'http://www.apache.org/licenses/LICENSE-2.0'\n\n"
+                  "Unless required by applicable law or agreed to in writing, software \n"
+                  "distributed under the License is distributed on an \"AS IS\" BASIS, \n"
+                  "WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  \n"
+                  "See the License for the specific language governing permissions and \n"
+                  "limitations under the License.")
+        elif arg in ("-h", "-?", "--help"):
+            print("command line arguments: \n"
+                  "  --debug: specifies a pyparsing debug trace \n"
+                  "  {file}: parse and save as linkbase named {file}-formula.xml")
+        elif arg == "--debug":
+            debugParsing = True
+        else:
+            if os.path.exists(arg):
+                xfFiles.append(arg)
+            else:
+                print("file named {} not found".format(arg))
+            
+    # load xf formula files
+    if xfFiles:
+        xfsProgs = parse(_cntlr(), _logMessage, xfFiles, debugParsing=debugParsing)
                 
 

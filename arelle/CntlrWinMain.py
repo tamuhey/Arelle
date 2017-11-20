@@ -144,7 +144,7 @@ class CntlrWinMain (Cntlr.Cntlr):
         self.validateCalcLB = BooleanVar(value=self.modelManager.validateCalcLB)
         self.validateCalcLB.trace("w", self.setValidateCalcLB)
         validateMenu.add_checkbutton(label=_("Calc Linkbase checks"), underline=0, variable=self.validateCalcLB, onvalue=True, offvalue=False)
-        self.modelManager.validateInferDecimals = self.config.setdefault("validateInferDecimals",False)
+        self.modelManager.validateInferDecimals = self.config.setdefault("validateInferDecimals",True)
         self.validateInferDecimals = BooleanVar(value=self.modelManager.validateInferDecimals)
         self.validateInferDecimals.trace("w", self.setValidateInferDecimals)
         validateMenu.add_checkbutton(label=_("Infer Decimals in calculations"), underline=0, variable=self.validateInferDecimals, onvalue=True, offvalue=False)
@@ -1249,7 +1249,7 @@ class CntlrWinMain (Cntlr.Cntlr):
                           os.path.join(self.imagesDir, "arelle32.gif"),
                           _("arelle\u00ae {0} {1}bit {2}\n"
                               "An open source XBRL platform\n"
-                              "\u00a9 2010-2015 Mark V Systems Limited\n"
+                              "\u00a9 2010-2017 Mark V Systems Limited\n"
                               "All rights reserved\nhttp://www.arelle.org\nsupport@arelle.org\n\n"
                               "Licensed under the Apache License, Version 2.0 (the \"License\"); "
                               "you may not use this file except in compliance with the License.  "
@@ -1288,7 +1288,10 @@ class CntlrWinMain (Cntlr.Cntlr):
             elif isinstance(file, _STR_BASE):
                 message += " - " + file
         if isinstance(messageArgs, dict):
-            message = message % messageArgs
+            try:
+                message = message % messageArgs
+            except (KeyError, TypeError, ValueError) as ex:
+                message += " \nMessage log error: " + str(ex)
         self.uiThreadQueue.put((self.uiAddToLog, [message]))
         
     # ui thread addToLog

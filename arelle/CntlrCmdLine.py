@@ -318,7 +318,7 @@ def parseAndRun(args):
 
     # install any dynamic plugins so their command line options can be parsed if present
     for i, arg in enumerate(args):
-        if arg.startswith('--plugins'):
+        if arg.startswith('--plugin'): # allow singular or plural (option must simply be non-ambiguous
             if len(arg) > 9 and arg[9] == '=':
                 preloadPlugins = arg[10:]
             elif i < len(args) - 1:
@@ -373,7 +373,7 @@ def parseAndRun(args):
     if options.about:
         print(_("\narelle(r) {0}bit {1}\n\n"
                 "An open source XBRL platform\n"
-                "(c) 2010-2015 Mark V Systems Limited\n"
+                "(c) 2010-2017 Mark V Systems Limited\n"
                 "All rights reserved\nhttp://www.arelle.org\nsupport@arelle.org\n\n"
                 "Licensed under the Apache License, Version 2.0 (the \"License\"); "
                 "you may not \nuse this file except in compliance with the License.  "

@@ -109,7 +109,7 @@ def isSqlConnection(host, port, timeout=10, product=None):
     while t < timeout:
         try:
             if product == "postgres" and hasPostgres:
-                pgConnect(user='', host=host, port=int(port or 5432), socket_timeout=t)
+                pgConnect(user='', host=host, port=int(port or 5432), timeout=t)
             elif product == "mysql" and hasMySql:
                 mysqlConnect(user='', host=host, port=int(port or 5432), socket_timeout=t)
             elif product == "orcl" and hasOracle:
@@ -149,7 +149,7 @@ class SqlDbConnection():
             self.conn = pgConnect(user=user, password=password, host=host, 
                                   port=int(port or 5432), 
                                   database=database, 
-                                  socket_timeout=timeout or 60)
+                                  timeout=timeout or 60)
             self.product = product
         elif product == "mysql":
             if not hasMySql:
@@ -215,6 +215,11 @@ class SqlDbConnection():
     
     def showStatus(self, msg, clearAfter=None):
         self.modelXbrl.modelManager.showStatus(msg, clearAfter)
+        
+    def pyStrFromDbStr(self, str):
+        if self.product == "postgres":
+            return str.replace("%%", "%")
+        return str
         
     def pyBoolFromDbBool(self, str):
         return str in ("TRUE", "t", True)  # may be DB string or Python boolean (preconverted)
