@@ -281,25 +281,23 @@ def parseAndRun(args):
     parser.add_option("--xdgConfigHome", action="store", dest="xdgConfigHome", 
                       help=_("Specify non-standard location for configuration and cache files (overrides environment parameter XDG_CONFIG_HOME)."))
     parser.add_option("--plugins", action="store", dest="plugins",
-                      help=_("Modify plug-in configuration.  "
-                             "Re-save unless 'temp' is in the module list.  " 
-                             "Enter 'show' to show current plug-in configuration.  "
+                      help=_("Specify plug-in configuration for this invocation.  "
+                             "Enter 'show' to confirm plug-in configuration.  "
                              "Commands show, and module urls are '|' separated: "
-                             "+url to add plug-in by its url or filename, ~name to reload a plug-in by its name, -name to remove a plug-in by its name, "
+                             "url specifies a plug-in by its url or filename, "
                              "relative URLs are relative to installation plug-in directory, "
-                             " (e.g., '+http://arelle.org/files/hello_web.py', '+C:\Program Files\Arelle\examples\plugin\hello_dolly.py' to load, "
-                             "or +../examples/plugin/hello_dolly.py for relative use of examples directory, "
-                             "~Hello Dolly to reload, -Hello Dolly to remove).  "
-                             "If + is omitted from .py file nothing is saved (same as temp).  "
-                             "Packaged plug-in urls are their directory's url.  " ))
+                             " (e.g., 'http://arelle.org/files/hello_web.py', 'C:\Program Files\Arelle\examples\plugin\hello_dolly.py' to load, "
+                             "or ../examples/plugin/hello_dolly.py for relative use of examples directory) "
+                             "Local python files do not require .py suffix, e.g., hello_dolly without .py is sufficient, "
+                             "Packaged plug-in urls are their directory's url (e.g., --plugins EdgarRenderer or --plugins xbrlDB).  " ))
     parser.add_option("--packages", action="store", dest="packages",
-                      help=_("Modify taxonomy packages configuration.  "
-                             "Re-save unless 'temp' is in the module list.  " 
+                      help=_("Specify taxonomy packages configuration.  "
                              "Enter 'show' to show current packages configuration.  "
                              "Commands show, and module urls are '|' separated: "
-                             "+url to add package by its url or filename, ~name to reload package by its name, -name to remove a package by its name, "
-                             "URLs are full absolute paths.  "
-                             "If + is omitted from package file nothing is saved (same as temp).  " ))
+                             "url specifies a package by its url or filename, please use full paths. "
+                             "(Package settings from GUI are no longer shared with cmd line operation. "
+                             "Cmd line package settings are not persistent.)  " ))
+    parser.add_option("--package", action="store", dest="packages", help=SUPPRESS_HELP)
     parser.add_option("--packageManifestName", action="store", dest="packageManifestName",
                       help=_("Provide non-standard archive manifest file name pattern (e.g., *taxonomyPackage.xml).  "
                              "Uses unix file name pattern matching.  "
@@ -371,7 +369,7 @@ def parseAndRun(args):
         
     (options, leftoverArgs) = parser.parse_args(args)
     if options.about:
-        print(_("\narelle(r) {0}bit {1}\n\n"
+        print(_("\narelle(r) {0} ({1}bit)\n\n"
                 "An open source XBRL platform\n"
                 "(c) 2010-2017 Mark V Systems Limited\n"
                 "All rights reserved\nhttp://www.arelle.org\nsupport@arelle.org\n\n"
@@ -385,12 +383,12 @@ def parseAndRun(args):
                 "See the License for the specific language governing permissions and \n"
                 "limitations under the License."
                 "\n\nIncludes:"
-                "\n   Python(r) {3[0]}.{3[1]}.{3[2]} (c) 2001-2013 Python Software Foundation"
+                "\n   Python(r) {4[0]}.{4[1]}.{4[2]} (c) 2001-2013 Python Software Foundation"
                 "\n   PyParsing (c) 2003-2013 Paul T. McGuire"
-                "\n   lxml {4[0]}.{4[1]}.{4[2]} (c) 2004 Infrae, ElementTree (c) 1999-2004 by Fredrik Lundh"
-                "{2}"
+                "\n   lxml {5[0]}.{5[1]}.{5[2]} (c) 2004 Infrae, ElementTree (c) 1999-2004 by Fredrik Lundh"
+                "{3}"
                 "\n   May include installable plug-in modules with author-specific license terms"
-                ).format(cntlr.systemWordSize, Version.version,
+                ).format(Version.__version__, cntlr.systemWordSize, Version.version,
                          _("\n   Bottle (c) 2011-2013 Marcel Hellkamp") if hasWebServer else "",
                          sys.version_info, etree.LXML_VERSION))
     elif options.disclosureSystemName in ("help", "help-verbose"):
@@ -929,7 +927,7 @@ class CntlrCmdLine(Cntlr.Cntlr):
                         if not options.validate:
                             ValidateXbrlDimensions.loadDimensionDefaults(modelXbrl)
                         # setup fresh parameters from formula optoins
-                        modelXbrl.parameters = fo.typedParameters()
+                        modelXbrl.parameters = fo.typedParameters(modelXbrl.prefixedNamespaces)
                         ValidateFormula.validate(modelXbrl, compileOnly=(options.formulaAction != "run"))
                         self.addToLog(format_string(self.modelManager.locale, 
                                                     _("formula validation and execution in %.2f secs")

@@ -88,6 +88,11 @@ def qname(value, name=None, noPrefixIsNoNamespace=False, castException=None, pre
         namespaceURI = None # cancel namespace if it is a zero length string
     return QName(prefix, namespaceURI, localName)
 
+def qnameHref(href): # namespaceUri#localname
+    namespaceURI, _sep, localName = href.rpartition("#")
+    return QName(None, namespaceURI or None, localName)
+
+
 def qnameNsLocalName(namespaceURI, localName):  # does not handle localNames with prefix
     return QName(None, namespaceURI or None, localName)
 
@@ -99,7 +104,12 @@ def qnameClarkName(clarkname):  # does not handle clark names with prefix
         return QName(None, None, clarkname)
 
 def qnameEltPfxName(element, prefixedName, prefixException=None):
-    prefix,sep,localName = prefixedName.rpartition(':')
+    # check for href name style first
+    if "#" in prefixedName:
+        namespaceURI, _sep, localName = prefixedName.rpartition('#')
+        return QName(None, namespaceURI, localName)
+    # check for prefixed name style
+    prefix,_sep,localName = prefixedName.rpartition(':')
     if not prefix:
         prefix = None # don't want '' but instead None if no prefix
     namespaceURI = element.nsmap.get(prefix)
@@ -283,9 +293,9 @@ class DateTime(datetime.datetime):
         else:
             return "{0.year:04}-{0.month:02}-{0.day:02}T{0.hour:02}:{0.minute:02}:{0.second:02}".format(self)
     def addYearMonthDuration(self, other, sign):
-        m = self.month + sign * other.months
+        m = self.month + sign * other.months - 1 # m is zero based now (0 - Jan, 11 - Dec)
         y = self.year + sign * other.years + m // 12
-        m %= 12
+        m = (m % 12) + 1 # m back to 1 based (1 = Jan)
         d = self.day
         lastDay = lastDayOfMonth(y, m)
         if d > lastDay: d = lastDay

@@ -5,10 +5,10 @@ Created on Oct 17, 2010
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
 import os, sys, traceback, re
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from arelle import (FileSource, ModelXbrl, ModelDocument, ModelVersReport, XbrlConst, 
                ValidateXbrl, ValidateFiling, ValidateHmrc, ValidateVersReport, ValidateFormula,
-               ValidateInfoset, RenderingEvaluator, ViewFileRenderedGrid)
+               ValidateInfoset, RenderingEvaluator, ViewFileRenderedGrid, UrlUtil)
 from arelle.ModelDocument import Type, ModelDocumentReference, load as modelDocumentLoad
 from arelle.ModelDtsObject import ModelResource
 from arelle.ModelInstanceObject import ModelFact
@@ -80,8 +80,12 @@ class Validate:
                                 _name = testcasesElement.get("name")
                             break
                     self.modelXbrl.info("info", _("Testcases - %(name)s"), modelXbrl=self.modelXbrl.modelDocument, name=_name)
+                    _statusCounts = OrderedDict((("pass",0),("fail",0)))
                     for doc in sorted(self.modelXbrl.modelDocument.referencesDocument.keys(), key=lambda doc: doc.uri):
                         self.validateTestcase(doc)  # testcases doc's are sorted by their uri (file names), e.g., for formula
+                        for tv in getattr(doc, "testcaseVariations", ()):
+                            _statusCounts[tv.status] = _statusCounts.get(tv.status, 0) + 1
+                    self.modelXbrl.info("arelle:testResults", ", ".join("{}={}".format(k,c) for k, c in _statusCounts.items() if k))
                 elif self.modelXbrl.modelDocument.type in (Type.TESTCASE, Type.REGISTRYTESTCASE):
                     self.validateTestcase(self.modelXbrl.modelDocument)
             except Exception as err:
@@ -105,7 +109,7 @@ class Validate:
             self.validateRssFeed()
         else:
             try:
-                self.instValidator.validate(self.modelXbrl, self.modelXbrl.modelManager.formulaOptions.typedParameters())
+                self.instValidator.validate(self.modelXbrl, self.modelXbrl.modelManager.formulaOptions.typedParameters(self.modelXbrl.prefixedNamespaces))
                 self.instValidator.close()
             except Exception as err:
                 self.modelXbrl.error("exception:" + type(err).__name__,
@@ -137,7 +141,7 @@ class Validate:
                 if getattr(rssItem, "doNotProcessRSSitem", False) or modelXbrl.modelDocument is None:
                     modelXbrl.close()
                     continue # skip entry based on processing criteria
-                self.instValidator.validate(modelXbrl, self.modelXbrl.modelManager.formulaOptions.typedParameters())
+                self.instValidator.validate(modelXbrl, self.modelXbrl.modelManager.formulaOptions.typedParameters(self.modelXbrl.prefixedNamespaces))
                 self.instValidator.close()
                 rssItem.setResults(modelXbrl)
                 self.modelXbrl.modelManager.viewModelObject(self.modelXbrl, rssItem.objectId())
@@ -224,7 +228,7 @@ class Validate:
                         else: # need own file source, may need instance discovery
                             filesource = FileSource.FileSource(readMeFirstUri, self.modelXbrl.modelManager.cntlr)
                             if filesource and not filesource.selection and filesource.isArchive:
-                                for _archiveFile in filesource.dir: # find instance document in archive
+                                for _archiveFile in filesource.dir or (): # find instance document in archive
                                     filesource.select(_archiveFile)
                                     if ModelDocument.Type.identify(filesource, filesource.url) in (ModelDocument.Type.INSTANCE, ModelDocument.Type.INLINEXBRL):
                                         break # use this selection
@@ -236,7 +240,7 @@ class Validate:
                         modelXbrl.isTestcaseVariation = True
                     if modelXbrl.modelDocument is None:
                         modelXbrl.error("arelle:notLoaded",
-                             _("Testcase %(id)s %(name)s document not loaded: %(file)s"),
+                             _("Variation %(id)s %(name)s readMeFirst document not loaded: %(file)s"),
                              modelXbrl=testcase, id=modelTestcaseVariation.id, name=modelTestcaseVariation.name, file=os.path.basename(readMeFirstUri))
                         self.determineNotLoadedTestStatus(modelTestcaseVariation, modelXbrl.errors)
                         modelXbrl.close()
@@ -284,7 +288,7 @@ class Validate:
                         modelTestcaseVariation.status = "generated"
                     else:
                         modelXbrl.error("arelle:notLoaded",
-                             _("Testcase %(id)s %(name)s DTSes not loaded, unable to generate versioning report: %(file)s"),
+                             _("Variation %(id)s %(name)s input DTSes not loaded, unable to generate versioning report: %(file)s"),
                              modelXbrl=testcase, id=modelTestcaseVariation.id, name=modelTestcaseVariation.name, file=os.path.basename(readMeFirstUri))
                         modelTestcaseVariation.status = "failed"
                     for inputDTS in inputDTSes.values():
@@ -296,14 +300,39 @@ class Validate:
                 elif inputDTSes:
                     # validate schema, linkbase, or instance
                     modelXbrl = inputDTSes[None][0]
+                    expectedDataFiles = set(modelXbrl.modelManager.cntlr.webCache.normalizeUrl(uri, baseForElement)
+                                            for d in modelTestcaseVariation.dataUris.values() for uri in d
+                                            if not UrlUtil.isAbsolute(uri))
+                    foundDataFiles = set()
+                    variationBase = os.path.dirname(baseForElement)
                     for dtsName, inputDTS in inputDTSes.items():  # input instances are also parameters
                         if dtsName: # named instance
                             parameters[dtsName] = (None, inputDTS) #inputDTS is a list of modelXbrl's (instance DTSes)
                         elif len(inputDTS) > 1: # standard-input-instance with multiple instance documents
                             parameters[XbrlConst.qnStandardInputInstance] = (None, inputDTS) # allow error detection in validateFormula
+                        for _inputDTS in inputDTS:
+                            for docUrl in _inputDTS.urlDocs.keys():
+                                if docUrl.startswith(variationBase):
+                                    foundDataFiles.add(docUrl)
+                    if expectedDataFiles - foundDataFiles:
+                        modelXbrl.error("arelle:testcaseDataNotUsed",
+                            _("Variation %(id)s %(name)s data files not used: %(missingDataFiles)s"),
+                            modelObject=modelTestcaseVariation, name=modelTestcaseVariation.name, id=modelTestcaseVariation.id, 
+                            missingDataFiles=", ".join(sorted(os.path.basename(f) for f in expectedDataFiles - foundDataFiles)))
+                    if foundDataFiles - expectedDataFiles:
+                        modelXbrl.warning("arelle:testcaseDataUnexpected",
+                            _("Variation %(id)s %(name)s files not in variation data: %(unexpectedDataFiles)s"),
+                            modelObject=modelTestcaseVariation, name=modelTestcaseVariation.name, id=modelTestcaseVariation.id,
+                            unexpectedDataFiles=", ".join(sorted(os.path.basename(f) for f in foundDataFiles - expectedDataFiles)))
                     if modelXbrl.hasTableRendering or modelTestcaseVariation.resultIsTable:
-                        RenderingEvaluator.init(modelXbrl)
-                    if modelXbrl.hasFormulae:
+                        try:
+                            RenderingEvaluator.init(modelXbrl)
+                        except Exception as err:
+                            modelXbrl.error("exception:" + type(err).__name__,
+                                _("Testcase RenderingEvaluator.init exception: %(error)s, instance: %(instance)s"),
+                                modelXbrl=modelXbrl, instance=modelXbrl.modelDocument.basename, error=err, exc_info=True)
+                    modelXbrlHasFormulae = modelXbrl.hasFormulae
+                    if modelXbrlHasFormulae:
                         try:
                             # validate only formulae
                             self.instValidator.parameters = parameters
@@ -323,19 +352,24 @@ class Validate:
                                                    errorCaptureLevel=errorCaptureLevel)
                         if infoset.modelDocument is None:
                             modelXbrl.error("arelle:notLoaded",
-                                _("Testcase %(id)s %(name)s result infoset not loaded: %(file)s"),
+                                _("Variation %(id)s %(name)s result infoset not loaded: %(file)s"),
                                 modelXbrl=testcase, id=modelTestcaseVariation.id, name=modelTestcaseVariation.name, 
                                 file=os.path.basename(modelTestcaseVariation.resultXbrlInstance))
                             modelTestcaseVariation.status = "result infoset not loadable"
                         else:   # check infoset
                             ValidateInfoset.validate(self.instValidator, modelXbrl, infoset)
                         infoset.close()
-                    if modelTestcaseVariation.resultIsTable: # and self.modelXbrl.modelManager.validateInfoset:
+                    if modelXbrl.hasTableRendering or modelTestcaseVariation.resultIsTable: # and self.modelXbrl.modelManager.validateInfoset:
                         # diff (or generate) table infoset
                         resultTableUri = modelXbrl.modelManager.cntlr.webCache.normalizeUrl(modelTestcaseVariation.resultTableUri, baseForElement)
                         if not any(alternativeValidation(modelXbrl, resultTableUri)
                                    for alternativeValidation in pluginClassMethods("Validate.TableInfoset")):
-                            ViewFileRenderedGrid.viewRenderedGrid(modelXbrl, resultTableUri, diffToFile=True)  # false to save infoset files
+                            try:
+                                ViewFileRenderedGrid.viewRenderedGrid(modelXbrl, resultTableUri, diffToFile=True)  # false to save infoset files
+                            except Exception as err:
+                                modelXbrl.error("exception:" + type(err).__name__,
+                                    _("Testcase table linkbase validation exception: %(error)s, instance: %(instance)s"),
+                                    modelXbrl=modelXbrl, instance=modelXbrl.modelDocument.basename, error=err, exc_info=True)
                     self.instValidator.close()
                     extraErrors = []
                     for pluginXbrlMethod in pluginClassMethods("TestcaseVariation.Validated"):
@@ -350,7 +384,7 @@ class Validate:
                             formulaOutputInstance = modelXbrl.formulaOutputInstance
                             modelXbrl.formulaOutputInstance = None # prevent it from being closed now
                         self.instValidator.close()
-                    compareIxResultInstance = (modelXbrl.modelDocument.type == Type.INLINEXBRL and 
+                    compareIxResultInstance = (modelXbrl.modelDocument.type in (Type.INLINEXBRL, Type.INLINEXBRLDOCUMENTSET) and 
                                                modelTestcaseVariation.resultXbrlInstanceUri is not None)
                     if compareIxResultInstance:
                         formulaOutputInstance = modelXbrl # compare modelXbrl to generated output instance
@@ -362,6 +396,7 @@ class Validate:
                         del inputDTSes # dereference
                         errMsgPrefix = "formula"
                     if resultIsXbrlInstance and formulaOutputInstance and formulaOutputInstance.modelDocument:
+                        _matchExpectedResultIDs = not modelXbrlHasFormulae # formula restuls have inconsistent IDs
                         expectedInstance = ModelXbrl.load(self.modelXbrl.modelManager, 
                                                    modelTestcaseVariation.resultXbrlInstanceUri,
                                                    _("loading expected result XBRL instance"), 
@@ -370,7 +405,7 @@ class Validate:
                                                    errorCaptureLevel=errorCaptureLevel)
                         if expectedInstance.modelDocument is None:
                             self.modelXbrl.error("{}:expectedResultNotLoaded".format(errMsgPrefix),
-                                _("Testcase %(id)s %(name)s expected result instance not loaded: %(file)s"),
+                                _("Testcase \"%(name)s\" %(id)s expected result instance not loaded: %(file)s"),
                                 modelXbrl=testcase, id=modelTestcaseVariation.id, name=modelTestcaseVariation.name, 
                                 file=os.path.basename(modelTestcaseVariation.resultXbrlInstanceUri),
                                 messageCodes=("formula:expectedResultNotLoaded","ix:expectedResultNotLoaded"))
@@ -386,7 +421,7 @@ class Validate:
                                 formulaOutputFootnotesRelSet = ModelRelationshipSet(formulaOutputInstance, "XBRL-footnotes")
                                 expectedFootnotesRelSet = ModelRelationshipSet(expectedInstance, "XBRL-footnotes")
                                 def factFootnotes(fact, footnotesRelSet):
-                                    footnotes = []
+                                    footnotes = {}
                                     footnoteRels = footnotesRelSet.fromModelObject(fact)
                                     if footnoteRels:
                                         # most process rels in same order between two instances, use labels to sort
@@ -395,21 +430,18 @@ class Validate:
                                             modelObject = footnoteRel.toModelObject
                                             if isinstance(modelObject, ModelResource):
                                                 xml = modelObject.viewText().strip()
-                                                footnotes.append("Footnote {}: {}".format(
-                                                   i+1, # compare footnote with HTML serialized
-                                                   xml,
-                                                   #re.sub(r'\s+', ' ', collapseWhitespace(modelObject.stringValue))
-                                                   ))
+                                                footnotes["Footnote {}".format(i+1)] = xml #re.sub(r'\s+', ' ', collapseWhitespace(modelObject.stringValue))
                                             elif isinstance(modelObject, ModelFact):
-                                                footnotes.append("Footnoted fact {}: {} context: {} value: {}".format(
-                                                    i+1,
+                                                footnotes["Footnoted fact {}".format(i+1)] = \
+                                                    "{} context: {} value: {}".format(
                                                     modelObject.qname,
                                                     modelObject.contextID,
-                                                    collapseWhitespace(modelObject.value)))
+                                                    collapseWhitespace(modelObject.value))
                                     return footnotes
                                 for expectedInstanceFact in expectedInstance.facts:
                                     unmatchedFactsStack = []
-                                    formulaOutputFact = formulaOutputInstance.matchFact(expectedInstanceFact, unmatchedFactsStack, deemP0inf=True, matchId=True)
+                                    formulaOutputFact = formulaOutputInstance.matchFact(expectedInstanceFact, unmatchedFactsStack, deemP0inf=True, matchId=_matchExpectedResultIDs, matchLang=False)
+                                    #formulaOutputFact = formulaOutputInstance.matchFact(expectedInstanceFact, unmatchedFactsStack, deemP0inf=True, matchId=True, matchLang=True)
                                     if formulaOutputFact is None:
                                         if unmatchedFactsStack: # get missing nested tuple fact, if possible
                                             missingFact = unmatchedFactsStack[-1]
@@ -422,10 +454,11 @@ class Validate:
                                     else: # compare footnotes
                                         expectedInstanceFactFootnotes = factFootnotes(expectedInstanceFact, expectedFootnotesRelSet)
                                         formulaOutputFactFootnotes = factFootnotes(formulaOutputFact, formulaOutputFootnotesRelSet)
-                                        if expectedInstanceFactFootnotes != formulaOutputFactFootnotes:
+                                        if (len(expectedInstanceFactFootnotes) != len(formulaOutputFactFootnotes) or
+                                            set(expectedInstanceFactFootnotes.values()) != set(formulaOutputFactFootnotes.values())):
                                             formulaOutputInstance.error("{}:expectedFactFootnoteDifference".format(errMsgPrefix),
                                                 _("Output expected fact %(fact)s expected footnotes %(footnotes1)s produced footnotes %(footnotes2)s"),
-                                                modelXbrl=(formulaOutputFact,expectedInstanceFact), fact=expectedInstanceFact.qname, footnotes1=expectedInstanceFactFootnotes, footnotes2=formulaOutputFactFootnotes,
+                                                modelXbrl=(formulaOutputFact,expectedInstanceFact), fact=expectedInstanceFact.qname, footnotes1=sorted(expectedInstanceFactFootnotes.items()), footnotes2=sorted(formulaOutputFactFootnotes.items()),
                                                 messageCodes=("formula:expectedFactFootnoteDifference","ix:expectedFactFootnoteDifference"))
 
                             # for debugging uncomment next line to save generated instance document
@@ -516,15 +549,16 @@ class Validate:
         else:
             status = "fail"
         modelTestcaseVariation.status = status
-        modelTestcaseVariation.actual = []
+        _actual = {} # code and quantity
         if numErrors > 0: # either coded errors or assertions (in errors list)
             # put error codes first, sorted, then assertion result (dict's)
             for error in _errors:
                 if isinstance(error,dict):  # asserion results
                     modelTestcaseVariation.assertions = error
                 else:   # error code results
-                    modelTestcaseVariation.actual.append(error)
-            modelTestcaseVariation.actual.sort(key=lambda d: str(d))
+                    _actual[error] = _actual.get(error, 0) + 1
+            modelTestcaseVariation.actual = [error if qty == 1 else "{} ({})".format(error,qty)
+                                             for error, qty in sorted(_actual.items(), key=lambda i:i[0])]
             for error in _errors:
                 if isinstance(error,dict):
                     modelTestcaseVariation.actual.append(error)

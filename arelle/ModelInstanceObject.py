@@ -227,6 +227,12 @@ class ModelFact(ModelObject):
             return self._isNumeric
 
     @property
+    def isMultiLanguage(self):
+        """(bool) -- concept.type.isMultiLanguage (string or normalized string)"""
+        concept = self.concept
+        return concept is not None and concept.type is not None and concept.type.isMultiLanguage
+
+    @property
     def isFraction(self):
         """(bool) -- concept.isFraction"""
         try:
@@ -394,7 +400,7 @@ class ModelFact(ModelObject):
             return float(self.value)
         return self.value
     
-    def isVEqualTo(self, other, deemP0Equal=False, deemP0inf=False):
+    def isVEqualTo(self, other, deemP0Equal=False, deemP0inf=False, normalizeSpace=True):
         """(bool) -- v-equality of two facts
         
         Note that facts may be in different instances
@@ -438,7 +444,7 @@ class ModelFact(ModelObject):
             return self.xValue == other.xValue # required to handle date/time with 24 hrs.
         selfValue = self.value
         otherValue = other.value
-        if isinstance(selfValue,str) and isinstance(otherValue,str): # normalized space comparison
+        if normalizeSpace and isinstance(selfValue,str) and isinstance(otherValue,str): # normalized space comparison
             return ' '.join(selfValue.split()) == ' '.join(otherValue.split())
         else:
             return selfValue == otherValue
@@ -586,15 +592,15 @@ class ModelInlineValueObject:
         except AttributeError:
             self.xValid = UNVALIDATED # may not be initialized otherwise
             self.xValue = None
+            f = self.format
             v = XmlUtil.innerText(self, 
-                                  ixExclude="html", 
+                                  ixExclude="tuple" if self.elementQname == XbrlConst.qnIXbrl11Tuple else "html", 
                                   ixEscape=(self.get("escape") in ("true","1")), 
                                   ixContinuation=(self.elementQname == XbrlConst.qnIXbrl11NonNumeric),
-                                  strip=True) # transforms are whitespace-collapse
+                                  strip=(f is not None)) # transforms are whitespace-collapse, otherwise it is preserved.
             if self.isNil:
                 self._ixValue = v
             else:
-                f = self.format
                 if f is not None:
                     if f.namespaceURI in FunctionIxt.ixtNamespaceFunctions:
                         try:
@@ -611,8 +617,10 @@ class ModelInlineValueObject:
                         except Exception as err:
                             self._ixValue = ModelValue.INVALIDixVALUE
                             raise err
-                if self.localName == "nonNumeric" or self.localName == "tuple":
+                if self.localName == "nonNumeric":
                     self._ixValue = v
+                elif self.localName == "tuple":
+                    self._ixValue = ""
                 elif self.localName == "fraction":
                     if self.xValid >= VALID:
                         self._ixValue = str(self.xValue)
@@ -701,7 +709,7 @@ class ModelInlineFact(ModelInlineValueObject, ModelFact):
 
     @property
     def order(self):
-        """(float) -- order attribute of inline element or None if absent or float conversion error"""
+        """(Decimal) -- order attribute of inline element or None if absent or Decimal conversion error"""
         try:
             return self._order
         except AttributeError:
@@ -711,6 +719,12 @@ class ModelInlineFact(ModelInlineValueObject, ModelFact):
             except (ValueError, TypeError, InvalidOperation):
                 self._order = None
             return self._order
+
+    @property
+    def parentElement(self):
+        """(ModelObject) -- parent element (tuple or xbrli:xbrl) of the inline target instance document
+            for inline root element, the xbrli:xbrl element is substituted for by the inline root element"""
+        return getattr(self, "_ixFactParent") # set by ModelDocument locateFactInTuple for the inline target's root element
 
     @property
     def fractionValue(self):

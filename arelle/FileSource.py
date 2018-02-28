@@ -95,6 +95,7 @@ class FileSource:
         if not self.isTarGz:
             self.type = self.type[3:]
         self.isZip = self.type == ".zip"
+        self.isZipBackslashed = False # windows style backslashed paths
         self.isEis = self.type == ".eis"
         self.isXfd = (self.type == ".xfd" or self.type == ".frm")
         self.isRss = (self.type == ".rss" or self.url.endswith(".rss.xml"))
@@ -300,7 +301,7 @@ class FileSource:
             self.fs.close()
             self.fs = None
             self.isOpen = False
-            self.isZip = False
+            self.isZip = self.isZipBackslashed = False
         if self.isTarGz and self.isOpen:
             self.fs.close()
             self.fs = None
@@ -401,7 +402,11 @@ class FileSource:
                 archiveFileName = filepath[len(archiveFileSource.baseurl) + 1:]
             if archiveFileSource.isZip:
                 try:
-                    b = archiveFileSource.fs.read(archiveFileName.replace("\\","/"))
+                    if archiveFileSource.isZipBackslashed:
+                        f = archiveFileName.replace("/", "\\")
+                    else:
+                        f = archiveFileName.replace("\\","/")
+                    b = archiveFileSource.fs.read(f)
                     if binary:
                         return (io.BytesIO(b), )
                     if encoding is None:
@@ -508,7 +513,11 @@ class FileSource:
         elif self.isZip:
             files = []
             for zipinfo in self.fs.infolist():
-                files.append(zipinfo.filename)
+                f = zipinfo.filename
+                if '\\' in f:
+                    self.isZipBackslashed = True
+                    f = f.replace("\\", "/")
+                files.append(f)
             self.filesDir = files
         elif self.isTarGz:
             self.filesDir = self.fs.getnames()
@@ -571,14 +580,24 @@ class FileSource:
             
         return self.filesDir
     
+    def basedUrl(self, selection):
+        if isHttpUrl(selection) or os.path.isabs(selection):
+            return selection
+        elif self.baseIsHttp or os.sep == '/':
+            return self.baseurl + "/" + selection
+        else: # MSFT os.sep == '\\'
+            return self.baseurl + os.sep + selection.replace("/", os.sep)
+    
     def select(self, selection):
         self.selection = selection
-        if isHttpUrl(selection) or os.path.isabs(selection):
-            self.url = selection
-        elif self.baseIsHttp or os.sep == '/':
-            self.url = self.baseurl + "/" + selection
-        else: # MSFT os.sep == '\\'
-            self.url = self.baseurl + os.sep + selection.replace("/", os.sep)
+        if not selection:
+            self.url = None
+        else:
+            if isinstance(selection, list): # json list
+                self.url = [self.basedUrl(s) for s in selection]
+            # elif isinstance(selection, dict): # json objects
+            else:
+                self.url = self.basedUrl(selection)
             
 def openFileStream(cntlr, filepath, mode='r', encoding=None):
     if PackageManager.isMappedUrl(filepath):

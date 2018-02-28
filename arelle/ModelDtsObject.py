@@ -443,7 +443,7 @@ class ModelConcept(ModelNamableTerm, ModelParticle):
         
     def instanceOfType(self, typeqname):
         """(bool) -- True if element is declared by, or derived from type of given qname or list of qnames"""
-        if isinstance(typeqname, (tuple,list)): # union
+        if isinstance(typeqname, (tuple,list,set)): # union
             if self.typeQname in typeqname:
                 return True
         else: # not union, single type
@@ -715,17 +715,17 @@ class ModelConcept(ModelNamableTerm, ModelParticle):
     
     @property
     def isEnumeration(self):
-        """(bool) -- True if derived from enum:enumerationItemType or enum:enumerationsItemType"""
+        """(bool) -- True if derived from enum:enumerationItemType or enum:enumerationsItemType or enum2:setValueDimensionType"""
         try:
             return self._isEnum
         except AttributeError:
-            self._isEnum = self.instanceOfType(XbrlConst.qnEnumerationItemTypes)
+            self._isEnum = self.instanceOfType(XbrlConst.qnEnumerationTypes)
             return self._isEnum
         
     @property
     def enumDomainQname(self):
         """(QName) -- enumeration domain qname """
-        return self.schemaNameQname(self.get(XbrlConst.attrEnumerationDomain2014) or self.get(XbrlConst.attrEnumerationDomainYYYY) or self.get(XbrlConst.attrEnumerationDomain2016))
+        return self.schemaNameQname(self.get(XbrlConst.attrEnumerationDomain2014) or self.get(XbrlConst.attrEnumerationDomainYYYY) or self.get(XbrlConst.attrEnumerationDomain11YYYY) or self.get(XbrlConst.attrEnumerationDomain2016))
 
     @property
     def enumDomain(self):
@@ -739,12 +739,12 @@ class ModelConcept(ModelNamableTerm, ModelParticle):
     @property
     def enumLinkrole(self):
         """(anyURI) -- enumeration linkrole """
-        return self.get(XbrlConst.attrEnumerationLinkrole2014) or self.get(XbrlConst.attrEnumerationLinkroleYYYY) or self.get(XbrlConst.attrEnumerationLinkrole2016)
+        return self.get(XbrlConst.attrEnumerationLinkrole2014) or self.get(XbrlConst.attrEnumerationLinkroleYYYY) or self.get(XbrlConst.attrEnumerationLinkrole11YYYY) or self.get(XbrlConst.attrEnumerationLinkrole2016)
     
     @property
     def enumDomainUsable(self):
         """(string) -- enumeration usable attribute """
-        return self.get(XbrlConst.attrEnumerationUsable2014) or self.get(XbrlConst.attrEnumerationUsableYYYY) or self.get(XbrlConst.attrEnumerationUsable2016) or "false"
+        return self.get(XbrlConst.attrEnumerationUsable2014) or self.get(XbrlConst.attrEnumerationUsableYYYY) or self.get(XbrlConst.attrEnumerationUsable11YYYY) or self.get(XbrlConst.attrEnumerationUsable2016) or "false"
 
     @property
     def isEnumDomainUsable(self):
@@ -1191,6 +1191,11 @@ class ModelType(ModelNamableTerm):
             return False
         typeDerivedFrom = self.modelXbrl.qnameTypes.get(qnameDerivedFrom)
         return typeDerivedFrom.isDomainItemType if typeDerivedFrom is not None else False
+    
+    @property
+    def isMultiLanguage(self):
+        """(bool) -- True if type is, or is derived from, stringItemType or normalizedStringItemType."""
+        return self.baseXbrliType in {"stringItemType", "normalizedStringItemType", "string", "normalizedString"}
     
     def isDerivedFrom(self, typeqname):
         """(bool) -- True if type is derived from type specified by QName.  Type can be a single type QName or list of QNames"""
@@ -2035,4 +2040,11 @@ elementSubstitutionModelClass.update((
      (XbrlConst.qnXlExtended, ModelLink),
      (XbrlConst.qnXlLocator, ModelLocator),
      (XbrlConst.qnXlResource, ModelResource),
+     (XbrlConst.qnLinkLabelLink, ModelLink), # needed for dynamic object creation (e.g., loadFromExcel, OIM)
+     (XbrlConst.qnLinkReferenceLink, ModelLink),
+     (XbrlConst.qnLinkFootnoteLink, ModelLink),
+     (XbrlConst.qnLinkPresentationLink, ModelLink),
+     (XbrlConst.qnLinkCalculationLink, ModelLink),
+     (XbrlConst.qnLinkDefinitionLink, ModelLink),
+     (XbrlConst.qnGenLink, ModelLink),
     ))

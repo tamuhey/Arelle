@@ -6,11 +6,12 @@ Refactored from ModelObject on Jun 11, 2011
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
 import os, io, logging
+from collections import defaultdict
 from arelle import XmlUtil, XbrlConst, ModelValue
 from arelle.ModelObject import ModelObject
 from arelle.PluginManager import pluginClassMethods
 
-TXMY_PLG_SRC_ELTS = ("metadata", "catalog", "taxonomy")
+TXMY_PKG_SRC_ELTS = ("metadata", "catalog", "taxonomy")
 
 class ModelTestcaseVariation(ModelObject):
     def init(self, modelDocument):
@@ -118,6 +119,17 @@ class ModelTestcaseVariation(ModelObject):
             return self._readMeFirstUris
     
     @property
+    def dataUris(self):
+        try:
+            return self._dataUris
+        except AttributeError:
+            self._dataUris = defaultdict(list) # may contain instances, schemas, linkbases
+            for dataElement in XmlUtil.descendants(self, None, ("data", "input")):
+                for elt in XmlUtil.descendants(dataElement, None, ("xsd", "schema", "linkbase", "instance")):
+                    self._dataUris["schema" if elt.localName == "xsd" else elt.localName].append(elt.textValue.strip())
+            return self._dataUris
+    
+    @property
     def parameters(self):
         try:
             return self._parameters
@@ -142,6 +154,11 @@ class ModelTestcaseVariation(ModelObject):
         
     @property
     def resultXbrlInstanceUri(self):
+        for pluginXbrlMethod in pluginClassMethods("ModelTestcaseVariation.ResultXbrlInstanceUri"):
+            resultInstanceUri = pluginXbrlMethod(self)
+            if resultInstanceUri is not None:
+                return resultInstanceUri or None # (empty string returns None)
+            
         resultInstance = XmlUtil.descendant(XmlUtil.descendant(self, None, "result"), None, "instance")
         if resultInstance is not None:
             return XmlUtil.text(resultInstance)
@@ -168,7 +185,8 @@ class ModelTestcaseVariation(ModelObject):
         result = XmlUtil.descendant(self, None, "result")
         if result is not None :
             child = XmlUtil.child(result, None, "table")
-            return child is not None and XmlUtil.text(child).endswith(".xml")
+            if child is not None and XmlUtil.text(child).endswith(".xml"):
+                return True
         return False
         
     @property
@@ -176,12 +194,13 @@ class ModelTestcaseVariation(ModelObject):
         result = XmlUtil.descendant(self, None, "result")
         if result is not None:
             child = XmlUtil.child(result, None, "table")
-            return os.path.join(self.modelDocument.outpath, XmlUtil.text(child if child is not None else result))
+            if child is not None:
+                return os.path.join(self.modelDocument.outpath, XmlUtil.text(child))
         return None    
     
     @property
     def resultIsTaxonomyPackage(self):
-        return any(e.localName for e in XmlUtil.descendants(self,None,TXMY_PLG_SRC_ELTS))
+        return any(e.localName for e in XmlUtil.descendants(self,None,TXMY_PKG_SRC_ELTS))
 
     @property
     def cfcnCall(self):

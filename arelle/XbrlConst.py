@@ -130,6 +130,7 @@ dimensionDefault = "http://xbrl.org/int/dim/arcrole/dimension-default"
 dtrTypesStartsWith = "http://www.xbrl.org/dtr/type/"
 dtrNumeric = "http://www.xbrl.org/dtr/type/numeric"
 defaultLinkRole = "http://www.xbrl.org/2003/role/link"
+defaultGenLinkRole = "http://www.xbrl.org/2008/role/link"
 iso4217 = "http://www.xbrl.org/2003/iso4217"
 def qnIsoCurrency(token):
     return qname(iso4217, "iso4217:" + token) if token else None
@@ -168,26 +169,36 @@ verPrefixNS = {"ver":ver,
 
 # extended enumeration spec
 enums = {"http://xbrl.org/2014/extensible-enumerations", "http://xbrl.org/PWD/2016-10-12/extensible-enumerations-1.1",
-         "http://xbrl.org/WGWD/YYYY-MM-DD/extensible-enumerations-1.1"}
+         "http://xbrl.org/WGWD/YYYY-MM-DD/extensible-enumerations-1.1",
+         "http://xbrl.org/WGWD/YYYY-MM-DD/extensible-enumerations-2.0"}
 qnEnumerationItemType2014 = qname("{http://xbrl.org/2014/extensible-enumerations}enum:enumerationItemType")
-qnEnumerationItemTypeYYYY = qname("{http://xbrl.org/WGWD/YYYY-MM-DD/extensible-enumerations-1.1}enum:enumerationItemType")
-qnEnumerationSetItemTypeYYYY = qname("{http://xbrl.org/WGWD/YYYY-MM-DD/extensible-enumerations-1.1}enum:enumerationSetItemType")
-qnEnumerationListItemTypeYYYY = qname("{http://xbrl.org/WGWD/YYYY-MM-DD/extensible-enumerations-1.1}enum:enumerationListItemType")
+qnEnumerationItemTypeYYYY = qname("{http://xbrl.org/WGWD/YYYY-MM-DD/extensible-enumerations-2.0}enum2:enumerationItemType")
+qnEnumerationSetItemTypeYYYY = qname("{http://xbrl.org/WGWD/YYYY-MM-DD/extensible-enumerations-2.0}enum2:enumerationSetItemType")
+qnEnumerationSetValDimTypeYYYY = qname("{http://xbrl.org/WGWD/YYYY-MM-DD/extensible-enumerations-2.0}enum2:setValueDimensionType")
+qnEnumerationItemType11YYYY = qname("{http://xbrl.org/WGWD/YYYY-MM-DD/extensible-enumerations-1.1}enum:enumerationItemType")
+qnEnumerationSetItemType11YYYY = qname("{http://xbrl.org/WGWD/YYYY-MM-DD/extensible-enumerations-1.1}enum:enumerationSetItemType")
+qnEnumerationListItemType11YYYY = qname("{http://xbrl.org/WGWD/YYYY-MM-DD/extensible-enumerations-1.1}enum:enumerationListItemType")
 qnEnumerationItemType2016 = qname("{http://xbrl.org/PWD/2016-10-12/extensible-enumerations-1.1}enum:enumerationItemType")
 qnEnumerationsItemType2016 = qname("{http://xbrl.org/PWD/2016-10-12/extensible-enumerations-1.1}enum:enumerationsItemType")
-qnEnumerationListItemTypes = (qnEnumerationListItemTypeYYYY, qnEnumerationSetItemTypeYYYY, qnEnumerationsItemType2016)
-qnEnumerationSetItemTypes = (qnEnumerationSetItemTypeYYYY,)
+qnEnumerationListItemTypes = (qnEnumerationListItemType11YYYY, qnEnumerationSetItemType11YYYY, qnEnumerationsItemType2016)
+qnEnumerationSetItemTypes = (qnEnumerationSetItemType11YYYY, qnEnumerationSetItemTypeYYYY)
+qnEnumeration2ItemTypes = (qnEnumerationItemTypeYYYY, qnEnumerationSetItemTypeYYYY)
 qnEnumerationItemTypes = (qnEnumerationItemType2014, 
-                          qnEnumerationItemTypeYYYY, qnEnumerationSetItemTypeYYYY, qnEnumerationListItemTypeYYYY,
+                          qnEnumerationItemTypeYYYY, qnEnumerationSetItemTypeYYYY, 
+                          qnEnumerationItemType11YYYY, qnEnumerationSetItemType11YYYY, qnEnumerationListItemType11YYYY,
                           qnEnumerationItemType2016, qnEnumerationsItemType2016)
+qnEnumerationTypes = qnEnumerationItemTypes + (qnEnumerationSetValDimTypeYYYY,)
 attrEnumerationDomain2014 = "{http://xbrl.org/2014/extensible-enumerations}domain"
-attrEnumerationDomainYYYY = "{http://xbrl.org/WGWD/YYYY-MM-DD/extensible-enumerations-1.1}domain"
+attrEnumerationDomainYYYY = "{http://xbrl.org/WGWD/YYYY-MM-DD/extensible-enumerations-2.0}domain"
+attrEnumerationDomain11YYYY = "{http://xbrl.org/WGWD/YYYY-MM-DD/extensible-enumerations-1.1}domain"
 attrEnumerationDomain2016 = "{http://xbrl.org/PWD/2016-10-12/extensible-enumerations-1.1}domain"
 attrEnumerationLinkrole2014 = "{http://xbrl.org/2014/extensible-enumerations}linkrole"
-attrEnumerationLinkroleYYYY = "{http://xbrl.org/WGWD/YYYY-MM-DD/extensible-enumerations-1.1}linkrole"
+attrEnumerationLinkroleYYYY = "{http://xbrl.org/WGWD/YYYY-MM-DD/extensible-enumerations-2.0}linkrole"
+attrEnumerationLinkrole11YYYY = "{http://xbrl.org/WGWD/YYYY-MM-DD/extensible-enumerations-1.1}linkrole"
 attrEnumerationLinkrole2016 = "{http://xbrl.org/PWD/2016-10-12/extensible-enumerations-1.1}linkrole"
 attrEnumerationUsable2014 = "{http://xbrl.org/2014/extensible-enumerations}headUsable"
-attrEnumerationUsableYYYY = "{http://xbrl.org/WGWD/YYYY-MM-DD/extensible-enumerations-1.1}headUsable"
+attrEnumerationUsableYYYY = "{http://xbrl.org/WGWD/YYYY-MM-DD/extensible-enumerations-2.0}headUsable"
+attrEnumerationUsable11YYYY = "{http://xbrl.org/WGWD/YYYY-MM-DD/extensible-enumerations-1.1}headUsable"
 attrEnumerationUsable2016 = "{http://xbrl.org/PWD/2016-10-12/extensible-enumerations-1.1}headUsable"
 
 # formula specs

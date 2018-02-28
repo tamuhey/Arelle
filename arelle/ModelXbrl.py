@@ -50,6 +50,7 @@ def load(modelManager, url, nextaction=None, base=None, useFileSource=None, erro
     if nextaction is None: nextaction = _("loading")
     from arelle import (ModelDocument, FileSource)
     modelXbrl = create(modelManager, errorCaptureLevel=errorCaptureLevel)
+    supplementalUrls = None
     if useFileSource is not None:
         modelXbrl.fileSource = useFileSource
         modelXbrl.closeFileSource = False
@@ -57,11 +58,19 @@ def load(modelManager, url, nextaction=None, base=None, useFileSource=None, erro
     elif isinstance(url,FileSource.FileSource):
         modelXbrl.fileSource = url
         modelXbrl.closeFileSource= True
-        url = modelXbrl.fileSource.url
+        if isinstance(modelXbrl.fileSource.url, list): # json list
+            url = modelXbrl.fileSource.url[0]
+            supplementalUrls = modelXbrl.fileSource.url[1:]
+        #elif isinstance(modelXbrl.fileSource.url, dict): # json object
+        else:
+            url = modelXbrl.fileSource.url
     else:
         modelXbrl.fileSource = FileSource.FileSource(url, modelManager.cntlr)
         modelXbrl.closeFileSource= True
     modelXbrl.modelDocument = ModelDocument.load(modelXbrl, url, base, isEntry=True, **kwargs)
+    if supplementalUrls:
+        for url in supplementalUrls:
+            ModelDocument.load(modelXbrl, url, base, isEntry=False, isDiscovered=True, **kwargs)
     del modelXbrl.entryLoadingUrl
     loadSchemalocatedSchemas(modelXbrl)
     
@@ -467,10 +476,11 @@ class ModelXbrl:
             self.closeFileSource= True
             del self.entryLoadingUrl
         # reload dts views
-        from arelle import ViewWinDTS
-        for view in self.views:
-            if isinstance(view, ViewWinDTS.ViewDTS):
-                self.modelManager.cntlr.uiThreadQueue.put((view.view, []))
+        if self.views: # runs with GUI
+            from arelle import ViewWinDTS
+            for view in self.views:
+                if isinstance(view, ViewWinDTS.ViewDTS):
+                    self.modelManager.cntlr.uiThreadQueue.put((view.view, []))
                 
     def saveInstance(self, **kwargs):
         """Saves current instance document file.
@@ -803,7 +813,7 @@ class ModelXbrl:
                         fbdq[DEFAULT].add(fact)
             return fbdq[memQname]
         
-    def matchFact(self, otherFact, unmatchedFactsStack=None, deemP0inf=False, matchId=False):
+    def matchFact(self, otherFact, unmatchedFactsStack=None, deemP0inf=False, matchId=False, matchLang=True):
         """Finds matching fact, by XBRL 2.1 duplicate definition (if tuple), or by
         QName and VEquality (if an item), lang and accuracy equality, as in formula and test case usage
         
@@ -820,9 +830,10 @@ class ModelXbrl:
                 elif (fact.qname == otherFact.qname and fact.isVEqualTo(otherFact, deemP0inf=deemP0inf)):
                     if fact.isFraction:
                         return fact
-                    elif not fact.isNumeric:
+                    elif fact.isMultiLanguage and matchLang:
                         if fact.xmlLang == otherFact.xmlLang:
                             return fact
+                        # else: print('*** lang mismatch extracted "{}" expected "{}" on {} in {}'.format(fact.xmlLang or "", otherFact.xmlLang or "", fact.qname, otherFact.modelDocument.uri))
                     else:
                         if (fact.decimals == otherFact.decimals and
                             fact.precision == otherFact.precision):

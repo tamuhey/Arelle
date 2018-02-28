@@ -8,6 +8,11 @@ This module is Arelle's controller in windowing interactive UI mode
 '''
 from arelle import PythonUtil # define 2.x or 3.x string types
 import os, sys, subprocess, pickle, time, locale, re, fnmatch
+
+if sys.platform == 'win32' and getattr(sys, 'frozen', False): 
+    # need the .dll directory in path to be able to access Tk and Tcl DLLs efore importinng Tk, etc.
+    os.environ['PATH'] = os.path.dirname(sys.executable) + ";" + os.environ['PATH']
+
 from tkinter import (Tk, Tcl, TclError, Toplevel, Menu, PhotoImage, StringVar, BooleanVar, N, S, E, W, EW, 
                      HORIZONTAL, VERTICAL, END, font as tkFont)
 try:
@@ -715,6 +720,8 @@ class CntlrWinMain (Cntlr.Cntlr):
         
     def fileOpenFile(self, filename, importToDTS=False, selectTopView=False):
         if filename:
+            for xbrlLoadedMethod in pluginClassMethods("CntlrWinMain.Xbrl.Open"):
+                filename = xbrlLoadedMethod(self, filename) # runs in GUI thread, allows mapping filename, mult return filename
             filesource = None
             # check for archive files
             filesource = openFileSource(filename, self,
@@ -725,13 +732,14 @@ class CntlrWinMain (Cntlr.Cntlr):
                 filename = DialogOpenArchive.askArchiveFile(self, filesource)
                 
         if filename:
-            if importToDTS:
-                if not isHttpUrl(filename):
-                    self.config["importOpenDir"] = os.path.dirname(filename)
-            else:
-                if not isHttpUrl(filename):
-                    self.config["fileOpenDir"] = os.path.dirname(filesource.baseurl if filesource.isArchive else filename)
-            self.updateFileHistory(filename, importToDTS)
+            if not isinstance(filename, (dict, list)): # json objects
+                if importToDTS:
+                    if not isHttpUrl(filename):
+                        self.config["importOpenDir"] = os.path.dirname(filename)
+                else:
+                    if not isHttpUrl(filename):
+                        self.config["fileOpenDir"] = os.path.dirname(filesource.baseurl if filesource.isArchive else filename)
+                self.updateFileHistory(filename, importToDTS)
             thread = threading.Thread(target=self.backgroundLoadXbrl, args=(filesource,importToDTS,selectTopView), daemon=True).start()
             
     def webOpen(self, *ignore):
@@ -740,11 +748,13 @@ class CntlrWinMain (Cntlr.Cntlr):
         url = DialogURL.askURL(self.parent, buttonSEC=True, buttonRSS=True)
         if url:
             self.updateFileHistory(url, False)
+            for xbrlLoadedMethod in pluginClassMethods("CntlrWinMain.Xbrl.Open"):
+                url = xbrlLoadedMethod(self, url) # runs in GUI thread, allows mapping url, mult return url
             filesource = openFileSource(url,self)
             if filesource.isArchive and not filesource.selection: # or filesource.isRss:
                 from arelle import DialogOpenArchive
                 url = DialogOpenArchive.askArchiveFile(self, filesource)
-            self.updateFileHistory(url, False)
+                self.updateFileHistory(url, False)
             thread = threading.Thread(target=self.backgroundLoadXbrl, args=(filesource,False,False), daemon=True).start()
             
     def importWebOpen(self, *ignore):
@@ -860,24 +870,28 @@ class CntlrWinMain (Cntlr.Cntlr):
                     currentAction = "tree/list of facts"
                     ViewWinFactList.viewFacts(modelXbrl, self.tabWinTopRt, lang=self.labelLang)
                     if topView is None: topView = modelXbrl.views[-1]
+                currentAction = "presentation linkbase view"
+                hasView = ViewWinRelationshipSet.viewRelationshipSet(modelXbrl, self.tabWinTopRt, XbrlConst.parentChild, lang=self.labelLang)
+                if hasView and topView is None: topView = modelXbrl.views[-1]
+                currentAction = "calculation linkbase view"
+                hasView = ViewWinRelationshipSet.viewRelationshipSet(modelXbrl, self.tabWinTopRt, XbrlConst.summationItem, lang=self.labelLang)
+                if hasView and topView is None: topView = modelXbrl.views[-1]
+                currentAction = "dimensions relationships view"
+                hasView = ViewWinRelationshipSet.viewRelationshipSet(modelXbrl, self.tabWinTopRt, "XBRL-dimensions", lang=self.labelLang)
+                if hasView and topView is None: topView = modelXbrl.views[-1]
+                if modelXbrl.hasTableRendering:
+                    currentAction = "rendering view"
+                    hasView = ViewWinRelationshipSet.viewRelationshipSet(modelXbrl, self.tabWinTopRt, "Table-rendering", lang=self.labelLang)
+                    if hasView and topView is None: topView = modelXbrl.views[-1]
                 if modelXbrl.hasFormulae:
                     currentAction = "formulae view"
                     ViewWinFormulae.viewFormulae(modelXbrl, self.tabWinTopRt)
                     if topView is None: topView = modelXbrl.views[-1]
-                currentAction = "presentation linkbase view"
-                ViewWinRelationshipSet.viewRelationshipSet(modelXbrl, self.tabWinTopRt, XbrlConst.parentChild, lang=self.labelLang)
-                if topView is None: topView = modelXbrl.views[-1]
-                currentAction = "calculation linkbase view"
-                ViewWinRelationshipSet.viewRelationshipSet(modelXbrl, self.tabWinTopRt, XbrlConst.summationItem, lang=self.labelLang)
-                currentAction = "dimensions relationships view"
-                ViewWinRelationshipSet.viewRelationshipSet(modelXbrl, self.tabWinTopRt, "XBRL-dimensions", lang=self.labelLang)
-                if modelXbrl.hasTableRendering:
-                    currentAction = "rendering view"
-                    ViewWinRelationshipSet.viewRelationshipSet(modelXbrl, self.tabWinTopRt, "Table-rendering", lang=self.labelLang)
                 for name, arcroles in sorted(self.config.get("arcroleGroups", {}).items()):
                     if XbrlConst.arcroleGroupDetect in arcroles:
                         currentAction = name + " view"
-                        ViewWinRelationshipSet.viewRelationshipSet(modelXbrl, self.tabWinTopRt, (name, arcroles), lang=self.labelLang)
+                        hasView = ViewWinRelationshipSet.viewRelationshipSet(modelXbrl, self.tabWinTopRt, (name, arcroles), lang=self.labelLang)
+                        if hasView and topView is None: topView = modelXbrl.views[-1]
             currentAction = "property grid"
             ViewWinProperties.viewProperties(modelXbrl, self.tabWinTopLeft)
             currentAction = "log view creation time"
@@ -1247,7 +1261,7 @@ class CntlrWinMain (Cntlr.Cntlr):
         DialogAbout.about(self.parent,
                           _("About arelle"),
                           os.path.join(self.imagesDir, "arelle32.gif"),
-                          _("arelle\u00ae {0} {1}bit {2}\n"
+                          _("arelle\u00ae {0} ({1}bit)\n"
                               "An open source XBRL platform\n"
                               "\u00a9 2010-2017 Mark V Systems Limited\n"
                               "All rights reserved\nhttp://www.arelle.org\nsupport@arelle.org\n\n"
@@ -1268,7 +1282,7 @@ class CntlrWinMain (Cntlr.Cntlr):
                               "{3}"
                               "\n   May include installable plug-in modules with author-specific license terms"
                               )
-                            .format(self.__version__, self.systemWordSize, Version.version,
+                            .format(Version.__version__, self.systemWordSize, Version.version,
                                     _("\n   Bottle \u00a9 2011-2013 Marcel Hellkamp"
                                       "\n   CherryPy \u00a9 2002-2013 CherryPy Team") if self.hasWebServer else "",
                                     sys.version_info, etree.LXML_VERSION, Tcl().eval('info patchlevel')

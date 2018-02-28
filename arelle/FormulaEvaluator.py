@@ -212,13 +212,15 @@ def evaluateVar(xpCtx, varSet, varIndex, cachedFilteredFacts, uncoveredAspectFac
                             factVarBindings.append(", \n${}: fallback {}".format(vb.qname, xpCtx.flattenSequence(vb.values)))
                         else:
                             if vb.isBindAsSequence:
-                                _modelObjects.extend(vb.yieldedEvaluation)
-                            else:
+                                if isinstance(vb.yieldedEvaluation, list):
+                                    _modelObjects.extend(vb.yieldedEvaluation)
+                            elif vb.yieldedFact is not None:
                                 _modelObjects.append(vb.yieldedFact)
-                            if vb.yieldedFact.isItem:
-                                factVarBindings.append(", \n${}: {} context {}".format(vb.qname, vb.yieldedFact.qname, vb.yieldedFactContext.id))
-                            elif vb.yieldedFact.isTuple and isinstance(vb.yieldedFact.parentElement, ModelFact):
-                                factVarBindings.append(", \n${}: {} tuple {}".format(vb.qname, vb.yieldedFact.qname, vb.yieldedFact.parentElement.qname))
+                            if vb.yieldedFact is not None:
+                                if vb.yieldedFact.isItem:
+                                    factVarBindings.append(", \n${}: {} context {}".format(vb.qname, vb.yieldedFact.qname, vb.yieldedFactContext.id))
+                                elif vb.yieldedFact.isTuple and isinstance(vb.yieldedFact.parentElement, ModelFact):
+                                    factVarBindings.append(", \n${}: {} tuple {}".format(vb.qname, vb.yieldedFact.qname, vb.yieldedFact.parentElement.qname))
                     xpCtx.modelXbrl.log(
                         "ERROR" if (xpCtx.formulaOptions.errorUnsatisfiedAssertions and not result) else "INFO",
                         "formula:assertionSatisfied" if result else "formula:assertionUnsatisfied",
@@ -672,7 +674,7 @@ def aspectMatches(xpCtx, fact1, fact2, aspect):
     if aspect == 1: # Aspect.LOCATION:
         return (fact2 is not None and
                 fact1.modelXbrl != fact2.modelXbrl or # test deemed true for multi-instance comparisons
-                fact1.getparent() == fact2.getparent())
+                fact1.parentElement == fact2.parentElement)
     if aspect == 2: # Aspect.CONCEPT:
         return fact2 is not None and fact1.qname == fact2.qname
     if fact1.isTuple or fact2.isTuple:
