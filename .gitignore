@@ -12,3 +12,6 @@ arelle/plugin/validate/DQC_test
 arelle/plugin/xule
 
 
+.idea/*
+venv*
+

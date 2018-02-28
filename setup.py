@@ -423,7 +423,7 @@ else:
 
 timestamp = datetime.datetime.utcnow()
 setup(
-    name='Arelle',
+    name='w_versioned_arelle',
     version=get_version(),
     description='An open source XBRL platform',
     long_description=open('README.md').read(),
