@@ -432,7 +432,7 @@ setup(
     url='http://www.arelle.org',
     download_url='http://www.arelle.org/download',
     cmdclass=cmdclass,
-    # include_package_data=True,  # note: this uses MANIFEST.in
+    include_package_data=True,  # note: this uses MANIFEST.in
     packages=packages,
     data_files=dataFiles,
     platforms=['OS Independent'],
