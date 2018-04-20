@@ -21,6 +21,9 @@ XMLdeclaration = re.compile(r"<\?xml[^><\?]*\?>", re.DOTALL)
 
 TAXONOMY_PACKAGE_FILE_NAMES = ('.taxonomyPackage.xml', 'catalog.xml') # pre-PWD packages
 
+import logging
+logger = logging.getLogger('FileSource.py')
+
 def openFileSource(filename, cntlr=None, sourceZipStream=None, checkIfXmlIsEis=False, reloadCache=False):
     if sourceZipStream:
         filesource = FileSource(POST_UPLOADED_ZIP, cntlr)
@@ -126,6 +129,7 @@ class FileSource:
             self.cntlr.addToLog(_("[{0}] {1}").format(type(err).__name__, err))
 
     def open(self, reloadCache=False):
+        logger.debug('Begin FileSource open url: {}.'.format(self.url))
         if not self.isOpen:
             if (self.isZip or self.isTarGz or self.isEis or self.isXfd or self.isRss or self.isInstalledTaxonomyPackage) and self.cntlr:
                 self.basefile = self.cntlr.webCache.getfilename(self.url, reload=reloadCache)
@@ -275,14 +279,18 @@ class FileSource:
                               for prefix, remapping in taxonomyPackage["remappings"].items())
                 except EnvironmentError as err:
                     self.logError(err)
+                    logger.debug('Arelle Load Detail - Filesource open is done.')
                     return # provide error message later
+    logger.debug('Arelle Load Detail - Filesource open is done.')
 
     def openZipStream(self, sourceZipStream):
+        logger.debug('Arelle Load Detail - OpenZipStream start url: {}'.format(self.url))
         if not self.isOpen:
             self.basefile = self.url
             self.baseurl = self.url # url gets changed by selection
             self.fs = zipfile.ZipFile(sourceZipStream, mode="r")
-            self.isOpen = True    
+            self.isOpen = True
+        logger.debug('Arelle Load Detail - OpenZipStream is done.')
             
     def close(self):
         if self.referencedFileSources:

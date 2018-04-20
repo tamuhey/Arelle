@@ -423,7 +423,7 @@ else:
 
 timestamp = datetime.datetime.utcnow()
 setup(
-    name='Arelle',
+    name='w_versioned_arelle',
     version=get_version(),
     description='An open source XBRL platform',
     long_description=open('README.md').read(),
@@ -432,7 +432,7 @@ setup(
     url='http://www.arelle.org',
     download_url='http://www.arelle.org/download',
     cmdclass=cmdclass,
-    # include_package_data=True,  # note: this uses MANIFEST.in
+    include_package_data=True,  # note: this uses MANIFEST.in
     packages=packages,
     data_files=dataFiles,
     platforms=['OS Independent'],

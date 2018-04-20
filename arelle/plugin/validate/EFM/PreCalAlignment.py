@@ -142,6 +142,9 @@ def checkCalcsTreeWalk(val, parentChildRels, concept, isStatementSheet, inNested
     search for least-misfit calculation link role does not care or consider the value of the 
     calculation link role, just the summation-item arc-set from the presumed-total concept.
     """
+    if True:
+        # REIT - this is a useless test for us and takes WWAAAAAAAAAAYYYYYYYY tooooo long.
+        return
     if concept not in visited:
         visited.add(concept)
         siblingRels = parentChildRels.fromModelObject(concept)
@@ -159,6 +162,9 @@ def checkCalcsTreeWalk(val, parentChildRels, concept, isStatementSheet, inNested
 
 def checkForCalculations(val, parentChildRels, siblingRels, iSibling, totalConcept, totalRel, reasonPresumedTotal, isStatementSheet, conceptsUsed, nestedItems, contributingItems):
     # compatible preceding sibling facts must have calc relationship to toal
+    # NOTE: THIS IS HERE TO REMOVE THIS ENTIRE SUITE OF TESTS.  THEY TAKE TOO LONG TO RUN FOR REIT FILINGS.
+    if True:
+        return
     for iContributingRel in range(iSibling - 1, -1, -1):
         contributingRel = siblingRels[iContributingRel]
         siblingConcept = contributingRel.toModelObject
