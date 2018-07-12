@@ -1102,7 +1102,7 @@ class ModelXbrl:
             # need locale-dependent formatting
             return format_string(self.modelManager.locale, '%f', argValue)
         elif isinstance(argValue, dict):
-            return dict((loggableValue(k), loggableValue(v)) for k,v in argValue.items())
+            return dict((self.loggableValue(k), self.loggableValue(v)) for k,v in argValue.items())
         else:
             return str(argValue)
 
