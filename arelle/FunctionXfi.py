@@ -981,7 +981,7 @@ def fact_footnotes(xc, p, args):
     lang = stringArg(xc, args, 4, "xs:string", emptyFallback='')
     relationshipSet = inst.relationshipSet(arcroleURI,linkroleURI)
     if relationshipSet:
-        return relationshipSet.label(itemObj, footnoteroleURI, lang, returnMultiple=True)
+        return relationshipSet.label(itemObj, footnoteroleURI, lang, returnMultiple=True) or ()
     return ()
 
 def concept_relationships(xc, p, args, nestResults=False):
