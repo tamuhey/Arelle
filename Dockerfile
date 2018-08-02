@@ -27,4 +27,8 @@ RUN echo "Starting the script section" && \
 		./smithy_arelle.sh && \
 		echo "script section completed"
 ARG BUILD_ARTIFACTS_PYPI=/build/dist/w_versioned_arelle*.tar.gz
+
+RUN mkdir /audit/
+ARG BUILD_ARTIFACTS_AUDIT=/audit/*
+RUN pip freeze > /audit/pip.lock
 FROM scratch
