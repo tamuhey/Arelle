@@ -4,7 +4,7 @@ Created on Oct 17, 2010
 @author: Mark V Systems Limited
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
-import os, sys, traceback, re
+import os, sys, traceback, re, logging
 from collections import defaultdict, OrderedDict
 from arelle import (FileSource, ModelXbrl, ModelDocument, ModelVersReport, XbrlConst, 
                ValidateXbrl, ValidateFiling, ValidateHmrc, ValidateVersReport, ValidateFormula,
@@ -75,7 +75,7 @@ class Validate:
                 if self.modelXbrl.modelDocument.type in (Type.TESTCASESINDEX, Type.REGISTRY):
                     _name = self.modelXbrl.modelDocument.basename
                     for testcasesElement in self.modelXbrl.modelDocument.xmlRootElement.iter():
-                        if isinstance(testcasesElement,ModelObject) and testcasesElement.localName in ("testcases", "testSuite"):
+                        if isinstance(testcasesElement,ModelObject) and testcasesElement.localName in ("testcases", "registries", "testSuite"):
                             if testcasesElement.get("name"):
                                 _name = testcasesElement.get("name")
                             break
@@ -85,7 +85,7 @@ class Validate:
                         self.validateTestcase(doc)  # testcases doc's are sorted by their uri (file names), e.g., for formula
                         for tv in getattr(doc, "testcaseVariations", ()):
                             _statusCounts[tv.status] = _statusCounts.get(tv.status, 0) + 1
-                    self.modelXbrl.info("arelle:testResults", ", ".join("{}={}".format(k,c) for k, c in _statusCounts.items() if k))
+                    self.modelXbrl.info("arelle:testSuiteResults", ", ".join("{}={}".format(k,c) for k, c in _statusCounts.items() if k))
                 elif self.modelXbrl.modelDocument.type in (Type.TESTCASE, Type.REGISTRYTESTCASE):
                     self.validateTestcase(self.modelXbrl.modelDocument)
             except Exception as err:
@@ -165,7 +165,7 @@ class Validate:
     def validateTestcase(self, testcase):
         self.modelXbrl.info("info", "Testcase", modelDocument=testcase)
         self.modelXbrl.viewModelObject(testcase.objectId())
-        if testcase.type == Type.TESTCASESINDEX:
+        if testcase.type in (Type.TESTCASESINDEX, Type.REGISTRY):
             for doc in sorted(testcase.referencesDocument.keys(), key=lambda doc: doc.uri):
                 self.validateTestcase(doc)  # testcases doc's are sorted by their uri (file names), e.g., for formula
         elif hasattr(testcase, "testcaseVariations"):
@@ -186,7 +186,10 @@ class Validate:
                                     name=modelTestcaseVariation.name, 
                                     expected=modelTestcaseVariation.expected, 
                                     description=modelTestcaseVariation.description)
-                errorCaptureLevel = modelTestcaseVariation.severityLevel # default is INCONSISTENCY
+                if self.modelXbrl.modelManager.formulaOptions.testcaseResultsCaptureWarnings:
+                    errorCaptureLevel = logging._checkLevel("WARNING")
+                else:
+                    errorCaptureLevel = modelTestcaseVariation.severityLevel # default is INCONSISTENCY
                 parameters = modelTestcaseVariation.parameters.copy()
                 for readMeFirstUri in modelTestcaseVariation.readMeFirstUris:
                     if isinstance(readMeFirstUri,tuple):
@@ -479,6 +482,11 @@ class Validate:
                 # update ui thread via modelManager (running in background here)
                 self.modelXbrl.modelManager.viewModelObject(self.modelXbrl, modelTestcaseVariation.objectId())
                     
+            _statusCounts = OrderedDict((("pass",0),("fail",0)))
+            for tv in getattr(testcase, "testcaseVariations", ()):
+                _statusCounts[tv.status] = _statusCounts.get(tv.status, 0) + 1    
+            self.modelXbrl.info("arelle:testCaseResults", ", ".join("{}={}".format(k,c) for k, c in _statusCounts.items() if k))
+            
             self.modelXbrl.modelManager.showStatus(_("ready"), 2000)
             
     def noErrorCodes(self, modelTestcaseVariation):

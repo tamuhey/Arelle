@@ -1070,7 +1070,7 @@ class ModelXbrl:
                 if isinstance(argValue, _INT_TYPES):    # must be sortable with int's in logger
                     extras["sourceLine"] = argValue
             elif argName not in ("exc_info", "messageCodes"):
-                    fmtArgs[argName] = self.loggableValue(argValue) # dereference anything not loggable
+                fmtArgs[argName] = self.loggableValue(argValue) # dereference anything not loggable
 
         if "refs" not in extras:
             try:
@@ -1087,6 +1087,24 @@ class ModelXbrl:
         return (messageCode, 
                 (msg, fmtArgs) if fmtArgs else (msg,), 
                 extras)
+        
+    def loggableValue(self, argValue): # must be dereferenced and not related to object lifetimes
+        if isinstance(argValue, (ModelValue.QName, ModelObject, bool, FileNamedStringIO,
+                                 # might be a set of lxml objects not dereferencable at shutdown 
+                                 tuple, list, set)):
+            return str(argValue)
+        elif argValue is None:
+            return "(none)"
+        elif isinstance(argValue, _INT_TYPES):
+            # need locale-dependent formatting
+            return format_string(self.modelManager.locale, '%i', argValue)
+        elif isinstance(argValue,(float,Decimal)):
+            # need locale-dependent formatting
+            return format_string(self.modelManager.locale, '%f', argValue)
+        elif isinstance(argValue, dict):
+            return dict((self.loggableValue(k), self.loggableValue(v)) for k,v in argValue.items())
+        else:
+            return str(argValue)
 
     def loggableValue(self, argValue): # must be dereferenced and not related to object lifetimes
         if isinstance(argValue, (ModelValue.QName, ModelObject, bool, FileNamedStringIO,

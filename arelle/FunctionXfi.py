@@ -980,7 +980,7 @@ def fact_footnotes(xc, p, args):
     if not footnoteroleURI: footnoteroleURI = XbrlConst.footnote
     lang = stringArg(xc, args, 4, "xs:string", emptyFallback='')
     relationshipSet = inst.relationshipSet(arcroleURI,linkroleURI)
-    if relationshipSet:
+    if relationshipSet: # must return empty sequence, not None if no footnotes match filters
         return relationshipSet.label(itemObj, footnoteroleURI, lang, returnMultiple=True) or ()
     return ()
 
