@@ -10,6 +10,7 @@ from arelle import XmlUtil
 from arelle import PackageManager
 from arelle.UrlUtil import isHttpUrl
 from operator import indexOf
+pluginClassMethods = None # dynamic import
 
 archivePathSeparators = (".zip" + os.sep, ".tar.gz" + os.sep, ".eis" + os.sep, ".xml" + os.sep, ".xfd" + os.sep, ".frm" + os.sep, '.taxonomyPackage.xml' + os.sep) + \
                         ((".zip/", ".tar.gz/", ".eis/", ".xml/", ".xfd/", ".frm/", '.taxonomyPackage.xml/') if os.sep != "/" else ()) #acomodate windows and http styles
@@ -77,6 +78,18 @@ class FileNamedTextIOWrapper(io.TextIOWrapper):  # provide string IO in memory b
     def __str__(self):
         return self.fileName
     
+class FileNamedBytesIO(io.BytesIO):  # provide Bytes IO in memory but behave as a fileName string
+    def __init__(self, fileName, *args, **kwargs):
+        super(FileNamedBytesIO, self).__init__(*args, **kwargs)
+        self.fileName = fileName
+        
+    def close(self):
+        del self.fileName
+        super(FileNamedBytesIO, self).close()
+
+    def __str__(self):
+        return self.fileName
+    
 class ArchiveFileIOError(IOError):
     def __init__(self, fileSource, errno, fileName):
         super(ArchiveFileIOError, self).__init__(errno,
@@ -87,6 +100,9 @@ class ArchiveFileIOError(IOError):
             
 class FileSource:
     def __init__(self, url, cntlr=None, checkIfXmlIsEis=False):
+        global pluginClassMethods
+        if pluginClassMethods is None: # dynamic import
+            from arelle.PluginManager import pluginClassMethods
         self.url = str(url)  # allow either string or FileNamedStringIO
         self.baseIsHttp = isHttpUrl(self.url)
         self.cntlr = cntlr
@@ -263,25 +279,14 @@ class FileSource:
             elif self.isInstalledTaxonomyPackage:
                 self.isOpen = True
                 # load mappings
-                try:
-                    metadataFiles = self.taxonomyPackageMetadataFiles
-                    if len(metadataFiles) != 1:
-                        raise IOError(_("Taxonomy package must contain one and only one metadata file: {0}.")
-                                      .format(', '.join(metadataFiles)))
-                    # HF: this won't work, see DialogOpenArchive for correct code
-                    # not sure if it is used
-                    taxonomyPackage = PackageManager.parsePackage(self.cntlr, self.url)
-                    fileSourceDir = os.path.dirname(self.baseurl) + os.sep
-                    self.mappedPaths = \
-                        dict((prefix, 
-                              remapping if isHttpUrl(remapping)
-                              else (fileSourceDir + remapping.replace("/", os.sep)))
-                              for prefix, remapping in taxonomyPackage["remappings"].items())
-                except EnvironmentError as err:
-                    self.logError(err)
-                    logger.debug('Arelle Load Detail - Filesource open is done.')
-                    return # provide error message later
-    logger.debug('Arelle Load Detail - Filesource open is done.')
+                self.loadTaxonomyPackageMappings()
+                
+    def loadTaxonomyPackageMappings(self):
+        if self.taxonomyPackageMetadataFiles:
+            metadata = self.url + os.sep + self.taxonomyPackageMetadataFiles[0]
+            taxonomyPackage = PackageManager.parsePackage(self.cntlr, self, metadata,
+                                                          os.sep.join(os.path.split(metadata)[:-1]) + os.sep)
+            self.mappedPaths = taxonomyPackage["remappings"]
 
     def openZipStream(self, sourceZipStream):
         logger.debug('Arelle Load Detail - OpenZipStream start url: {}'.format(self.url))
@@ -484,6 +489,10 @@ class FileSource:
                         if filepath[l - len(f):l] == f:
                             filepath = filepath[0:l - len(f) - 1] + filepath[l:]
                             break
+        for pluginMethod in pluginClassMethods("FileSource.File"): #custom overrides for decription, etc
+            fileResult = pluginMethod(self.cntlr, filepath, binary, stripDeclaration)
+            if fileResult is not None:
+                return fileResult
         if binary:
             return (openFileStream(self.cntlr, filepath, 'rb'), )
         else:
@@ -500,6 +509,10 @@ class FileSource:
                 archiveFileSource.isEis or archiveFileSource.isXfd or
                 archiveFileSource.isRss or self.isInstalledTaxonomyPackage):
                 return archiveFileName.replace("\\","/") in archiveFileSource.dir
+        for pluginMethod in pluginClassMethods("FileSource.Exists"): #custom overrides for decription, etc
+            existsResult = pluginMethod(self.cntlr, filepath)
+            if existsResult is not None:
+                return existsResult
         # assume it may be a plain ordinary file path
         return os.path.exists(filepath)
     
@@ -768,5 +781,6 @@ def gaeSet(key, bytesValue): # stores bytes, not string valye
             return False
         chunkKeys.append(chunkKey)
     return gaeMemcache.set(key, chunkKeys, time=GAE_EXPIRE_WEEK)
+
 
 

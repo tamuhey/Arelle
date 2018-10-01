@@ -34,13 +34,13 @@ def disclosureSystemConfigURL(disclosureSystem, *args, **kwargs):
     return os.path.join(os.path.dirname(__file__), "config.xml")
 
 def validateXbrlStart(val, parameters=None, *args, **kwargs):
-    val.validateXDCplugin = val.validateDisclosureSystem and getattr(val.disclosureSystem, "CIPCplugin", False)
-    if not (val.validateXDCplugin):
+    val.validateCIPCplugin = val.validateDisclosureSystem and getattr(val.disclosureSystem, "CIPCplugin", False)
+    if not (val.validateCIPCplugin):
         return
     
 
 def validateXbrlFinally(val, *args, **kwargs):
-    if not (val.validateXDCplugin):
+    if not (val.validateCIPCplugin):
         return
 
     _xhtmlNs = "{{{}}}".format(xhtml)

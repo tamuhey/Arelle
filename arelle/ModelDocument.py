@@ -250,7 +250,7 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
             _type = Type.VERSIONINGREPORT
             from arelle.ModelVersReport import ModelVersReport
             _class = ModelVersReport
-        elif ln in ("testcases", "documentation", "testSuite"):
+        elif ln in ("testcases", "documentation", "testSuite", "registries"):
             _type = Type.TESTCASESINDEX
         elif ln in ("testcase", "testSet"):
             _type = Type.TESTCASE
@@ -685,12 +685,14 @@ class ModelDocument:
             except AttributeError:
                 pass
 
-    def save(self, overrideFilepath=None, outputZip=None, updateFileHistory=True, encoding="utf-8", **kwargs):
+    def save(self, overrideFilepath=None, outputZip=None, outputFile=None, updateFileHistory=True, encoding="utf-8", **kwargs):
         """Saves current document file.
         
         :param overrideFilepath: specify to override saving in instance's modelDocument.filepath
         """
-        if outputZip:
+        if outputFile:
+            fh = outputFile
+        elif outputZip:
             fh = io.StringIO();
         else:
             fh = open( (overrideFilepath or self.filepath), "w", encoding='utf-8')
@@ -698,7 +700,8 @@ class ModelDocument:
         if outputZip:
             fh.seek(0)
             outputZip.writestr(os.path.basename(overrideFilepath or self.filepath),fh.read())
-        fh.close()
+        if outputFile is None:
+            fh.close()
         if overrideFilepath:
             self.filepath = overrideFilepath
             self.setTitleInBackground()
@@ -1250,20 +1253,20 @@ class ModelDocument:
     
     def testcasesIndexDiscover(self, rootNode):
         for testcasesElement in rootNode.iter():
-            if isinstance(testcasesElement,ModelObject) and testcasesElement.localName in ("testcases", "testSuite"):
+            if isinstance(testcasesElement,ModelObject) and testcasesElement.localName in ("testcases", "registries", "testSuite"):
                 rootAttr = testcasesElement.get("root")
                 if rootAttr:
                     base = os.path.join(os.path.dirname(self.filepath),rootAttr) + os.sep
                 else:
                     base = self.filepath
                 for testcaseElement in testcasesElement:
-                    if isinstance(testcaseElement,ModelObject) and testcaseElement.localName in ("testcase", "testSetRef"):
-                        uriAttr = testcaseElement.get("uri") or testcaseElement.get("{http://www.w3.org/1999/xlink}href")
+                    if isinstance(testcaseElement,ModelObject) and testcaseElement.localName in ("testcase", "registry", "testSetRef"):
+                        uriAttr = testcaseElement.get("uri") or testcaseElement.get("file") or testcaseElement.get("{http://www.w3.org/1999/xlink}href")
                         if uriAttr:
                             doc = load(self.modelXbrl, uriAttr, base=base, referringElement=testcaseElement)
                             if doc is not None and doc not in self.referencesDocument:
                                 self.referencesDocument[doc] = ModelDocumentReference("testcaseIndex", testcaseElement)
-                    elif isinstance(testcaseElement,ModelObject) and testcaseElement.localName == "testcases":
+                    elif isinstance(testcaseElement,ModelObject) and testcaseElement.localName in ("testcases", "registries"):
                         uriAttr = testcaseElement.get("uri") or testcaseElement.get("{http://www.w3.org/1999/xlink}href")
                         if uriAttr:
                             doc = load(self.modelXbrl, uriAttr, base=base, referringElement=testcaseElement)
