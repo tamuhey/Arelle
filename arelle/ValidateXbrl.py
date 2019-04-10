@@ -16,7 +16,8 @@ from arelle.ModelDtsObject import ModelConcept
 from arelle.ModelInstanceObject import ModelInlineFact
 from arelle.ModelValue import qname
 from arelle.PluginManager import pluginClassMethods
-from arelle.XbrlConst import ixbrlAll
+from arelle.ValidateXbrlCalcs import inferredDecimals
+from arelle.XbrlConst import ixbrlAll, dtrNoDecimalsItemTypes, dtrSQNameItemTypes, dtrSQNameTypes
 from arelle.XhtmlValidate import ixMsgCode
 from arelle.XmlValidate import VALID
 from collections import defaultdict
@@ -226,8 +227,7 @@ class ValidateXbrl:
                             
         # instance checks
         modelXbrl.modelManager.showStatus(_("validating instance"))
-        if modelXbrl.modelDocument.type == ModelDocument.Type.INSTANCE or \
-           modelXbrl.modelDocument.type == ModelDocument.Type.INLINEXBRL:
+        if modelXbrl.modelDocument.type in (ModelDocument.Type.INSTANCE, ModelDocument.Type.INLINEXBRL, ModelDocument.Type.INLINEXBRLDOCUMENTSET):
             self.checkFacts(modelXbrl.facts)
             self.checkContexts(self.modelXbrl.contexts.values())
             self.checkUnits(self.modelXbrl.units.values())
@@ -722,7 +722,7 @@ class ValidateXbrl:
                                     _("Fact %(fact)s context %(contextID)s is a fraction with invalid denominator %(denominator)")).format(
                                     modelObject=f, fact=f.qname, contextID=f.contextID, denominator=denominator)
                     else:
-                        if self.modelXbrl.modelDocument.type != ModelDocument.Type.INLINEXBRL:
+                        if self.modelXbrl.modelDocument.type not in (ModelDocument.Type.INLINEXBRL, ModelDocument.Type.INLINEXBRLDOCUMENTSET):
                             for child in f.iterchildren():
                                 if isinstance(child,ModelObject):
                                     self.modelXbrl.error("xbrl.5.1.1:itemMixedContent",
@@ -734,11 +734,19 @@ class ValidateXbrl:
                                 self.modelXbrl.error("xbrl.4.6.3:missingPrecisionDecimals",
                                     _("Fact %(fact)s context %(contextID)s is a numeric concept and must have either precision or decimals"),
                                     modelObject=f, fact=f.qname, contextID=f.contextID)
+                            elif f.concept.instanceOfType(dtrNoDecimalsItemTypes) and inferredDecimals(f) > 0:
+                                self.modelXbrl.error("dtre:noDecimalsItemType",
+                                    _("Fact %(fact)s context %(contextID)s is a may not have inferred decimals value > 0: %(inferredDecimals)s"),
+                                    modelObject=f, fact=f.qname, contextID=f.contextID, inferredDecimals=inferredDecimals(f))
                         else:
                             if hasPrecision or hasDecimals:
                                 self.modelXbrl.error("xbrl.4.6.3:extraneousPrecisionDecimals",
                                     _("Fact %(fact)s context %(contextID)s is a non-numeric concept and must not have precision or decimals"),
                                     modelObject=f, fact=f.qname, contextID=f.contextID)
+                            if getattr(f,"xValid", 0) == 4 and f.concept.instanceOfType(dtrSQNameItemTypes) and not f.nsmap.get(f.xValue.rpartition(":")[0]):
+                                self.modelXbrl.error("dtre:SQNameItemType",
+                                    _("Fact %(fact)s context %(contextID)s is a must have an in-scope prefix: %(value)s"),
+                                    modelObject=f, fact=f.qname, contextID=f.contextID, value=f.xValue[:200])
                         # not a real check
                         #if f.isNumeric and not f.isNil and f.precision :
                         #    try:
@@ -876,6 +884,19 @@ class ValidateXbrl:
                         modelObject=cntx, contextID=cntx.id, error=err)
             self.segmentScenario(cntx.segment, cntx.id, "segment", "4.7.3.2")
             self.segmentScenario(cntx.scenario, cntx.id, "scenario", "4.7.4")
+            
+            for dim in cntx.qnameDims.values():
+                if dim.isTyped:
+                    typedMember = dim.typedMember
+                    if typedMember is not None and typedMember.xValid >= VALID: # typed dimension may be nil or empty
+                        modelConcept = self.modelXbrl.qnameConcepts.get(typedMember.qname)
+                        if modelConcept is not None and modelConcept.instanceOfType(dtrSQNameTypes):
+                            if not typedMember.nsmap.get(typedMember.xValue.rpartition(":")[0]):
+                                self.modelXbrl.error("dtre:SQNameType",
+                                    _("Context %(contextID)s dimennsion %(dim)s is a must have an in-scope prefix: %(value)s"),
+                                    modelObject=typedMember, dim=typedMember.qname, contextID=cntx.id, value=typedMember.xValue[:200])
+                            
+                         
                 
     def checkContextsDimensions(self, contexts):
         for cntx in contexts:

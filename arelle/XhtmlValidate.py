@@ -6,14 +6,19 @@ Created on Sept 1, 2013
 
 (originally part of XmlValidate, moved to separate module)
 '''
-from arelle import XbrlConst, XmlUtil, XmlValidate, ValidateFilingText
+from arelle import XbrlConst, XmlUtil, XmlValidate, ValidateFilingText, UrlUtil
 from arelle.ModelValue import qname
 from arelle.ModelObject import ModelObject
 from arelle.PythonUtil import normalizeSpace
 from lxml import etree
-import os, re
+import os, re, posixpath
 
 EMPTYDICT = {}
+
+XHTML_DTD = { # modified to have ixNestedContent elements as placeholders for ix footnote and nonnumeric/continuation elements
+    XbrlConst.ixbrl: "xhtml1-strict-ix.dtd", 
+    XbrlConst.ixbrl11: "xhtml1_1-strict-ix.dtd"
+    }
 
 ixElements = {
      XbrlConst.ixbrl: {
@@ -54,7 +59,7 @@ ixAttrType = {
         "escape": "boolean",
         "footnoteRole": "anyURI",
         "format": "QName",
-        "fromRefs": {"type": "IDREFS", "minLength": 1},
+        "fromRefs": "IDREFS",
         "id": "NCName",
         "linkRole": "anyURI",
         "name": "QName",
@@ -64,10 +69,54 @@ ixAttrType = {
         "sign": {"type": "string", "pattern": re.compile("-$")},
         "target": "NCName",
         "title": "string",
-        "toRefs": {"type": "IDREFS", "minLength": 1},
+        "toRefs": "IDREFS",
         "tupleID": "NCName",
         "tupleRef": "NCName",
         "unitRef": "NCName"}
+    }
+htmlAttrType = {
+    "id": "ID",
+    "class": "NMTOKENS",
+    "colspan": "nonNegativeInteger",
+    "rowspan": "nonNegativeInteger",
+    "maxlength": "nonNegativeInteger",
+    "rbspan": "nonNegativeInteger",
+    "size": "nonNegativeInteger",
+    "tabindex": "nonNegativeInteger",
+    "hspace": "nonNegativeInteger",
+    "vspace": "nonNegativeInteger",
+    "border": "nonNegativeInteger",
+    "marginwidth": "nonNegativeInteger",
+    "marginheight": "nonNegativeInteger",
+    "alink": {"type": "token", "pattern": re.compile("#[0-9a-fA-F]{6}$")},
+    "bgcolor": {"type": "token", "pattern": re.compile("#[0-9a-fA-F]{6}$")},
+    "color": {"type": "token", "pattern": re.compile("#[0-9a-fA-F]{6}$")},
+    "link": {"type": "token", "pattern": re.compile("#[0-9a-fA-F]{6}$")},
+    "text": {"type": "token", "pattern": re.compile("#[0-9a-fA-F]{6}$")},
+    "vlinke": {"type": "token", "pattern": re.compile("#[0-9a-fA-F]{6}$")},
+    "accesskey": {"type": "string", "length": 1},
+    "char": {"type": "string", "length": 1},
+    "height": {"type": "token", "pattern": re.compile("\d+%?$|\d*\.\d+%?$")},
+    "width": {"type": "token", "pattern": re.compile("\d+%?$|\d*\.\d+%?$|\d*\*$")},
+    # these can be nonNegativeInteger or MultiLength in frameset
+    "cols": {"type": "token", "pattern": re.compile("(\d+%?|\d*\.\d+%?|\d*\*)(,\d+%?|,\d*\.\d+%?|,\d*\*)*$")},
+    "rows": {"type": "token", "pattern": re.compile("(\d+%?|\d*\.\d+%?|\d*\*)(,\d+%?|,\d*\.\d+%?|,\d*\*)*$")},
+    "rel": "NMTOKENS",
+    "rev": "NMTOKENS",
+    "datetime": "dateTime",
+    "hfreflang": "language"
+    }
+htmlEltUriAttrs = { # attributes with URI content (for relative correction and %20 canonicalization
+    "a": {"href"},
+    "area": {"href"},
+    "blockquote": {"cite"},
+    "del": {"cite"},
+    "form": {"action"},
+    "input": {"src", "usemap"},
+    "ins": {"cite"},
+    "img": {"src", "longdesc", "usemap"},
+    "object": {"classid", "codebase", "data", "archive", "usemap"},
+    "q": {"cite"},
     }
 ixAttrRequired = {
     XbrlConst.ixbrl: {
@@ -206,6 +255,7 @@ def xhtmlValidate(modelXbrl, elt):
     isEFM = modelXbrl.modelManager.disclosureSystem.validationType == "EFM"
     # find ix version for messages
     _ixNS = elt.modelDocument.ixNS
+    _xhtmlDTD = XHTML_DTD[_ixNS]
     _customTransforms = modelXbrl.modelManager.customTransforms or {}
     
     def checkAttribute(elt, isIxElt, attrTag, attrValue):
@@ -265,6 +315,16 @@ def xhtmlValidate(modelXbrl, elt):
                 modelXbrl.error(ixMsgCode("attributeNotExpected",elt),
                     _("Attribute %(attribute)s is not expected on element ix:%(element)s"),
                     modelObject=elt, attribute=attrTag, element=elt.localName)
+        elif ns is None:
+            _xsdType = htmlAttrType.get(localName)
+            if _xsdType is not None:
+                if isinstance(_xsdType, dict):
+                    baseXsdType = _xsdType["type"]
+                    facets = _xsdType
+                else:
+                    baseXsdType = _xsdType
+                    facets = None
+                XmlValidate.validateValue(modelXbrl, elt, attrTag, baseXsdType, attrValue, facets=facets)
                 
     def checkHierarchyConstraints(elt):
         constraints = ixHierarchyConstraints.get(elt.localName)
@@ -297,7 +357,7 @@ def xhtmlValidate(modelXbrl, elt):
                     if relations is None: relations = []
                     else: relations = [relations]
                 if rel == "child-or-text":
-                    relations += XmlUtil.innerTextNodes(elt, ixExclude=True, ixEscape=False, ixContinuation=False)
+                    relations += XmlUtil.innerTextNodes(elt, ixExclude=True, ixEscape=False, ixContinuation=False, ixResolveUris=False)
                 issue = ''
                 if reqt in ('^',):
                     if not any(r.localName in names and r.namespaceURI == elt.namespaceURI
@@ -478,7 +538,7 @@ def xhtmlValidate(modelXbrl, elt):
                             toChild.tail = fromChild.tail    
                             
     # copy xhtml elements to fresh tree
-    with open(os.path.join(modelXbrl.modelManager.cntlr.configDir, "xhtml1-strict-ix.dtd")) as fh:
+    with open(os.path.join(modelXbrl.modelManager.cntlr.configDir, _xhtmlDTD)) as fh:
         dtd = DTD(fh)
     try:
         #with open("/users/hermf/temp/testDtd.htm", "w") as fh:
@@ -495,3 +555,18 @@ def xhtmlValidate(modelXbrl, elt):
             _("%(element)s error %(error)s"),
             modelObject=elt, element=elt.localName.title(), error=dtd.error_log.filter_from_errors())
 
+def resolveHtmlUri(elt, name, value):
+    if name == "archive": # URILIST
+        return " ".join(resolveHtmlUri(elt, None, v) for v in value.split(" "))
+    if not UrlUtil.isAbsolute(value) and not value.startswith("/"):
+        if elt.modelDocument.htmlBase is not None:
+            value = elt.modelDocument.htmlBase + value
+    # canonicalize ../ and ./
+    scheme, sep, pathpart = value.rpartition("://")
+    if sep:
+        pathpart = pathpart.replace('\\','/')
+        endingSep = '/' if pathpart[-1] == '/' else ''  # normpath drops ending directory separator
+        _uri = scheme + "://" + posixpath.normpath(pathpart) + endingSep
+    else:
+        _uri = posixpath.normpath(value)
+    return _uri # .replace(" ", "%20")  requirement for this is not yet clear

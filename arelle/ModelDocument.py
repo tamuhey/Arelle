@@ -70,6 +70,7 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
             # HMRC note, HMRC.blockedFile should be in this list if hmrc-taxonomies.xml is maintained an dup to date
             modelXbrl.error(("EFM.6.22.02", "GFM.1.1.3", "SBR.NL.2.1.0.06" if normalizedUri.startswith("http") else "SBR.NL.2.2.0.17"),
                     _("Prohibited file for filings %(blockedIndicator)s: %(url)s"),
+                    edgarCode="cp-2202-Prohibited-Href-Or-Schema-Location",
                     modelObject=referringElement, url=normalizedUri,
                     blockedIndicator=_(" blocked") if blocked else "",
                     messageCodes=("EFM.6.22.02", "GFM.1.1.3", "SBR.NL.2.1.0.06", "SBR.NL.2.2.0.17"))
@@ -330,10 +331,11 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
         elif _type == Type.RSSFEED:
             modelDocument.rssFeedDiscover(rootNode)
             
-        if isEntry:
+        if isEntry or _type == Type.INLINEXBRL: # inline doc set members may not be entry but may have processing instructions
             for pi in modelDocument.processingInstructions:
                 if pi.target == "arelle-unit-test":
                     modelXbrl.arelleUnitTests[pi.get("location")] = pi.get("action")
+        if isEntry:
             while modelXbrl.schemaDocsToValidate:
                 doc = modelXbrl.schemaDocsToValidate.pop()
                 XmlValidateSchema.validate(doc, doc.xmlRootElement, doc.targetNamespace) # validate schema elements
@@ -437,6 +439,8 @@ def create(modelXbrl, type, uri, schemaRefs=None, isEntry=False, initialXml=None
         for elt in xmlDocument.iter():
             if isinstance(elt, ModelObject):
                 elt.init(modelDocument)
+    else:
+        xmlDocument = None
     if type == Type.INSTANCE and discover:
         modelDocument.instanceDiscover(modelDocument.xmlRootElement)
     elif type == Type.RSSFEED and discover:
@@ -640,6 +644,18 @@ class ModelDocument:
     @property
     def modelDocument(self):
         return self # for compatibility with modelObject and modelXbrl
+    
+    @property
+    def displayUri(self):
+        if self.type == Type.INLINEXBRLDOCUMENTSET:
+            ixdsDocBaseNames = [ixDoc.basename
+                                for ixDoc in self.referencesDocument.keys()
+                                if ixDoc.type == Type.INLINEXBRL]
+            if len(ixdsDocBaseNames) > 2: # linit to 3 basenames in IXDS
+                ixdsDocBaseNames = ixdsDocBaseNames[0:2] + ["..."]
+            return "{}{}IXDS {}".format(self.filepathdir, os.sep, ", ".join(ixdsDocBaseNames))
+        else:
+            return self.uri
 
     @property
     def basename(self):
@@ -892,6 +908,7 @@ class ModelDocument:
                 if self.modelXbrl.modelManager.validateDisclosureSystem:
                     self.modelXbrl.error(("EFM.6.03.11", "GFM.1.1.7", "EBA.2.1", "EIOPA.2.1"),
                         _("Prohibited base attribute: %(attribute)s"),
+                        edgarCode="du-0311-Xml-Base-Used",
                         modelObject=element, attribute=baseAttr, element=element.qname)
                 else:
                     if baseAttr.startswith("/"):
@@ -1180,6 +1197,7 @@ class ModelDocument:
                 
     def inlineXbrlDiscover(self, htmlElement):
         ixNS = None
+        htmlBase = None
         conflictingNSelts = []
         # find namespace, only 1 namespace
         for inlineElement in htmlElement.iterdescendants():
@@ -1188,21 +1206,30 @@ class ModelDocument:
                     ixNS = inlineElement.namespaceURI
                 elif ixNS != inlineElement.namespaceURI:
                     conflictingNSelts.append(inlineElement)
+            elif inlineElement.tag == "{http://www.w3.org/1999/xhtml}base":
+                htmlBase = inlineElement.get("href")
         if ixNS is None: # no inline element, look for xmlns namespaces on htmlElement:
             for _ns in htmlElement.nsmap.values():
                 if _ns in XbrlConst.ixbrlAll:
                     ixNS = _ns
                     break
+        # required by 12.4.1 of [HTML] bullet 3
+        # use of document base is commented out because it discloses/uses absolute server directory and defeats URI redirection
+        if htmlBase is None:
+            htmlBase = "" # os.path.dirname(self.uri) + "/"
         if conflictingNSelts:
             self.modelXbrl.error("ix:multipleIxNamespaces",
                     _("Multiple ix namespaces were found"),
                     modelObject=conflictingNSelts)
         self.ixNS = ixNS
         self.ixNStag = ixNStag = "{" + ixNS + "}" if ixNS else ""
+        self.htmlBase = htmlBase
+        ixdsTarget = getattr(self.modelXbrl, "ixdsTarget", None)
         # load referenced schemas and linkbases (before validating inline HTML
         for inlineElement in htmlElement.iterdescendants(tag=ixNStag + "references"):
-            self.schemaLinkbaseRefsDiscover(inlineElement)
-            xmlValidate(self.modelXbrl, inlineElement) # validate instance elements
+            if inlineElement.get("target") == ixdsTarget:
+                self.schemaLinkbaseRefsDiscover(inlineElement)
+                xmlValidate(self.modelXbrl, inlineElement) # validate instance elements
         # with DTS loaded, now validate inline HTML (so schema definition of facts is available)
         if htmlElement.namespaceURI == XbrlConst.xhtml:  # must validate xhtml
             XhtmlValidate.xhtmlValidate(self.modelXbrl, htmlElement)  # fails on prefixed content
@@ -1317,6 +1344,8 @@ class ModelDocument:
 # inline document set level compilation
 # modelIxdsDocument is an inlineDocumentSet or entry inline document (if not a document set)
 def inlineIxdsDiscover(modelXbrl, modelIxdsDocument): 
+    # extract for a single target document
+    ixdsTarget = getattr(modelXbrl, "ixdsTarget", None)
     # compile inline result set
     ixdsEltById = defaultdict(list)
     for htmlElement in modelXbrl.ixdsHtmlElements:
@@ -1335,6 +1364,7 @@ def inlineIxdsDiscover(modelXbrl, modelIxdsDocument):
     targetReferenceAttrs = defaultdict(dict) # target dict by attrname of elts
     targetReferencePrefixNs = defaultdict(dict) # target dict by prefix, namespace
     targetReferencesIDs = {} # target dict by id of reference elts
+    modelInlineFootnotesById = {} # inline 1.1 ixRelationships and ixFootnotes
     hasResources = False
     for htmlElement in modelXbrl.ixdsHtmlElements:  
         mdlDoc = htmlElement.modelDocument
@@ -1435,9 +1465,15 @@ def inlineIxdsDiscover(modelXbrl, modelIxdsDocument):
                 modelXbrl.error(ixMsgCode("tupleMemberOrderMissing", modelFact, sect="validation"),
                                 _("Inline XBRL tuple member %(qname)s must have a numeric order attribute"),
                                 modelObject=modelFact, qname=modelFact.qname)
-            modelFact._ixFactParent = tuple # support ModelInlineFact parentElement()
+            if modelFact.get("target") == tuple.get("target"):
+                modelFact._ixFactParent = tuple # support ModelInlineFact parentElement()
+            else:
+                modelXbrl.error(ixMsgCode("tupleMemberDifferentTarget", modelFact, sect="validation"),
+                                _("Inline XBRL tuple member %(qname)s must have a tuple parent %(tuple)s with same target"),
+                                modelObject=modelFact, qname=modelFact.qname, tuple=tuple.qname)
         else:
-            modelXbrl.modelXbrl.facts.append(modelFact)
+            if modelFact.get("target") == ixdsTarget: # only process facts with target match
+                modelXbrl.modelXbrl.facts.append(modelFact)
             try:
                 modelFact._ixFactParent = modelXbrl.ixTargetRootElements[modelFact.get("target")]
             except KeyError:
@@ -1503,25 +1539,27 @@ def inlineIxdsDiscover(modelXbrl, modelIxdsDocument):
 
         for modelInlineFact in htmlElement.iterdescendants(tag=ixNStag + '*'):
             if isinstance(modelInlineFact,ModelInlineFact) and modelInlineFact.localName in ("nonNumeric", "nonFraction", "fraction"):
-                factTargetIDs.add(modelInlineFact.get("target"))
+                _target = modelInlineFact.get("target")
+                factTargetIDs.add(_target)
                 if modelInlineFact.qname is not None: # must have a qname to be in facts
-                    if modelInlineFact.concept is None:
-                        modelXbrl.error(ixMsgCode("missingReferences", modelInlineFact, name="references", sect="validation"),
-                                        _("Instance fact missing schema definition: %(qname)s of Inline Element %(localName)s"),
-                                        modelObject=modelInlineFact, qname=modelInlineFact.qname, localName=modelInlineFact.elementQname)
-                    elif modelInlineFact.isFraction == (modelInlineFact.localName == "fraction"):
-                        mdlDoc.modelXbrl.factsInInstance.add( modelInlineFact )
-                        locateFactInTuple(modelInlineFact, tuplesByTupleID, ixNStag)
-                        locateContinuation(modelInlineFact)
-                        for r in modelInlineFact.footnoteRefs:
-                            footnoteRefs[r].append(modelInlineFact)
-                        if modelInlineFact.id:
-                            factsByFactID[modelInlineFact.id] = modelInlineFact
-                    else:
-                        modelXbrl.error(ixMsgCode("fractionDeclaration", modelInlineFact, name="fraction", sect="validation"),
-                                        _("Inline XBRL element %(qname)s base type %(type)s mapped by %(localName)s"),
-                                        modelObject=modelInlineFact, qname=modelInlineFact.qname, localName=modelInlineFact.elementQname,
-                                        type=modelInlineFact.concept.baseXsdType)
+                    if _target == ixdsTarget: # if not the selected target, schema isn't loaded
+                        if modelInlineFact.concept is None:
+                                modelXbrl.error(ixMsgCode("missingReferences", modelInlineFact, name="references", sect="validation"),
+                                                _("Instance fact missing schema definition: %(qname)s of Inline Element %(localName)s"),
+                                                modelObject=modelInlineFact, qname=modelInlineFact.qname, localName=modelInlineFact.elementQname)
+                        elif modelInlineFact.isFraction != (modelInlineFact.localName == "fraction"):
+                            modelXbrl.error(ixMsgCode("fractionDeclaration", modelInlineFact, name="fraction", sect="validation"),
+                                            _("Inline XBRL element %(qname)s base type %(type)s mapped by %(localName)s"),
+                                            modelObject=modelInlineFact, qname=modelInlineFact.qname, localName=modelInlineFact.elementQname,
+                                            type=modelInlineFact.concept.baseXsdType)
+                        else:
+                            mdlDoc.modelXbrl.factsInInstance.add( modelInlineFact )
+                    locateFactInTuple(modelInlineFact, tuplesByTupleID, ixNStag)
+                    locateContinuation(modelInlineFact)
+                    for r in modelInlineFact.footnoteRefs:
+                        footnoteRefs[r].append(modelInlineFact)
+                    if modelInlineFact.id:
+                        factsByFactID[modelInlineFact.id] = modelInlineFact
         # order tuple facts
         for tupleFact in tupleElements:
             # check for duplicates
@@ -1571,22 +1609,39 @@ def inlineIxdsDiscover(modelXbrl, modelIxdsDocument):
                             numDenom[i] = modelInlineFractionTerm.xValue
                 rootModelFact._fractionValue = numDenom
             xmlValidate(modelXbrl, rootModelFact, ixFacts=True)
+
+        for modelInlineFootnote in htmlElement.iterdescendants(tag=XbrlConst.qnIXbrl11Footnote.clarkNotation):
+            if isinstance(modelInlineFootnote,ModelObject):
+                locateContinuation(modelInlineFootnote)
+                modelInlineFootnotesById[modelInlineFootnote.footnoteID] = modelInlineFootnote
+
             
     if len(targetReferenceAttrs) == 0:
         modelXbrl.error(ixMsgCode("missingReferences", None, name="references", sect="validation"),
                         _("There must be at least one reference"),
                         modelObject=modelXbrl)
-    if factTargetIDs - set(targetReferenceAttrs.keys()):
+    _missingReferenceTargets = factTargetIDs - set(targetReferenceAttrs.keys())
+    if _missingReferenceTargets:
         modelXbrl.error(ixMsgCode("missingReferenceTargets", None, name="references", sect="validation"),
-                        _("Instance fact targets without reference: %(missingReferenceTargets)s"),
-                        modelObject=modelXbrl, missingReferenceTargets=",".join(sorted(
-                            "(default)" if t is None else t
-                            for t in factTargetIDs - set(targetReferenceAttrs.keys()))))
+                        _("Found no ix:references element%(plural)s having target%(plural)s '%(missingReferenceTargets)s' in IXDS."),
+                        modelObject=modelXbrl, plural=("s" if len(_missingReferenceTargets) > 1 else ""),
+                        missingReferenceTargets=", ".join(sorted("(default)" if t is None else t
+                                                                 for t in _missingReferenceTargets)))
+        
+    if ixdsTarget not in factTargetIDs and ixdsTarget not in targetReferenceAttrs.keys():
+        modelXbrl.warning("arelle:ixdsTargetNotDefined",
+                          _("Target parameter %(ixdsTarget)s is not a specified IXDS target property"),
+                          modelObject=modelXbrl, ixdsTarget=ixdsTarget)
         
     del targetReferenceAttrs, factTargetIDs
 
             
     footnoteLinkPrototypes = {}
+    # inline 1.1 link prototypes, one per link role (so only one extended link element is produced per link role)
+    linkPrototypes = {}
+    # inline 1.1 ixRelationships and ixFootnotes
+    linkModelInlineFootnoteIds = defaultdict(set)
+    linkModelLocIds = defaultdict(set)
     for htmlElement in modelXbrl.ixdsHtmlElements:  
         mdlDoc = htmlElement.modelDocument
         # inline 1.0 ixFootnotes, build resources (with ixContinuation)
@@ -1596,6 +1651,9 @@ def inlineIxdsDiscover(modelXbrl, modelIxdsDocument):
                 linkrole = modelInlineFootnote.get("footnoteLinkRole", XbrlConst.defaultLinkRole)
                 arcrole = modelInlineFootnote.get("arcrole", XbrlConst.factFootnote)
                 footnoteID = modelInlineFootnote.footnoteID or ""
+                # check if any footnoteRef fact is in this target instance
+                if not any(modelFact.get("target") == ixdsTarget for modelFact in footnoteRefs[footnoteID]):
+                    continue # skip footnote, it's not in this target document
                 footnoteLocLabel = footnoteID + "_loc"
                 if linkrole in footnoteLinkPrototypes:
                     linkPrototype = footnoteLinkPrototypes[linkrole]
@@ -1621,26 +1679,23 @@ def inlineIxdsDiscover(modelXbrl, modelIxdsDocument):
                                                                 footnoteLocLabel, footnoteID,
                                                                 linkrole, arcrole, sourceElement=modelInlineFootnote))
                 
-        # inline 1.1 link prototypes, one per link role (so only one extended link element is produced per link role)
-        linkPrototypes = {}
         for modelInlineRel in htmlElement.iterdescendants(tag=XbrlConst.qnIXbrl11Relationship.clarkNotation):
             if isinstance(modelInlineRel,ModelObject):
                 linkrole = modelInlineRel.get("linkRole", XbrlConst.defaultLinkRole)
                 if linkrole not in linkPrototypes:
                     linkPrototypes[linkrole] = LinkPrototype(mdlDoc, mdlDoc.xmlRootElement, XbrlConst.qnLinkFootnoteLink, linkrole, sourceElement=modelInlineRel) 
                     
-        # inline 1.1 ixRelationships and ixFootnotes
-        modelInlineFootnotesById = {}
-        linkModelInlineFootnoteIds = defaultdict(set)
-        linkModelLocIds = defaultdict(set)
         
-        for modelInlineFootnote in htmlElement.iterdescendants(tag=XbrlConst.qnIXbrl11Footnote.clarkNotation):
-            if isinstance(modelInlineFootnote,ModelObject):
-                locateContinuation(modelInlineFootnote)
-                modelInlineFootnotesById[modelInlineFootnote.footnoteID] = modelInlineFootnote
-
+    for htmlElement in modelXbrl.ixdsHtmlElements:  
+        mdlDoc = htmlElement.modelDocument
         for modelInlineRel in htmlElement.iterdescendants(tag=XbrlConst.qnIXbrl11Relationship.clarkNotation):
             if isinstance(modelInlineRel,ModelObject):
+                fromLabels = set()
+                relHasFromFactsInTarget = False
+                for fromId in modelInlineRel.get("fromRefs","").split():
+                    fromLabels.add(fromId)
+                    if not relHasFromFactsInTarget and fromId in factsByFactID and factsByFactID[fromId].get("target") == ixdsTarget:
+                        relHasFromFactsInTarget = True
                 linkrole = modelInlineRel.get("linkRole", XbrlConst.defaultLinkRole)
                 arcrole = modelInlineRel.get("arcrole", XbrlConst.factFootnote)
                 linkPrototype = linkPrototypes[linkrole]
@@ -1650,11 +1705,10 @@ def inlineIxdsDiscover(modelXbrl, modelIxdsDocument):
                                    (arcrole,linkrole,None,None),
                                    (arcrole,None,None,None)):
                     if linkPrototype not in modelXbrl.baseSets[baseSetKey]: # only one link per linkrole
-                        modelXbrl.baseSets[baseSetKey].append(linkPrototype)
-                fromLabels = set()
-                for fromId in modelInlineRel.get("fromRefs","").split():
-                    fromLabels.add(fromId)
-                    if fromId not in linkModelLocIds[linkrole]:
+                        if relHasFromFactsInTarget:
+                            modelXbrl.baseSets[baseSetKey].append(linkPrototype)
+                for fromId in fromLabels:
+                    if fromId not in linkModelLocIds[linkrole] and relHasFromFactsInTarget:
                         linkModelLocIds[linkrole].add(fromId)
                         locPrototype = LocPrototype(mdlDoc, linkPrototype, fromId, fromId, sourceElement=modelInlineRel)
                         linkPrototype.childElements.append(locPrototype)
@@ -1665,21 +1719,24 @@ def inlineIxdsDiscover(modelXbrl, modelIxdsDocument):
                 fromToMatchedIds = set()
                 toIdsNotFound = []
                 for toId in modelInlineRel.get("toRefs","").split():
-                    toLabels.add(toId)
                     if toId in modelInlineFootnotesById:
+                        toLabels.add(toId)
                         toFootnoteIds.add(toId)
-                        modelInlineFootnote = modelInlineFootnotesById[toId]
-                        if toId not in linkModelInlineFootnoteIds[linkrole]:
-                            linkPrototype.childElements.append(modelInlineFootnote)
-                            linkModelInlineFootnoteIds[linkrole].add(toId)
-                            linkPrototype.labeledResources[toId].append(modelInlineFootnote)
+                        if relHasFromFactsInTarget:
+                            modelInlineFootnote = modelInlineFootnotesById[toId]
+                            if toId not in linkModelInlineFootnoteIds[linkrole]:
+                                linkPrototype.childElements.append(modelInlineFootnote)
+                                linkModelInlineFootnoteIds[linkrole].add(toId)
+                                linkPrototype.labeledResources[toId].append(modelInlineFootnote)
                     elif toId in factsByFactID:
+                        toLabels.add(toId)
                         if toId not in linkModelLocIds[linkrole]:
-                            linkModelLocIds[linkrole].add(toId)
-                            locPrototype = LocPrototype(mdlDoc, linkPrototype, toId, toId, sourceElement=modelInlineRel)
-                            toFactQnames.add(str(locPrototype.dereference().qname))
-                            linkPrototype.childElements.append(locPrototype)
-                            linkPrototype.labeledResources[toId].append(locPrototype)
+                            if factsByFactID[toId].get("target") == ixdsTarget:
+                                linkModelLocIds[linkrole].add(toId)
+                                locPrototype = LocPrototype(mdlDoc, linkPrototype, toId, toId, sourceElement=modelInlineRel)
+                                toFactQnames.add(str(locPrototype.dereference().qname))
+                                linkPrototype.childElements.append(locPrototype)
+                                linkPrototype.labeledResources[toId].append(locPrototype)
                     else: 
                         toIdsNotFound.append(toId)
                     if toId in fromLabels:
@@ -1693,7 +1750,7 @@ def inlineIxdsDiscover(modelXbrl, modelIxdsDocument):
                                     _("Inline relationship has matching values in fromRefs and toRefs: %(fromToMatchedIds)s"),
                                     modelObject=modelInlineRel, fromToMatchedIds=', '.join(sorted(fromToMatchedIds)))
                 for fromLabel in fromLabels:
-                    for toLabel in toLabels: 
+                    for toLabel in toLabels: # toLabels is empty if no to fact or footnote is in target
                         linkPrototype.childElements.append(ArcPrototype(mdlDoc, linkPrototype, XbrlConst.qnLinkFootnoteArc,
                                                                         fromLabel, toLabel,
                                                                         linkrole, arcrole,
@@ -1704,7 +1761,7 @@ def inlineIxdsDiscover(modelXbrl, modelIxdsDocument):
                                     modelObject=modelInlineRel, toFootnoteIds=', '.join(sorted(toFootnoteIds)), 
                                     toFactQnames=', '.join(sorted(toFactQnames)))
 
-        del linkPrototypes, modelInlineFootnotesById, linkModelInlineFootnoteIds # dereference
+    del modelInlineFootnotesById, linkPrototypes, linkModelInlineFootnoteIds # dereference
         
     # check for multiple use of continuation reference (same continuationAt on different elements)
     for _contAt, _contReferences in continuationReferences.items():
@@ -1721,7 +1778,6 @@ def inlineIxdsDiscover(modelXbrl, modelIxdsDocument):
             modelXbrl.error(ixMsgCode("continuationNotReferenced", ns=XbrlConst.ixbrl11, name="continuation", sect="validation"),
                             _("ix:continuation %(continuedAt)s is not referenced by a, ix:footnote, ix:nonNumeric or other ix:continuation element."),
                             modelObject=_contElt, continuedAt=_contAt)
-    del modelXbrl.ixdsHtmlElements # dereference
     
 class LoadingException(Exception):
     pass

@@ -26,6 +26,8 @@ namedEntityPattern = re.compile("&[_A-Za-z\xC0-\xD6\xD8-\xF6\xF8-\xFF\u0100-\u02
 #                                r"[_\-\.:" 
 #                                "\xB7A-Za-z0-9\xC0-\xD6\xD8-\xF6\xF8-\xFF\u0100-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\u0300-\u036F\u203F-\u2040]*;")
 
+inlinePattern = re.compile(r"xmlns:[\w.-]+=['\"]http://www.xbrl.org/2013/inlineXBRL['\"]")
+inlineSelfClosedElementPattern = re.compile(r"<(([\w.-]+:)?(\w+))([^\w/][^<]*)?/>")
 
 edbodyDTD = None
 isInlineDTD = None
@@ -396,6 +398,23 @@ efmBlockedInlineHtmlElementAttributes = {
     'html': ('lang',), # want the xml:lang attribute only in SEC filnigs
     'link': ('rel', 'rev')
 }
+elementsWithNoContent = {
+    "relationship", # inline 1.1
+    "schemaRef", "linkbaseRef", "roleRef", "arcroleRef", # xbrl instance
+    "area", "base", "basefont", "br", "col", "frame", "hr", "img", "input", "isindex", "link", "meta", "param", # xhtml
+    # elements which can have no text node siblings, tested with IE, Chrome and Safari
+    "td", "tr"
+    } 
+
+
+ModelDocumentTypeINLINEXBRL = None
+ModelDocumentTypeINLINEXBRLDOCUMENTSET = None
+def initModelDocumentTypeReferences():
+    global ModelDocumentTypeINLINEXBRL, ModelDocumentTypeINLINEXBRLDOCUMENTSET
+    if ModelDocumentTypeINLINEXBRL is None:
+        from arelle.ModelDocument import Type
+        ModelDocumentTypeINLINEXBRL = Type.INLINEXBRL
+        ModelDocumentTypeINLINEXBRLDOCUMENTSET = Type.INLINEXBRLDOCUMENTSET
 
 def checkfile(modelXbrl, filepath):
     result = []
@@ -405,13 +424,19 @@ def checkfile(modelXbrl, filepath):
     file, encoding = modelXbrl.fileSource.file(filepath)
     parserResults = {}
     class checkFileType(object):
-        def start(self, tag, attr): # check root XML element type
+        def start(self, tag, attr, nsmap=None): # check root XML element type
             parserResults["rootIsTestcase"] = tag.rpartition("}")[2] in ("testcases", "documentation", "testSuite", "testcase", "testSet")
+            if tag in ("{http://www.w3.org/1999/xhtml}html", "{http://www.w3.org/1999/xhtml}xhtml"):
+                if nsmap and any(ns in ixbrlAll for ns in nsmap.values()):
+                    parserResults["isInline"] = True
+                else:
+                    parserResults["maybeInline"] = True
         def end(self, tag): pass
         def data(self, data): pass
         def close(self): pass
     _parser = XMLParser(target=checkFileType())
     _isTestcase = False
+    mayBeInline = isInline = False
     
     with file as f:
         while True:
@@ -446,7 +471,21 @@ def checkfile(modelXbrl, filepath):
                 _parser.feed(line.encode('utf-8','ignore'))
                 if "rootIsTestcase" in parserResults: # root XML element has been encountered
                     _isTestcase = parserResults["rootIsTestcase"]
+                    if "isInline" in parserResults:
+                        isInline = True
+                    elif "maybeInline" in parserResults:
+                        mayBeInline = True
                     _parser = None # no point to parse past the root element
+            if mayBeInline and inlinePattern.search(line):
+                mayBeInline = False
+                isInline = True
+            if isInline:
+                for match in inlineSelfClosedElementPattern.finditer(line):
+                    selfClosedLocalName = match.group(3)
+                    if selfClosedLocalName not in elementsWithNoContent:
+                        modelXbrl.warning("ixbrl:selfClosedTagWarning",
+                                          _("Self-closed element \"%(element)s\" may contain text or other elements and should not use self-closing tag syntax (/>) when empty; change these to end-tags in file %(file)s line %(line)s column %(column)s"),
+                                          modelDocument=filepath, element=match.group(1), file=os.path.basename(filepath), line=lineNum, column=match.start())
             result.append(line)
             lineNum += 1
     result = ''.join(result)
@@ -456,14 +495,12 @@ def checkfile(modelXbrl, filepath):
             start,end = xmlDeclarationMatch.span()
             result = result[0:start] + result[end:]
             foundXmlDeclaration = True
+
     return (io.StringIO(initial_value=result), encoding)
 
-ModelDocumentTypeINLINEXBRL = None
 def loadDTD(modelXbrl):
-    global edbodyDTD, isInlineDTD, ModelDocumentTypeINLINEXBRL
-    if ModelDocumentTypeINLINEXBRL is None:
-        from arelle.ModelDocument import Type
-        ModelDocumentTypeINLINEXBRL = Type.INLINEXBRL
+    global edbodyDTD, isInlineDTD
+    initModelDocumentTypeReferences()
     _isInline = modelXbrl.modelDocument.type == ModelDocumentTypeINLINEXBRL
     if isInlineDTD is None or isInlineDTD != _isInline:
         isInlineDTD = _isInline
@@ -491,6 +528,7 @@ def validateTextBlockFacts(modelXbrl):
     #handler = TextBlockHandler(modelXbrl)
     loadDTD(modelXbrl)
     checkedGraphicsFiles = set() #  only check any graphics file reference once per fact
+    allowedExternalHrefPattern = modelXbrl.modelManager.disclosureSystem.allowedExternalHrefPattern
     
     if isInlineDTD:
         htmlBodyTemplate = "<body><div>\n{0}\n</div></body>\n"
@@ -571,7 +609,7 @@ def validateTextBlockFacts(modelXbrl):
                                         _("Fact %(fact)s of context %(contextID)s has javascript in '%(attribute)s' for <%(element)s>"),
                                         modelObject=f1, fact=f1.qname, contextID=f1.contextID,
                                         attribute=attrTag, element=eltTag)
-                                elif attrValue.startswith("http://www.sec.gov/Archives/edgar/data/") and eltTag == "a":
+                                elif eltTag == "a" and (not allowedExternalHrefPattern or allowedExternalHrefPattern.match(attrValue)):
                                     pass
                                 elif scheme(attrValue) in ("http", "https", "ftp"):
                                     modelXbrl.error("EFM.6.05.16.externalReference",
@@ -654,6 +692,7 @@ def validateHtmlContent(modelXbrl, referenceElt, htmlEltTree, validatedObjectLab
     _xhtmlNsLen = len(_xhtmlNs)
     _tableTags = ("table", _xhtmlNs + "table")
     _anchorAncestorTags = set(_xhtmlNs + tag for tag in ("html", "body", "div"))
+    allowedExternalHrefPattern = modelXbrl.modelManager.disclosureSystem.allowedExternalHrefPattern
     for elt in htmlEltTree.iter():
         if isinstance(elt, ModelObject) and elt.namespaceURI == xhtml:
             eltTag = elt.localName
@@ -698,7 +737,7 @@ def validateHtmlContent(modelXbrl, referenceElt, htmlEltTree, validatedObjectLab
                         modelObject=elt, validatedObjectLabel=validatedObjectLabel,
                         attribute=attrTag, element=eltTag,
                         messageCodes=("EFM.6.05.34.activeContent", "EFM.5.02.05.activeContent"))
-                elif attrValue.startswith("http://www.sec.gov/Archives/edgar/data/") and eltTag == "a":
+                elif eltTag == "a" and (not allowedExternalHrefPattern or allowedExternalHrefPattern.match(attrValue)):
                     pass
                 elif scheme(attrValue) in ("http", "https", "ftp"):
                     modelXbrl.error(messageCodePrefix + "externalReference",
@@ -875,6 +914,7 @@ def validateGraphicFile(elt, graphicFile):
     return None
 
 def referencedFiles(modelXbrl, localFilesOnly=True):
+    initModelDocumentTypeReferences()
     _parser = XMLParser(resolve_entities=False, remove_comments=True, remove_pis=True, recover=True)
     referencedFiles = set()
     # add referenced files that are html-referenced image and other files
@@ -904,6 +944,11 @@ def referencedFiles(modelXbrl, localFilesOnly=True):
                 except (XMLSyntaxError, UnicodeDecodeError):
                     pass  # TODO: Why ignore UnicodeDecodeError?
     # footnote or other elements
-    for elt in modelXbrl.modelDocument.xmlRootElement.iter("{http://www.w3.org/1999/xhtml}a", "{http://www.w3.org/1999/xhtml}img"):
-        addReferencedFile(elt, elt)
+    if modelXbrl.modelDocument.type == ModelDocumentTypeINLINEXBRLDOCUMENTSET:
+        xbrlInstRoots = modelXbrl.ixdsHtmlElements
+    else:
+        xbrlInstRoots = [modelXbrl.modelDocument.xmlRootElement]
+    for xbrlInstRoot in xbrlInstRoots:
+        for elt in xbrlInstRoot.iter("{http://www.w3.org/1999/xhtml}a", "{http://www.w3.org/1999/xhtml}img"):
+            addReferencedFile(elt, elt)
     return referencedFiles

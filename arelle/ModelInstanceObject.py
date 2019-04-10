@@ -604,10 +604,12 @@ class ModelInlineValueObject:
             self.xValid = UNVALIDATED # may not be initialized otherwise
             self.xValue = None
             f = self.format
+            ixEscape = self.get("escape") in ("true","1")
             v = XmlUtil.innerText(self, 
                                   ixExclude="tuple" if self.elementQname == XbrlConst.qnIXbrl11Tuple else "html", 
-                                  ixEscape=(self.get("escape") in ("true","1")), 
+                                  ixEscape=ixEscape, 
                                   ixContinuation=(self.elementQname == XbrlConst.qnIXbrl11NonNumeric),
+                                  ixResolveUris=ixEscape,
                                   strip=(f is not None)) # transforms are whitespace-collapse, otherwise it is preserved.
             if self.isNil:
                 self._ixValue = v
@@ -745,7 +747,7 @@ class ModelInlineFact(ModelInlineValueObject, ModelFact):
     
     @property
     def footnoteRefs(self):
-        """([str]) -- list of footnoteRefs attribute contents of inline element"""
+        """([str]) -- list of footnoteRefs attribute contents of inline 1.0 element"""
         return self.get("footnoteRefs", "").split()
 
     def __iter__(self):
@@ -1514,6 +1516,7 @@ class ModelInlineFootnote(ModelResource):
                                   ixExclude=True, 
                                   ixEscape="html", 
                                   ixContinuation=(self.namespaceURI != XbrlConst.ixbrl),
+                                  ixResolveUris=True,
                                   strip=True) # include HTML constructs
 
             return self._ixValue

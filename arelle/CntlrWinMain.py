@@ -591,8 +591,8 @@ class CntlrWinMain (Cntlr.Cntlr):
                 filename = self.uiFileDialog("save",
                         title=_("arelle - Save {0}").format(view.tabTitle),
                         initialdir=os.path.dirname(self.modelManager.modelXbrl.modelDocument.uri),
-                        filetypes=[(_("CSV file"), "*.csv"),(_("HTML file"), "*.html"),(_("XML file"), "*.xml"),(_("JSON file"), "*.json")],
-                        defaultextension=".csv")
+                        filetypes=[(_("XLSX file"), "*.xlsx"),(_("CSV file"), "*.csv"),(_("HTML file"), "*.html"),(_("XML file"), "*.xml"),(_("JSON file"), "*.json")],
+                        defaultextension=".xlsx")
                 if not filename:
                     return False
                 try:
@@ -1264,7 +1264,7 @@ class CntlrWinMain (Cntlr.Cntlr):
                           os.path.join(self.imagesDir, "arelle32.gif"),
                           _("arelle\u00ae {0} ({1}bit)\n"
                               "An open source XBRL platform\n"
-                              "\u00a9 2010-2017 Mark V Systems Limited\n"
+                              "\u00a9 2010-{2} Mark V Systems Limited\n"
                               "All rights reserved\nhttp://www.arelle.org\nsupport@arelle.org\n\n"
                               "Licensed under the Apache License, Version 2.0 (the \"License\"); "
                               "you may not use this file except in compliance with the License.  "
@@ -1283,7 +1283,7 @@ class CntlrWinMain (Cntlr.Cntlr):
                               "{3}"
                               "\n   May include installable plug-in modules with author-specific license terms"
                               )
-                            .format(Version.__version__, self.systemWordSize, Version.version,
+                            .format(Version.__version__, self.systemWordSize, Version.copyrightLatestYear,
                                     _("\n   Bottle \u00a9 2011-2013 Marcel Hellkamp"
                                       "\n   CherryPy \u00a9 2002-2013 CherryPy Team") if self.hasWebServer else "",
                                     sys.version_info, etree.LXML_VERSION, Tcl().eval('info patchlevel')
@@ -1420,9 +1420,9 @@ class CntlrWinMain (Cntlr.Cntlr):
                                     filetypes=[] if self.isMac else filetypes,
                                     defaultextension=defaultextension,
                                     parent=parent)
-            if self.isMac:
+            if isinstance(multFileNames, (tuple,list)):
                 return multFileNames
-            return re.findall("[{]([^}]+)[}]",  # multiple returns "{file1} {file2}..."
+            return re.findall("[{]([^}]+)[}]",  # older multiple returns "{file1} {file2}..."
                               multFileNames)
         elif self.hasWin32gui:
             import win32gui
@@ -1457,9 +1457,17 @@ class WinMainLogHandler(logging.Handler):
         #formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s - %(file)s %(sourceLine)s")
         formatter = Cntlr.LogFormatter("[%(messageCode)s] %(message)s - %(file)s")
         self.setFormatter(formatter)
+        self.logRecordBuffer = None
+    def startLogBuffering(self):
+        if self.logRecordBuffer is None:
+            self.logRecordBuffer = []
+    def endLogBuffering(self):
+        self.logRecordBuffer = None
     def flush(self):
         ''' Nothing to flush '''
     def emit(self, logRecord):
+        if self.logRecordBuffer is not None:
+            self.logRecordBuffer.append(logRecord)
         # add to logView
         msg = self.format(logRecord)        
         try:            

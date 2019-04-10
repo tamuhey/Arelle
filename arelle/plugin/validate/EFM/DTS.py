@@ -53,8 +53,11 @@ def checkFilingDTS(val, modelDocument, isEFM, isGFM, visited):
                 modelObject=modelDocumentReference.referringModelObject,
                     schema=modelDocument.basename, 
                     include=referencedDocument.basename)
-        if referencedDocument not in visited and referencedDocument.inDTS: # ignore EdgarRenderer added non-DTS documents
+        if referencedDocument not in visited and (referencedDocument.inDTS or referencedDocument.type == ModelDocument.Type.INLINEXBRLDOCUMENTSET): # ignore EdgarRenderer added non-DTS documents
             checkFilingDTS(val, referencedDocument, isEFM, isGFM, visited)
+            
+    if modelDocument.type == ModelDocument.Type.INLINEXBRLDOCUMENTSET:
+        return # nothing to check in inline document set surrogate parent 
             
     if val.disclosureSystem.standardTaxonomiesDict is None:
         pass
@@ -83,6 +86,8 @@ def checkFilingDTS(val, modelDocument, isEFM, isGFM, visited):
                     val.modelXbrl.error("EFM.5.01.01",
                         _("Document file name %(filename)s must start with a-z or 0-9, contain upper or lower case letters, ., -, _, and end with .htm."),
                         modelObject=modelDocument, filename=modelDocument.basename)
+            elif modelDocument.type == ModelDocument.Type.INLINEXBRLDOCUMENTSET:
+                pass # don't check surrogate for inline document set
             elif not efmFilenamePattern.match(modelDocument.basename):
                 val.modelXbrl.error("EFM.5.01.01",
                     _("Document file name %(filename)s must start with a-z or 0-9, contain upper or lower case letters, ., -, _, and end with .xsd or .xml."),
