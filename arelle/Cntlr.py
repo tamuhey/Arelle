@@ -161,7 +161,7 @@ class Cntlr:
             # note that cache is in ~/Library/Caches/Arelle
             self.contextMenuClick = "<Button-2>"
             self.hasClipboard = hasGui  # clipboard always only if Gui (not command line mode)
-            self.updateURL = "http://arelle.org/downloads/8"
+            self.updateURL = "http://arelle.org/download/1005"
         elif sys.platform.startswith("win"):
             self.isMac = False
             self.isMSW = True
@@ -187,9 +187,9 @@ class Cntlr:
                 self.hasClipboard = False
             self.contextMenuClick = "<Button-3>"
             if "64 bit" in sys.version:
-                self.updateURL = "http://arelle.org/downloads/9"
+                self.updateURL = "http://arelle.org/download/1008"
             else: # 32 bit
-                self.updateURL = "http://arelle.org/downloads/10"
+                self.updateURL = "http://arelle.org/download/1011"
         else: # Unix/Linux
             self.isMac = False
             self.isMSW = False
@@ -270,6 +270,7 @@ class Cntlr:
     def startLogging(self, logFileName=None, logFileMode=None, logFileEncoding=None, logFormat=None, 
                      logLevel=None, logHandler=None, logToBuffer=False, logTextMaxLength=None, logRefObjectProperties=True):
         # add additional logging levels (for python 2.7, all of these are ints)
+        logging.addLevelName(logging.INFO - 1, "INFO-RESULT") # result data, has @name, @value, optional href to source and readable message
         logging.addLevelName(logging.INFO + 1, "INFO-SEMANTIC")
         logging.addLevelName(logging.WARNING + 1, "WARNING-SEMANTIC")
         logging.addLevelName(logging.WARNING + 2, "ASSERTION-SATISFIED")
@@ -615,7 +616,8 @@ class LogHandlerWithXml(logging.Handler):
         
         msg = self.format(logRec)
         if logRec.args:
-            args = "".join([' {0}="{1}"'.format(ncNameEncode(n), entityEncode(v, truncateAt=128)) 
+            args = "".join([' {0}="{1}"'.format(ncNameEncode(n), entityEncode(v, 
+                                                truncateAt=(65535 if n in ("json",) else 128))) 
                             for n, v in logRec.args.items()])
         else:
             args = ""

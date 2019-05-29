@@ -153,8 +153,12 @@ dtrNumeric = "http://www.xbrl.org/dtr/type/numeric"
 
 dtrNoDecimalsItemTypes = (qname("{http://www.xbrl.org/dtr/type/WGWD/YYYY-MM-DD}noDecimalsMonetaryItemType"), 
                           qname("{http://www.xbrl.org/dtr/type/WGWD/YYYY-MM-DD}nonNegativeNoDecimalsMonetaryItemType"))
+dtrPrefixedContentItemTypes = (qname("{http://www.xbrl.org/dtr/type/WGWD/YYYY-MM-DD}prefixedContentItemType"), )
+dtrPrefixedContentTypes = (qname("{http://www.xbrl.org/dtr/type/WGWD/YYYY-MM-DD}prefixedContentType"), )
 dtrSQNameItemTypes = (qname("{http://www.xbrl.org/dtr/type/WGWD/YYYY-MM-DD}SQNameItemType"), )
 dtrSQNameTypes = (qname("{http://www.xbrl.org/dtr/type/WGWD/YYYY-MM-DD}SQNameType"), )
+dtrSQNamesItemTypes = (qname("{http://www.xbrl.org/dtr/type/WGWD/YYYY-MM-DD}SQNamesItemType"), )
+dtrSQNamesTypes = (qname("{http://www.xbrl.org/dtr/type/WGWD/YYYY-MM-DD}SQNamesType"), )
 
 ver10 = "http://xbrl.org/2010/versioning-base"
 # 2010 names
@@ -533,6 +537,11 @@ def isNumericXsdType(xsdType):
     return xsdType in {"integer", "positiveInteger", "negativeInteger", "nonNegativeInteger", "nonPositiveInteger",
                        "long", "unsignedLong", "int", "unsignedInt", "short", "unsignedShort",
                        "byte", "unsignedByte", "decimal", "float", "double"}
+    
+def isIntegerXsdType(xsdType):
+    return xsdType in {"integer", "positiveInteger", "negativeInteger", "nonNegativeInteger", "nonPositiveInteger",
+                       "long", "unsignedLong", "int", "unsignedInt", "short", "unsignedShort",
+                       "byte", "unsignedByte"}
     
 standardLabelRoles = {
                     "http://www.xbrl.org/2003/role/label",

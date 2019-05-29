@@ -224,13 +224,8 @@ class ModelManager:
             gc.collect()
 
     def loadCustomTransforms(self):
-        import logging
-        logger = logging.getLogger('ModelManager.py')
-        logger.debug('Arelle Load Detail - In load custom transforms.')
         if self.customTransforms is None:
             self.customTransforms = {}
             for pluginMethod in pluginClassMethods("ModelManager.LoadCustomTransforms"):
-                logger.debug('Arelle Load Detail - Calling custom plugin method.')
                 pluginMethod(self.customTransforms)
-                logger.debug('Arelle Load Detail - Called custom plugin method.')
     
