@@ -161,8 +161,7 @@ class ValidateXbrlCalcs:
                                                     linkroleDefinition=self.modelXbrl.roleTypeDefinition(ELR),
                                                     reportedSum=Locale.format_decimal(self.modelXbrl.locale, roundedSum, 1, max(d,0)),
                                                     computedSum=Locale.format_decimal(self.modelXbrl.locale, roundedItemsSum, 1, max(d,0)), 
-                                                    contextID=fact.context.id if fact.context is not None else None,
-                                                    unitID=fact.unit.id if fact.unit is not None else None,
+                                                    contextID=fact.context.id, unitID=fact.unit.id,
                                                     unreportedContributors=", ".join(unreportedContribingItemQnames) or "none")
                                                 del unreportedContribingItemQnames[:]
                             boundSummationItems.clear() # dereference facts in list
