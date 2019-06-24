@@ -10,25 +10,6 @@ import datetime
 from distutils.command.build_py import build_py as _build_py
 
 
-def get_version():
-    """
-    Utility function to return the current version of the library, as defined
-    by the version string in the arelle's _pkg_meta.py file. The format follows
-    the standard Major.Minor.Fix notation.
-
-    :return: The version string in the standard Major.Minor.Fix notation.
-    :rtype: str
-    """
-    import imp
-
-    source_dir = 'arelle'
-
-    with open('{}/_pkg_meta.py'.format(source_dir), 'rb') as fp:
-        mod = imp.load_source('_pkg_meta', source_dir, fp)
-
-    return mod.version
-
-
 setup_requires = ['lxml'] # ,'Crypto.Cipher']
 # install_requires specifies a list of package dependencies that are 
 # installed when 'python setup.py install' is run. On Linux/Mac systems 
@@ -425,7 +406,7 @@ else:
 timestamp = datetime.datetime.utcnow()
 setup(
     name='w_versioned_arelle',
-    version=get_version(),
+    version=os.getenv('GIT_TAG', '0.0.0'),
     description='An open source XBRL platform',
     long_description=open('README.md').read(),
     author='arelle.org',
