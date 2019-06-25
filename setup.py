@@ -406,7 +406,7 @@ else:
 timestamp = datetime.datetime.utcnow()
 setup(
     name='w_versioned_arelle',
-    version=os.getenv('GIT_TAG', '0.0.0'),
+    version='@VERSION@',
     description='An open source XBRL platform',
     long_description=open('README.md').read(),
     author='arelle.org',
