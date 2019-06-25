@@ -23,6 +23,10 @@ RUN mkdir /root/.ssh && \
     eval "$(ssh-agent -s)" && ssh-add /root/.ssh/id_rsa
 ENV PATH=/tmp/virtualenv/bin:$PATH
 ENV PYTHONPATH=.
+
+# The following command replaces the @VERSION@ string in setup.py with the tagged version number from GIT_TAG
+RUN sed -i s/@VERSION@/$GIT_TAG/ ./setup.py
+
 RUN echo "Starting the script section" && \
 		./smithy_arelle.sh && \
 		echo "script section completed"
