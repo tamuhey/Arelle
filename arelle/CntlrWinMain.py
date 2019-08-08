@@ -454,9 +454,12 @@ class CntlrWinMain (Cntlr.Cntlr):
         self.packagesMenu = Menu(self.menubar, tearoff=0)
         hasPackages = False
         for i, packageInfo in enumerate(sorted(PackageManager.packagesConfig.get("packages", []),
-                                               key=lambda packageInfo: packageInfo.get("name")),
+                                               key=lambda packageInfo: (packageInfo.get("name",""),packageInfo.get("version",""))),
                                         start=1):
             name = packageInfo.get("name", "package{}".format(i))
+            version = packageInfo.get("version")
+            if version:
+                name = "{} ({})".format(name, version)
             URL = packageInfo.get("URL")
             if name and URL and packageInfo.get("status") == "enabled":
                 self.packagesMenu.add_command(
@@ -727,10 +730,13 @@ class CntlrWinMain (Cntlr.Cntlr):
             filesource = openFileSource(filename, self,
                                         checkIfXmlIsEis=self.modelManager.disclosureSystem and
                                         self.modelManager.disclosureSystem.validationType == "EFM")
-            if filesource.isArchive and not filesource.selection: # or filesource.isRss:
-                from arelle import DialogOpenArchive
-                filename = DialogOpenArchive.askArchiveFile(self, filesource)
-                
+            if filesource.isArchive:
+                if not filesource.selection: # or filesource.isRss:
+                    from arelle import DialogOpenArchive
+                    filename = DialogOpenArchive.askArchiveFile(self, filesource)
+                    if filesource.basefile and not isHttpUrl(filesource.basefile):
+                        self.config["fileOpenDir"] = os.path.dirname(filesource.baseurl)
+                filesource.loadTaxonomyPackageMappings() # if a package, load mappings if not loaded yet
         if filename:
             if not isinstance(filename, (dict, list)): # json objects
                 if importToDTS:
@@ -740,6 +746,8 @@ class CntlrWinMain (Cntlr.Cntlr):
                     if not isHttpUrl(filename):
                         self.config["fileOpenDir"] = os.path.dirname(filesource.baseurl if filesource.isArchive else filename)
                 self.updateFileHistory(filename, importToDTS)
+            elif len(filename) == 1:
+                self.updateFileHistory(filename[0], importToDTS)
             thread = threading.Thread(target=self.backgroundLoadXbrl, args=(filesource,importToDTS,selectTopView), daemon=True).start()
             
     def webOpen(self, *ignore):
