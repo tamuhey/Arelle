@@ -20,6 +20,9 @@ versioning report that can be inferred by diffing two DTSes.
 
 Contribute
 ==========
+Make sure that all commits are based off of Herm's commits from arelle/arelle
+unless the code change is Workiva generated.
+
 Arelle fully integrates test cases with the object models for XBRL instances and 
 DTSes. 
 
