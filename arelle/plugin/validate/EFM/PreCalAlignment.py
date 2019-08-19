@@ -143,7 +143,10 @@ def checkCalcsTreeWalk(val, parentChildRels, concept, isStatementSheet, inNested
     calculation link role, just the summation-item arc-set from the presumed-total concept.
     """
     if True:
-        # REIT - this is a useless test for us and takes WWAAAAAAAAAAYYYYYYYY tooooo long.
+        # NOTE: This has been added because the validation below is not optimized. For 
+        # instance NNN gets caught here and adds tens of minutes to the validation time. 
+        # Until such time that this validation gets updated to reduce its runtime we 
+        # will not run it.
         return
     if concept not in visited:
         visited.add(concept)
@@ -162,7 +165,10 @@ def checkCalcsTreeWalk(val, parentChildRels, concept, isStatementSheet, inNested
 
 def checkForCalculations(val, parentChildRels, siblingRels, iSibling, totalConcept, totalRel, reasonPresumedTotal, isStatementSheet, conceptsUsed, nestedItems, contributingItems):
     # compatible preceding sibling facts must have calc relationship to toal
-    # NOTE: THIS IS HERE TO REMOVE THIS ENTIRE SUITE OF TESTS.  THEY TAKE TOO LONG TO RUN FOR REIT FILINGS.
+    # NOTE: This has been added because the validations below are not optimized. For 
+    # instance NNN gets caught here and adds tens of minutes to the validation time. 
+    # Until such time that these validation get updated to reduce their runtime we 
+    # will not run them.
     if True:
         return
     for iContributingRel in range(iSibling - 1, -1, -1):
