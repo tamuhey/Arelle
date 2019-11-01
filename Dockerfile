@@ -35,4 +35,13 @@ ARG BUILD_ARTIFACTS_PYPI=/build/dist/w_versioned_arelle*.tar.gz
 RUN mkdir /audit/
 ARG BUILD_ARTIFACTS_AUDIT=/audit/*
 RUN pip freeze > /audit/pip.lock
-FROM scratch
+FROM drydock-prod.workiva.net/workiva/wf_arelle:latest-release AS wf-arelle-test-consumption
+USER root
+ARG BUILD_ID
+RUN apt update && \
+    apt full-upgrade -y && \
+    apt autoremove -y && \
+    apt clean all
+COPY --from=build /build/dist/*.tar.gz /test.tar.gz
+RUN pip install /test.tar.gz
+USER nobody
