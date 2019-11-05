@@ -35,3 +35,8 @@ Development
 * [Issue Tracker](https://arelle.atlassian.net/browse/ARELLE)
 * [Wiki](https://arelle.atlassian.net/wiki/display/ARELLE)
 
+# Testing
+
+#### Docker Image
+
+The build of this library now produces a docker image. The docker image is meant for testing purposes. The docker image is just wf_arelle with the library from the build installed
