@@ -16,7 +16,7 @@ setup_requires = ['lxml'] # ,'Crypto.Cipher']
 # this also allows installation directly from the github repository 
 # (using 'pip install -e git+git://github.com/rheimbuchArelle.git#egg=Arelle') 
 # and the install_requires packages are auto-installed as well.
-install_requires = ['lxml', 'isodate', 'openpyxl']
+install_requires = ['lxml', 'isodate', 'openpyxl', 'holidays']
 options = {}
 scripts = []
 cxFreezeExecutables = []
