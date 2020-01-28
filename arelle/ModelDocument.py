@@ -911,10 +911,15 @@ class ModelDocument:
                         edgarCode="du-0311-Xml-Base-Used",
                         modelObject=element, attribute=baseAttr, element=element.qname)
                 else:
+                    ''' HF 2019-09-29: believe this is wrong
                     if baseAttr.startswith("/"):
                         base = baseAttr
                     else:
                         base = baseAttr + base
+                    '''
+                    base = baseAttr + base
+                    if base.startswith("/"):
+                        break # break because it is now absolute
             baseElt = baseElt.getparent()
         if base: # neither None nor ''
             if base.startswith('http://') or os.path.isabs(base):
@@ -1529,13 +1534,27 @@ def inlineIxdsDiscover(modelXbrl, modelIxdsDocument):
                                     modelObject=(tupleFact, childElt), qname=childElt.qname)
             else:
                 checkTupleIxDescendants(tupleFact, childElt)
+                
+    def addItemFactToTarget(modelInlineFact):
+        if modelInlineFact.concept is None:
+                modelXbrl.error(ixMsgCode("missingReferences", modelInlineFact, name="references", sect="validation"),
+                                _("Instance fact missing schema definition: %(qname)s of Inline Element %(localName)s"),
+                                modelObject=modelInlineFact, qname=modelInlineFact.qname, localName=modelInlineFact.elementQname)
+        elif modelInlineFact.isFraction != (modelInlineFact.localName == "fraction"):
+            modelXbrl.error(ixMsgCode("fractionDeclaration", modelInlineFact, name="fraction", sect="validation"),
+                            _("Inline XBRL element %(qname)s base type %(type)s mapped by %(localName)s"),
+                            modelObject=modelInlineFact, qname=modelInlineFact.qname, localName=modelInlineFact.elementQname,
+                            type=modelInlineFact.concept.baseXsdType)
+        else:
+            mdlDoc.modelXbrl.factsInInstance.add( modelInlineFact )
 
     for htmlElement in modelXbrl.ixdsHtmlElements:  
         mdlDoc = htmlElement.modelDocument
         ixNStag = mdlDoc.ixNStag
         # hook up tuples to their container
         for tupleFact in tupleElements:
-            locateFactInTuple(tupleFact, tuplesByTupleID, ixNStag)
+            if tupleFact.modelDocument == mdlDoc:
+                locateFactInTuple(tupleFact, tuplesByTupleID, ixNStag)
 
         for modelInlineFact in htmlElement.iterdescendants(tag=ixNStag + '*'):
             if isinstance(modelInlineFact,ModelInlineFact) and modelInlineFact.localName in ("nonNumeric", "nonFraction", "fraction"):
@@ -1543,17 +1562,7 @@ def inlineIxdsDiscover(modelXbrl, modelIxdsDocument):
                 factTargetIDs.add(_target)
                 if modelInlineFact.qname is not None: # must have a qname to be in facts
                     if _target == ixdsTarget: # if not the selected target, schema isn't loaded
-                        if modelInlineFact.concept is None:
-                                modelXbrl.error(ixMsgCode("missingReferences", modelInlineFact, name="references", sect="validation"),
-                                                _("Instance fact missing schema definition: %(qname)s of Inline Element %(localName)s"),
-                                                modelObject=modelInlineFact, qname=modelInlineFact.qname, localName=modelInlineFact.elementQname)
-                        elif modelInlineFact.isFraction != (modelInlineFact.localName == "fraction"):
-                            modelXbrl.error(ixMsgCode("fractionDeclaration", modelInlineFact, name="fraction", sect="validation"),
-                                            _("Inline XBRL element %(qname)s base type %(type)s mapped by %(localName)s"),
-                                            modelObject=modelInlineFact, qname=modelInlineFact.qname, localName=modelInlineFact.elementQname,
-                                            type=modelInlineFact.concept.baseXsdType)
-                        else:
-                            mdlDoc.modelXbrl.factsInInstance.add( modelInlineFact )
+                        addItemFactToTarget(modelInlineFact)
                     locateFactInTuple(modelInlineFact, tuplesByTupleID, ixNStag)
                     locateContinuation(modelInlineFact)
                     for r in modelInlineFact.footnoteRefs:
@@ -1731,7 +1740,16 @@ def inlineIxdsDiscover(modelXbrl, modelIxdsDocument):
                     elif toId in factsByFactID:
                         toLabels.add(toId)
                         if toId not in linkModelLocIds[linkrole]:
-                            if factsByFactID[toId].get("target") == ixdsTarget:
+                            modelInlineFact = factsByFactID[toId]
+                            if relHasFromFactsInTarget and modelInlineFact.get("target") != ixdsTarget:
+                                # copy fact to target when not there
+                                if ixdsTarget:
+                                    modelInlineFact.set("target", ixdsTarget)
+                                else:
+                                    modelInlineFact.attrib.pop("target", None)
+                                addItemFactToTarget(modelInlineFact)
+                                locateFactInTuple(modelInlineFact, tuplesByTupleID, modelInlineFact.modelDocument.ixNStag)
+                            if modelInlineFact.get("target") == ixdsTarget:
                                 linkModelLocIds[linkrole].add(toId)
                                 locPrototype = LocPrototype(mdlDoc, linkPrototype, toId, toId, sourceElement=modelInlineRel)
                                 toFactQnames.add(str(locPrototype.dereference().qname))
