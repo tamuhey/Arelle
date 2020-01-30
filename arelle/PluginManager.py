@@ -209,13 +209,13 @@ def moduleModuleInfo(moduleURL, reload=False, parentImportsSubtree=False):
                             _value = item.value.values[i]
                             _valueType = _value.__class__.__name__
                             if _key == "import":
-                                if _valueType == 'Str':
+                                if _valueType in ('Str', 'Constant'):
                                     importURLs.append(_value.s)
                                 elif _valueType in ("List", "Tuple"):
                                     for elt in _value.elts:
                                         importURLs.append(elt.s)
-                            elif _valueType == 'Str':
-                                moduleInfo[_key] = _value.s
+                            elif _valueType in ('Str', 'Constant'): # Str < =python 3.7, Constant python 3.8+
+                                moduleInfo[_key] = _value.s                             
                             elif _valueType == 'Name':
                                 if _value.id in constantStrings:
                                     moduleInfo[_key] = constantStrings[_value.id]

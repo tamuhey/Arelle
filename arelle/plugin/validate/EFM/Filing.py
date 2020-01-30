@@ -9,7 +9,7 @@ Subsequent validations and enhancements created by staff of the U.S. Securities 
 Data and content created by government employees within the scope of their employment are not subject 
 to domestic copyright protection. 17 U.S.C. 105.
 '''
-import re, datetime, decimal, json, unicodedata
+import re, datetime, decimal, json, unicodedata, holidays
 from collections import defaultdict
 from pytz import timezone
 from arelle import (ModelDocument, ModelValue, ModelRelationshipSet, 
@@ -43,7 +43,7 @@ from .Consts import submissionTypesAllowingWellKnownSeasonedIssuer, \
 from .Dimensions import checkFilingDimensions
 from .PreCalAlignment import checkCalcsTreeWalk
 from .Util import conflictClassFromNamespace, abbreviatedNamespace, abbreviatedWildNamespace, loadDeprecatedConceptDates, \
-                    loadCustomAxesReplacements, loadNonNegativeFacts, loadDeiValidations
+                    loadCustomAxesReplacements, loadNonNegativeFacts, loadDeiValidations, loadOtherStandardTaxonomies
                     
 MIN_DOC_PER_END_DATE = ModelValue.dateTime("1980-01-01", type=ModelValue.DATE)
 MAX_DOC_PER_END_DATE = ModelValue.dateTime("2050-12-31", type=ModelValue.DATE)
@@ -76,6 +76,8 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
     modelXbrl.modelManager.disclosureSystem.loadStandardTaxonomiesDict()
     
     datetimeNowAtSEC = ModelValue.dateTime(datetime.datetime.now(tz=timezone("US/Eastern")).isoformat()[:19]) # re-strip time zone
+    upcomingSECHolidays = holidays.US(state=None, years=[datetimeNowAtSEC.year, datetimeNowAtSEC.year+1])
+
     
     # note that some XFM tests are done by ValidateXbrl to prevent mulstiple node walks
     disclosureSystem = val.disclosureSystem
@@ -115,6 +117,8 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
     submissionType = val.params.get("submissionType", "")
     hasSubmissionType = bool(submissionType)
     isInlineXbrl = modelXbrl.modelDocument.type in (ModelDocument.Type.INLINEXBRL, ModelDocument.Type.INLINEXBRLDOCUMENTSET)
+    if isEFM:
+        val.otherStandardTaxonomies = loadOtherStandardTaxonomies(modelXbrl, val)
     if modelXbrl.modelDocument.type == ModelDocument.Type.INSTANCE or isInlineXbrl:
         deprecatedConceptDates = {}
         deprecatedConceptFacts = defaultdict(list) # index by concept Qname, value is list of facts
@@ -480,7 +484,7 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                                 commonSharesClassMembers.add(memConcept.qname) # only note the actually used members, not any defined members
                                 #end of replacement 
                                 hasClassOfStockMember = True
-                            if factInDeiNamespace and dimConcept.name in ("StatementClassOfStockAxis", "ClassesOfShareCapitalAxis") and memConcept is not None:
+                            if factInDeiNamespace and dimConcept is not None and dimConcept.name in ("StatementClassOfStockAxis", "ClassesOfShareCapitalAxis") and memConcept is not None:
                                 deiSharesClassMembers.add(memConcept.qname)
                                 
                     if isEntityCommonStockSharesOutstanding and not hasClassOfStockMember:
@@ -930,14 +934,11 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
             def fevMessage(fev, messageKey=None, **kwargs):
                 logArgs = kwargs.copy()
                 validation = deiValidations["validations"][fev["validation"]]
-                severity = validation["severity"].upper()
+                severity = kwargs.get("severity", validation["severity"]).upper()
                 if severity == "WARNINGIFPRAGMATICELSEERROR":
                     severity = "WARNING" if validateEFMpragmatic else "ERROR"
                 if messageKey is None:
-                    if "validationMessage" in kwargs:
-                        messageKey = validation[kwargs["validationMessage"]]
-                    else:
-                        messageKey = validation["message"]
+                    messageKey = validation[kwargs.get("validationMessage", "message")]
                 if "severityVerb" not in logArgs:
                     logArgs["severityVerb"] = {"WARNING":"should","ERROR":"must"}[severity]
                 if "efmSection" not in logArgs:
@@ -1069,6 +1070,8 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
             unexpectedEloParams = set()
             expectedEloParams = set()
             eloValuesFromFacts = {}
+            eloValueFactNames = set(n for fev in fevs if "store-db-name" in fev for n in fev.get("xbrl-names", ())) # fact names producing elo values
+            missingReqInlineTag = False
             for fevIndex, fev in enumerate(fevs):
                 forms = fev.get("formSet", ()) # compiled set of forms
                 names = fev.get("xbrl-names", ())
@@ -1154,7 +1157,7 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                 elif validation == "op": # all or neither must have a value
                     if 0 < sum(fevFact(fev, name) is not None for name in names) < len(names): # default context for all
                         fevMessage(fev, subType=submissionType, modelObject=fevFacts(fev), tags=", ".join(names))
-                elif validation == "og":
+                elif validation == "et1": # "og": 
                     ogfacts = set()
                     for fr in fevFacts(fev, referenceTag, deduplicate=True):
                         if fr.xValue == referenceValue:
@@ -1164,12 +1167,14 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                                 numOgFacts += 1
                             if numOgFacts == 0:
                                 fevMessage(fev, subType=submissionType, modelObject=fr, tag=names[0], value=referenceValue, otherTag=referenceTag, contextID=fr.contextID)
-                    # find any facts without a referenceTag fact = value
+                                if any(name in eloValueFactNames for name in names):
+                                    missingReqInlineTag = True
+                    # find any facts without a referenceTag fact = value, note these are warning severity
                     for f in fevFacts(fev, names, deduplicate=True):
                         if f not in ogfacts:
                             fr = fevFact(fev, referenceTag, f)
-                            if (fr is None or fr.xValue != referenceValue) and f.xValue == referenceValue: # ok if it's false
-                                fevMessage(fev, subType=submissionType, modelObject=f, tag=names[0], value=referenceValue, otherTag=referenceTag, contextID=f.contextID)
+                            if (fr is None or fr.xValue != referenceValue):
+                                fevMessage(fev, severity="warning", subType=submissionType, modelObject=f, tag=names[0], value=referenceValue, otherTag=referenceTag, contextID=f.contextID)
                     del ogfacts # dereference
                 elif validation == "f2":
                     f = fevFact(fev, referenceTag) # f and dependent fact are in same context
@@ -1189,7 +1194,7 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                             (f is None and f2 is not None and fevFact(fev, referenceTag, f2) is None)):
                             fevMessage(fev, subType=submissionType, modelObject=f, tag=name, otherTag=referenceTag,
                                        contextID=f.contextID if f is not None else f2.contextID)
-                elif validation in ("a", "sr", "oth", "tb", "et1"):
+                elif validation in ("a", "sr", "oth", "tb"): #, "et1"):
                     for name in names:
                         f = fevFact(fev, name)
                         fr = fevFact(fev, referenceTag, f) # dependent fact is of context of f or for "c" inherited context (less disaggregatedd)
@@ -1255,11 +1260,17 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                             if fevFact(fev, referenceTag, f) is None: # note that reference tag is a list here
                                 fevMessage(fev, subType=submissionType, modelObject=f, tags=", ".join(names), otherTags=", ".join(referenceTag), severityVerb="may")
                     del t1facts # dereference
-                elif validation == "de":
+                elif validation in ("de", "de5pm"):
+                    t = datetimeNowAtSEC
+                    if validation == "de5pm" and (17,31) <= (t.hour, t.minute) <= (23,0):
+                        while True: # add 1 day until on a business day
+                            t += datetime.timedelta(1)
+                            if t.weekday() < 5 and t not in upcomingSECHolidays: # break when not holiday and not weekend
+                                break
                     for f in fevFacts(fev, names, deduplicate=True):
-                        if not (MIN_DOC_PER_END_DATE <= f.xValue <= datetimeNowAtSEC): # need 5pm check for 8-K?
+                        if not (MIN_DOC_PER_END_DATE <= f.xValue <= t): # f.xValue is a date only, not a date-time
                             fevMessage(fev, subType=submissionType, modelObject=f, tag=name, 
-                                       value="between 1980-01-01 and {}".format(datetime.date.today().isoformat()))
+                                       value="between 1980-01-01 and {}".format(t.date().isoformat()))
                 elif validation == "e503" and "itemsList" in val.params: # don't validate if no itemList (e.g. stand alone)
                     e503facts = set()
                     for f in fevFacts(fev, names, deduplicate=True):
@@ -1268,12 +1279,24 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                             fevMessage(fev, subType=submissionType, modelObject=f, tag=name, headerTag="5.03")
                     if "5.03" in val.params["itemsList"] and not e503facts: # missing a required fact
                         fevMessage(fev, subType=submissionType, modelObject=modelXbrl, tag=names[0], headerTag="5.03")
+                elif validation == "503-header-field":
+                    if "5.03" not in val.params.get("itemsList",()):
+                        eloName = None # cancel validation "elo-name": "submissionHeader.fyEnd"
+                elif validation == "sb":
+                    _fileNum = val.params.get("entity.repFileNum", "")
+                    for f in fevFacts(fev):
+                        if f.xValue and (_fileNum.startswith("811-") or _fileNum.startswith("814-")):
+                            fevMessage(fev, subType=submissionType, modelObject=f, tag=f.qname.localName, otherTag="entity file number", 
+                                       value="not starting with 811- or 814-", contextID=f.contextID)
                 elif validation in ("x", "xv", "r", "y", "n"):
                     for name in names:
                         f = fevFact(fev, name)
                         if f is None or (((f.xValue not in value) ^ ("!not!" in value)) if isinstance(value, (set,list)) 
                                          else (value is not None and f.xValue != value)):
                             fevMessage(fev, subType=submissionType, modelObject=f, efmSection=efmSection, tag=name, value=value)
+                        if f is None and name in eloValueFactNames:
+                            missingReqInlineTag = True
+                            
                 elif validation in ("ru", "ou"):
                     foundNonUS = None # false means found a us state, true means found a non-us state
                     for name in names:
@@ -1301,7 +1324,7 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                     for name in names:
                         f = fevFact(fev, name)
                         if f is not None and eloName in val.params and not deiParamEqual(name, f.xValue, val.params[eloName]):
-                            fevMessage(fev, messageKey="dq-0540-{tag}-Value",
+                            fevMessage(fev, messageKey=fev.get("elo-match-message", "dq-0540-{tag}-Value"),
                                        subType=submissionType, modelObject=f, efmSection="6.5.40", 
                                        tag=name, value=str(f.xValue), headerTag=eloName, valueOfHeaderTag=val.params[eloName])
                             
@@ -1309,6 +1332,8 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                     f = fevFact(fev, names)
                     if f is not None:
                         eloValuesFromFacts[storeDbName] = eloValueOfFact(names[0], f.xValue)
+                    elif storeDbName not in eloValuesFromFacts:
+                        eloValuesFromFacts[storeDbName] = None
 
                         
             del unexpectedDeiNameEfmSects, expectedDeiNames # dereference
@@ -1630,6 +1655,8 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
             
         # log extracted facts
         if isInlineXbrl and (extractedCoverFacts or eloValuesFromFacts):
+            if eloValuesFromFacts:
+                eloValuesFromFacts["missingReqInlineTag"] = ["no", "yes"][missingReqInlineTag]
             contextualFactNameSets = (("Security12bTitle", "TradingSymbol"), ("Security12gTitle", "TradingSymbol"))
             exchangeFactName = "SecurityExchangeName"
             exchangeAxisQN = qname(deiNamespaceURI, "EntityListingsExchangeAxis")
@@ -1990,13 +2017,14 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                 modelReference = modelRefRel.toModelObject
                 text = XmlUtil.innerText(modelReference)
                 #6.18.1 no reference to company extension concepts
-                if concept.modelDocument.targetNamespace not in disclosureSystem.standardTaxonomiesDict:
+                if (concept.modelDocument.targetNamespace not in disclosureSystem.standardTaxonomiesDict and
+                    concept.modelDocument.targetNamespace not in val.otherStandardTaxonomies):
                     modelXbrl.error(("EFM.6.18.01", "GFM.1.9.1"),
                         _("Your filing provides a reference, '%(xml)s', for an custom concept in extension taxonomy, %(concept)s.  "
                           "Please remove this reference."),
                         edgarCode="cp-1801-Custom-Element-Has-Reference",
                         modelObject=modelReference, concept=concept.qname, text=text, xml=XmlUtil.xmlstring(modelReference, stripXmlns=True, contentsOnly=True))
-                elif isEFM and not isStandardUri(val, modelRefRel.modelDocument.uri): 
+                elif isEFM and not isStandardUri(val, modelRefRel.modelDocument.uri) and concept.modelDocument.targetNamespace not in val.otherStandardTaxonomies: 
                     #6.18.2 no extension to add or remove references to standard concepts
                     modelXbrl.error(("EFM.6.18.02"),
                         _("Your filing attempted to add a new reference, '%(xml)s', to an existing concept in the standard taxonomy, %(concept)s.  "
