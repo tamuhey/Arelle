@@ -3,7 +3,9 @@ FROM amazonlinux:2 as build
 WORKDIR /build/
 ADD . /build/
 
-RUN yum -y install python3-devel && \
+RUN yum -y install python3-devel \
+                   libxml2-devel \
+		   libxslt-devel && \
     yum groupinstall -y "Development Tools" && \
     rm -rf /var/cache/yum
 
