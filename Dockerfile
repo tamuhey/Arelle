@@ -9,16 +9,11 @@ RUN yum -y install python3-devel \
     yum groupinstall -y "Development Tools" && \
     rm -rf /var/cache/yum
 
-ENV PATH=/tmp/virtualenv/bin:$PATH
-ENV PYTHONPATH=.
-
+# pypi package creation
 # The following command replaces the @VERSION@ string in setup.py with the tagged version number from GIT_TAG
 RUN sed -i s/@VERSION@/$GIT_TAG/ ./setup.py
-
-RUN echo "Starting the script section" && \
-		./smithy_arelle.sh && \
-		echo "script section completed"
 ARG BUILD_ARTIFACTS_PYPI=/build/dist/w_versioned_arelle*.tar.gz
+RUN python3 setup.py sdist
 
 RUN mkdir /audit/
 ARG BUILD_ARTIFACTS_AUDIT=/audit/*
