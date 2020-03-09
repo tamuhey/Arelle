@@ -126,6 +126,7 @@ class FormulaOptions():
         self.parameterValues = {} # index is QName, value is typed value
         self.runIDs = None # formula and assertion/assertionset IDs to execute
         self.compileOnly = False # compile but don't execute formulas
+        self.formulaAction = None # none, validate, run
         self.traceParameterExpressionResult = False
         self.traceParameterInputValue = False
         self.traceCallExpressionSource = False
@@ -1816,7 +1817,7 @@ class ModelMatchFilter(ModelFilter):
         return (("label", self.xlinkLabel),
                 ("aspect", self.aspectName),
                 ("dimension", self.dimension) if self.dimension else (),
-                ("matchAny", self.matchAny.lower())
+                ("matchAny", self.matchAny.lower()),
                 ("variable", self.variable),
                  )
         

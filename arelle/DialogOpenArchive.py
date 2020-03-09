@@ -10,6 +10,7 @@ try:
 except ImportError:
     from ttk import Frame, Button, Treeview, Scrollbar
 import os, sys
+from collections import defaultdict
 try:
     import regex as re
 except ImportError:
@@ -31,6 +32,8 @@ DISCLOSURE_SYSTEM = 3
 PLUGIN = 4
 PACKAGE = 5
 
+reportIxdsPattern = re.compile(r"^([^/]+/reports/[^/]+)/[^/]+$")
+
 def askArchiveFile(parent, filesource, multiselect=False):
     filenames = filesource.dir
     if filenames is not None:   # an IO or other error can return None
@@ -42,7 +45,8 @@ def askArchiveFile(parent, filesource, multiselect=False):
                                        filenames,
                                        _("Select Entry Point"), 
                                        _("File"),
-                                       showAltViewButton=True)
+                                       showAltViewButton=True,
+                                       multiselect=multiselect)
         else:
             dialog = DialogOpenArchive(parent, 
                                        ARCHIVE, 
@@ -172,13 +176,23 @@ class DialogOpenArchive(Toplevel):
                 if self.taxonomyPackage["entryPoints"]:
                     # may have instance documents too
                     self.packageContainedInstances = []
+                    self.packageContainedIXDSes = defaultdict(list)
+                    packageContentInstanceCounts = {}
                     packageContentTypeCounts = {}
-                    for suffix in (".xhtml", ".htm", ".html"):
+                    for suffix in (".xhtml", ".htm", ".html"): # try for suffixes in order of likelihood to have instance
                         for potentialInstance in filesource.dir:
-                            if potentialInstance.endswith(".xhtml"):
-                                _type = "Inline Instance"
-                                self.packageContainedInstances.append([potentialInstance, _type])
-                                packageContentTypeCounts[potentialInstance] = packageContentTypeCounts.get(potentialInstance, 0) + 1
+                            if potentialInstance.endswith(suffix):
+                                m = reportIxdsPattern.match(potentialInstance) # IXDS
+                                if multiselect and m: # only in ixds multiselect mode
+                                    _type = "Inline Doc Set"
+                                    self.packageContainedIXDSes[m.group(1)].append(potentialInstance)
+                                    potentialInstance = m.group(1) # use package name only
+                                else:
+                                    _type = "Inline Instance"
+                                if not self.packageContainedInstances or self.packageContainedInstances[-1][0] != potentialInstance:
+                                    self.packageContainedInstances.append([potentialInstance, _type])
+                                    packageContentInstanceCounts[potentialInstance] = packageContentInstanceCounts.get(potentialInstance, 0) + 1
+                                    packageContentTypeCounts[_type] = packageContentTypeCounts.get(_type, 0) + 1
                         if self.packageContainedInstances:
                             break 
                     if self.packageContainedInstances: # add sequences to any duplicated entry types
@@ -186,9 +200,16 @@ class DialogOpenArchive(Toplevel):
                             if count > 1:
                                 _dupNo = 0
                                 for i in range(len(self.packageContainedInstances)):
-                                    if self.packageContainedInstances[i][0] == _type:
+                                    if self.packageContainedInstances[i][1] == _type:
                                         _dupNo += 1
-                                        self.packageContainedInstances[i][0] = "{} {}".format(_type, _dupNo)
+                                        self.packageContainedInstances[i][1] = "{} {}".format(_type, _dupNo)
+                        for _instance, count in packageContentInstanceCounts.items():
+                            if count > 1:
+                                _dupNo = 0
+                                for i in range(len(self.packageContainedInstances)):
+                                    if self.packageContainedInstances[i][0] == _instance:
+                                        _dupNo += 1
+                                        self.packageContainedInstances[i][0] = "{} {}".format(_instance, _dupNo)
                                     
                 else:
                     # may be a catalog file with no entry oint names
@@ -391,8 +412,11 @@ class DialogOpenArchive(Toplevel):
                 # Greg Acsone reports [0] does not work for Corep 1.6 pkgs, need [1], old style packages
                 filenames = []
                 for _url, _type in self.packageContainedInstances: # check if selection was an inline instance
-                    if _type == epName:
-                        filenames.append(_url)
+                    if _type in selection:
+                        if _url in self.packageContainedIXDSes: # taxonomy package
+                            filenames.extend(self.packageContainedIXDSes[_url])
+                        else: # single instance
+                            filenames.append(_url)
                 if not filenames: # else if it's a named taxonomy entry point
                     for url in self.taxonomyPackage["entryPoints"][epName]:
                         filename = url[0]
