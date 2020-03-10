@@ -1,5 +1,7 @@
 FROM amazonlinux:2 as build
 
+ARG GIT_TAG
+
 WORKDIR /build/
 ADD . /build/
 
