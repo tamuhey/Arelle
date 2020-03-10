@@ -22,7 +22,7 @@ XMLdeclaration = re.compile(r"<\?xml[^><\?]*\?>", re.DOTALL)
 
 TAXONOMY_PACKAGE_FILE_NAMES = ('.taxonomyPackage.xml', 'catalog.xml') # pre-PWD packages
 
-def openFileSource(filename, cntlr=None, sourceZipStream=None, checkIfXmlIsEis=False, reloadCache=False):
+def openFileSource(filename, cntlr=None, sourceZipStream=None, checkIfXmlIsEis=False, reloadCache=False, base=None):
     if sourceZipStream:
         filesource = FileSource(POST_UPLOADED_ZIP, cntlr)
         filesource.openZipStream(sourceZipStream)
@@ -30,6 +30,8 @@ def openFileSource(filename, cntlr=None, sourceZipStream=None, checkIfXmlIsEis=F
             filesource.select(filename)
         return filesource
     else:
+        if cntlr and base:
+            filename = cntlr.webCache.normalizeUrl(filename, base=base)
         archivepathSelection = archiveFilenameParts(filename, checkIfXmlIsEis)
         if archivepathSelection is not None:
             archivepath = archivepathSelection[0]
@@ -334,7 +336,7 @@ class FileSource:
     @property
     def taxonomyPackageMetadataFiles(self):
         for f in (self.dir or []):
-            if f.endswith("/META-INF/taxonomyPackage.xml"):
+            if f.endswith("/META-INF/taxonomyPackage.xml"): # must be in a sub directory in the zip
                 return [f]  # standard package
         return [f for f in (self.dir or []) if os.path.split(f)[-1] in TAXONOMY_PACKAGE_FILE_NAMES]
     
@@ -489,6 +491,8 @@ class FileSource:
                 return fileResult
         if binary:
             return (openFileStream(self.cntlr, filepath, 'rb'), )
+        elif encoding:
+            return (openFileStream(self.cntlr, filepath, 'rt', encoding=encoding), )
         else:
             return openXmlFileStream(self.cntlr, filepath, stripDeclaration)
 
