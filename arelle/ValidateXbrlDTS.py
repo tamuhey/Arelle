@@ -30,17 +30,18 @@ link_loc_spec_sections = {"labelLink":"5.2.2.1",
                           "footnoteLink":"4.11.1.1"}
 standard_roles_for_ext_links = ("xbrl.3.5.3", (XbrlConst.defaultLinkRole,))
 standard_roles_definitions = {
-    "definitionLink": standard_roles_for_ext_links, 
-    "calculationLink": standard_roles_for_ext_links, 
-    "presentationLink": standard_roles_for_ext_links,
-    "labelLink": standard_roles_for_ext_links, 
-    "referenceLink": standard_roles_for_ext_links, 
-    "footnoteLink": standard_roles_for_ext_links,
-    "label": ("xbrl.5.2.2.2.2", XbrlConst.standardLabelRoles),
-    "reference": ("xbrl.5.2.3.2.1", XbrlConst.standardReferenceRoles),
-    "footnote": ("xbrl.4.11.1.2", (XbrlConst.footnote,)),
-    "linkbaseRef": ("xbrl.4.3.4", XbrlConst.standardLinkbaseRefRoles),
-    "loc": ("xbrl.3.5.3.7", ())
+    XbrlConst.qnLinkDefinitionLink: standard_roles_for_ext_links, 
+    XbrlConst.qnLinkCalculationLink: standard_roles_for_ext_links, 
+    XbrlConst.qnLinkPresentationLink: standard_roles_for_ext_links,
+    XbrlConst.qnLinkLabelLink: standard_roles_for_ext_links, 
+    XbrlConst.qnLinkReferenceLink: standard_roles_for_ext_links, 
+    XbrlConst.qnLinkFootnoteLink: standard_roles_for_ext_links,
+    XbrlConst.qnIXbrl11Relationship: standard_roles_for_ext_links, # has xlinkRole of footnoteLinks
+    XbrlConst.qnLinkLabel: ("xbrl.5.2.2.2.2", XbrlConst.standardLabelRoles),
+    XbrlConst.qnLinkReference: ("xbrl.5.2.3.2.1", XbrlConst.standardReferenceRoles),
+    XbrlConst.qnLinkFootnote: ("xbrl.4.11.1.2", (XbrlConst.footnote,)),
+    XbrlConst.qnLinkLinkbaseRef: ("xbrl.4.3.4", XbrlConst.standardLinkbaseRefRoles),
+    XbrlConst.qnLinkLoc: ("xbrl.3.5.3.7", ())
     }
 standard_roles_other = ("xbrl.5.1.3", ())
 
@@ -1259,8 +1260,8 @@ def checkLinkRole(val, elt, linkEltQname, xlinkRole, xlinkType, roleRefURIs):
                 _("Generic resource role %(xlinkRole)s is not absolute"),
                 modelObject=elt, xlinkRole=xlinkRole)
     elif XbrlConst.isStandardRole(xlinkRole):
-        if elt.namespaceURI == XbrlConst.link:
-            errCode, definedRoles = standard_roles_definitions.get(elt.localName, standard_roles_other)
+        if linkEltQname.namespaceURI == XbrlConst.link:
+            errCode, definedRoles = standard_roles_definitions.get(elt.qname, standard_roles_other)
             if xlinkRole not in definedRoles:
                 val.modelXbrl.error(errCode,
                     _("Standard role %(xlinkRole)s is not defined for %(element)s"),
@@ -1333,7 +1334,7 @@ def checkArcrole(val, elt, arcEltQname, arcrole, arcroleRefURIs):
     elif XbrlConst.isStandardArcElement(elt):
         if XbrlConst.standardArcroleArcElement(arcrole) != arcEltQname.localName:
             val.modelXbrl.error("xbrl.5.1.4.5:custArcroleUsedOn",
-                _("XBRL file {0} standard arcrole %(arcrole)s used on wrong arc %(element)s"),
+                _("Standard arcrole %(arcrole)s used on wrong arc %(element)s"),
                 modelObject=elt, element=arcEltQname, arcrole=arcrole)
 
 
