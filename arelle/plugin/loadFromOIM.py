@@ -26,24 +26,22 @@ from arelle.ModelObject import ModelObject
 from arelle.ModelValue import qname, dateTime, DATETIME, yearMonthDuration, dayTimeDuration
 from arelle.PrototypeInstanceObject import DimValuePrototype
 from arelle.PythonUtil import attrdict
-from arelle.UrlUtil import isHttpUrl, isAbsolute as isAbsoluteUri
+from arelle.UrlUtil import isHttpUrl, isAbsolute as isAbsoluteUri, relativeUrlPattern
 from arelle.XbrlConst import (qnLinkLabel, standardLabelRoles, qnLinkReference, standardReferenceRoles,
                               qnLinkPart, gen, link, defaultLinkRole, footnote, factFootnote, isStandardRole,
                               conceptLabel, elementLabel, conceptReference, all as hc_all, notAll as hc_notAll
                               )
 from arelle.XmlUtil import addChild, addQnameValue, copyIxFootnoteHtml, setXmlns
-from arelle.XmlValidate import integerPattern, NCNamePattern, validate as xmlValidate, VALID
+from arelle.XmlValidate import integerPattern, languagePattern, NCNamePattern, QNamePattern, validate as xmlValidate, VALID
 
-nsOim = "http://www.xbrl.org/CR/2018-12-12"
-nsOims = (nsOim,
+nsOims = ("http://www.xbrl.org/CR/2018-12-12",
           "http://www.xbrl.org/WGWD/YYYY-MM-DD",
-          "http://www.xbrl.org/PWD/2016-01-13/oim",
-          "http://www.xbrl.org/WGWD/YYYY-MM-DD/oim",
           "http://www.xbrl.org/CR/2019-06-12",
           "http://www.xbrl.org/((~status_date_uri~))"
          )
 nsOimCes = (
         "http://www.xbrl.org/WGWD/YYYY-MM-DD/oim-common/error",
+          "http://www.xbrl.org/((~status_date_uri~))/oim-common/error"
     )
 jsonDocumentTypes = (
         "http://www.xbrl.org/WGWD/YYYY-MM-DD/xbrl-json",
@@ -65,8 +63,15 @@ reservedLinkTypes = {
         "footnote":         "http://www.xbrl.org/2003/arcrole/fact-footnote",
         "explanatoryFact":  "http://www.xbrl.org/2009/arcrole/fact-explanatoryFact"
     }
+reservedLinkTypeAliases = {
+        "http://www.xbrl.org/2003/arcrole/fact-footnote": "footnote",
+        "http://www.xbrl.org/2009/arcrole/fact-explanatoryFact": "explanatoryFact"
+    }
 reservedLinkGroups = {
         "_":     "http://www.xbrl.org/2003/role/link"
+    }
+reservedLinkGroupAliases = {
+        "http://www.xbrl.org/2003/role/link": "_"
     }
 
 
@@ -80,26 +85,39 @@ XMLLANG = "{http://www.w3.org/XML/1998/namespace}lang"
 
 JSONdocumentType = "http://www.xbrl.org/WGWD/YYYY-MM-DD/xbrl-json"
 
-OIMReservedAliasURIs = {
+NSReservedAliasURIs = {
     "xbrl": nsOims,
-    "xsd": (XbrlConst.xsd,),
+    "xs": (XbrlConst.xsd,),
     "enum2": XbrlConst.enum2s,
     "oimce": nsOimCes,
     "xbrli": (XbrlConst.xbrli,),
-    "xsd": (XbrlConst.xsd,),
+    "xs": (XbrlConst.xsd,),
     "utr": (XbrlConst.utr,),
     "iso4217": (XbrlConst.iso4217,),
-    "xbrle": ("http://www.xbrl.org/WGWD/YYYY-MM-DD/error", ),
+    #"xbrle":  [ns + "/error" for ns in nsOims],
+    #"xbrlxe": [ns + "/xbrl-xml/error" for ns in nsOims]
+    }
+JSONNSReservedAliasURIs = {
     "xbrlje": [ns + "/xbrl-json/error" for ns in nsOims],
-    "xbrlce": [ns + "/xbrl-csv/error" for ns in nsOims]
     }
-OIMReservedAliasURIPrefixes = { # for starts-with checking
-    "dtr-type": "http://www.xbrl.org/dtr/type/", 
+CSVNSReservedAliasURIs = {
+    "xbrlce": [ns + "/xbrl-csv/error" for ns in nsOims],
     }
-OIMReservedURIAlias = dict(
-    (uri, alias)
-    for alias, uris in OIMReservedAliasURIs.items()
-    for uri in uris)
+NSReservedAliasURIPrefixes = { # for starts-with checking
+    # "dtr-type": "http://www.xbrl.org/dtr/type/", 
+    }
+NSReservedURIAlias = {}
+
+OIMReservedAliasURIs = {
+    "namespaces": NSReservedAliasURIs,
+    "linkTypes": reservedLinkTypes,
+    "linkGroups": reservedLinkGroups
+    }
+OIMReservedURIAlias = {
+    "namespaces": NSReservedURIAlias,
+    "linkTypes": reservedLinkTypeAliases,
+    "linkGroups": reservedLinkGroupAliases
+    }
 
 ENTITY_NA_QNAME = qname("https://xbrl.org/entities", "NA")
 EMPTY_DICT = {}
@@ -122,6 +140,11 @@ PrefixedQName = re.compile(
                  "[_A-Za-z\xC0-\xD6\xD8-\xF6\xF8-\xFF\u0100-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD]"
                   r"[_\-\." 
                   "\xB7A-Za-z0-9\xC0-\xD6\xD8-\xF6\xF8-\xFF\u0100-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\u0300-\u036F\u203F-\u2040]*")
+SQNamePattern = re.compile(
+                 "[_A-Za-z\xC0-\xD6\xD8-\xF6\xF8-\xFF\u0100-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD]"
+                  r"[_\-\." 
+                  "\xB7A-Za-z0-9\xC0-\xD6\xD8-\xF6\xF8-\xFF\u0100-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\u0300-\u036F\u203F-\u2040]*:"
+                 r"\S+")
 UnitPrefixedQNameSubstitutionChar = "\x07" # replaces PrefixedQName in unit pattern
 UnitPattern = re.compile(
                 # QNames are replaced by \x07 in these expressions
@@ -130,6 +153,11 @@ UnitPattern = re.compile(
                 # numerator and optional denominator, with parentheses if more than one term in either
                 "(^((\x07)|([(]\x07([*]\x07)+[)]))([/]((\x07)|([(]\x07([*]\x07)+[)])))?$)"
                 )
+UrlInvalidPattern = re.compile(
+                r"^[ \t\n\r]+[^ \t\n\r]*|.*[^ \t\n\r][ \t\n\r]+$|" # leading or trailing whitespace
+                r".*[^ \t\n\r]([\t\n\r]+|[ \t\n\r]{2,})[^ \t\n\r]|" # embedded uncollapsed whitespace
+                r".*%[^0-9a-fA-F]|.*%[0-9a-fA-F][^0-9a-fA-F]|.*#.*#" # invalid %nn or two ##s
+                )
 
 xlUnicodePattern = re.compile("_x([0-9A-F]{4})_")
 
@@ -137,6 +165,18 @@ precisionZeroPattern = re.compile(r"^\s*0+\s*$")
 
 htmlBodyTemplate = "<body xmlns='http://www.w3.org/1999/xhtml'>\n{0}\n</body>\n"
 xhtmlTagPrefix = "{http://www.w3.org/1999/xhtml}"
+
+class SQNameType:
+    pass # fake class for detecting SQName type in JSON structure check
+
+class QNameType:
+    pass # fake class for detecting QName type in JSON structure check
+
+class LangType:
+    pass
+
+class URIType:
+    pass
 
 UnrecognizedDocMemberTypes = {
     "/documentInfo": dict,
@@ -153,9 +193,10 @@ JsonMemberTypes = {
     "/documentInfo": dict,
     "/facts": dict,
     # documentInfo
+    "/documentInfo/baseURL": URIType,
     "/documentInfo/documentType": str,
     "/documentInfo/features": dict,
-    "/documentInfo/features/*": (int,bool,str,type(None)),
+    "/documentInfo/features/*:*": (int,bool,str,type(None)),
     "/documentInfo/namespaces": dict,
     "/documentInfo/namespaces/*": str,
     "/documentInfo/linkTypes": dict,
@@ -174,11 +215,11 @@ JsonMemberTypes = {
     "/facts/*/links/*/*": list,
     "/facts/*/links/*/*/": str,
     # dimensions
-    "/facts/*/dimensions/concept": str,
-    "/facts/*/dimensions/entity": str,
+    "/facts/*/dimensions/concept": QNameType,
+    "/facts/*/dimensions/entity": SQNameType,
     "/facts/*/dimensions/period": str,
     "/facts/*/dimensions/unit": str,
-    "/facts/*/dimensions/language": str,
+    "/facts/*/dimensions/language": LangType,
     "/facts/*/dimensions/noteId": str,
     "/facts/*/dimensions/*:*": (str,type(None)),
     }
@@ -511,11 +552,15 @@ def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
                     if key in ("namespaces", "linkTypes", "linkGroups"):
                         normalizedDict = OrderedDict()
                         normalizedValueKeyDict = {}
+                        if DUPJSONKEY in value:
+                            normalizedDict[DUPJSONKEY] = value[DUPJSONKEY]
+                        if DUPJSONVALUE in value:
+                            normalizedDict[DUPJSONVALUE] = value[DUPJSONVALUE]
                         for _key, _value in value.items():
                             if not isinstance(_value, str):
-                                continue
-                            _key = _key.strip()
-                            _value = _value.strip()
+                                continue # skip dup key/value entries
+                            # _key = _key.strip() # per !178 keys have only normalized values, don't normalize key
+                            # _value = _value.strip()
                             if _key in normalizedDict: # don't put the duplicate in the dictionary but report it as error
                                 if DUPJSONKEY not in normalizedDict:
                                     normalizedDict[DUPJSONKEY] = []
@@ -528,52 +573,37 @@ def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
                                     normalizedDict[DUPJSONVALUE].append((_value, _key, normalizedValueKeyDict[_value]))
                                 else:
                                     normalizedValueKeyDict[_value] = _key
-                            if key == "namespaces":
-                                if _key in OIMReservedAliasURIs and _value not in OIMReservedAliasURIs[_key]:
-                                    ldError("oimce:invalidURIForReservedAlias",
-                                                    _("The namespaces URI %(uri)s is used on standard alias %(alias)s which requires URI %(standardUri)s."),
-                                                    modelObject=modelXbrl, alias=_key, uri=_value, standardUri=OIMReservedAliasURIs[_key][0])
-                                elif _key in OIMReservedAliasURIPrefixes and not _value.startswith(OIMReservedAliasURIPrefixes[_key]):
-                                    ldError("oimce:invalidURIForReservedAlias",
-                                                    _("The namespaces URI %(uri)s is used on standard alias %(alias)s which requires a URI starting with %(standardUri)s."),
-                                                    modelObject=modelXbrl, alias=_key, uri=_value, standardUri=OIMReservedAliasURIPrefixes[_key])
-                                elif _value in OIMReservedURIAlias and _key != OIMReservedURIAlias[_value]:
-                                    ldError("oimce:invalidAliasForReservedURI",
-                                                    _("The namespaces URI %(uri)s is bound to alias %(key)s instead of standard alias %(alias)s."),
-                                                    modelObject=modelXbrl, key=_key, uri=_value, alias=OIMReservedURIAlias[_value])
-                                else:
-                                    for k,p in OIMReservedAliasURIPrefixes.items():
-                                        if _value.startswith(p) and _key != k:
-                                            ldError("oimce:invalidAliasForReservedURI",
-                                                            _("The namespaces URI %(uri)s is bound to alias %(key)s instead of standard alias %(alias)s."),
-                                                            modelObject=modelXbrl, key=_key, uri=_value, alias=k)
                             if not NCNamePattern.match(_key):
-                                error("oimce:invalidURIAlias",
-                                      _("The %(map)s alias %(alias)s must match the NCName lexical pattern"),
+                                ldError("{}:invalidJSONStructure",
+                                      _("The %(map)s alias \"%(alias)s\" must be a canonical NCName value"),
                                       modelObject=modelXbrl, map=key, alias=_key)
-                            if not (_value and isAbsoluteUri(_value)):
+                            if UrlInvalidPattern.match(_value):
+                                ldError("{}:invalidJSONStructure",
+                                      _("The %(map)s alias \"%(alias)s\" URI must be a canonical URI value: \"%(URI)s\"."),
+                                      modelObject=modelXbrl, map=key, alias=_key, URI=_value)
+                            elif not (_value and isAbsoluteUri(_value)) or UrlInvalidPattern.match(_value):
                                 ldError("oimce:invalidURI",
-                                        _("The %(map)s %(alias)s URL is invalid: %(URL)s."),
-                                        modelObject=modelXbrl, map=key, alias=_key, URL=_value)
+                                        _("The %(map)s \"%(alias)s\" URI is invalid: \"%(URI)s\"."),
+                                        modelObject=modelXbrl, map=key, alias=_key, URI=_value)
                         value.clear() # replace with normalized values
                         for _key, _value in normalizedDict.items():
                             value[_key] = _value
                     if DUPJSONKEY in value:
                         for _errKey, _errValue, _otherValue in value[DUPJSONKEY]:
                             if key in ("namespaces", "linkTypes", "linkGroups"):
-                                ldError("{}:multipleURIsForAlias", 
-                                                _("The %(map)s alias %(prefix)s is used on uri %(uri1)s and uri %(uri2)s."),
+                                ldError("{}:invalidJSON", # {} expanded when loadDictErrors are processed
+                                                _("The %(map)s alias \"%(prefix)s\" is used on uri \"%(uri1)s\" and uri \"\"%(uri2)s."),
                                                 modelObject=modelXbrl, map=key, prefix=_errKey, uri1=_errValue, uri2=_otherValue)
                             else:
-                                ldError("{}:invalidJSONStructure",
-                                                _("The %(obj)s key %(key)s is used on multiple objects."),
+                                ldError("{}:invalidJSON", # {} expanded when loadDictErrors are processed
+                                                _("The %(obj)s key \"%(key)s\" is used on multiple objects."),
                                                 modelObject=modelXbrl, obj=key, key=_errKey)
                         del value[DUPJSONKEY]
                     if DUPJSONVALUE in value:
                         if key in ("namespaces", "linkTypes", "linkGroups"):
                             for _errValue, _errKey, _otherKey in value[DUPJSONVALUE]:
                                 ldError("oimce:multipleAliasesForURI",
-                                                _("The %(map)s value %(uri)s is used on alias %(alias1)s and alias %(alias2)s."),
+                                                _("The \"%(map)s\" value \"%(uri)s\" is used on alias \"%(alias1)s\" and alias \"%(alias2)s\"."),
                                                 modelObject=modelXbrl, map=key, uri=_errValue, alias1=_errKey, alias2=_otherKey)
                         del value[DUPJSONVALUE]
                 if key in _dict: # don't put the duplicate in the dictionary but report it as error
@@ -632,13 +662,13 @@ def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
                           _("File MUST use utf-8 encoding: %(file)s, error %(error)s"),
                           file=filepath, error=str(ex))
                 except json.JSONDecodeError as ex:
-                    raise OIMException("oimce:unsupportedDocumentType".format(errPrefix),
+                    raise OIMException("{}:invalidJSON".format(errPrefix),
                             "JSON error while %(action)s, %(file)s, error %(error)s",
                             file=filepath, action=currentAction, error=ex)
                 # check for top-level key duplicates
                 if isinstance(oimObject, dict) and DUPJSONKEY in oimObject:
                     for _errKey, _errValue, _otherValue in oimObject[DUPJSONKEY]:
-                        error("{}:invalidJSONStructure".format(errPrefix),
+                        error("{}:invalidJSON".format(errPrefix),
                               _("The key %(key)s is used on multiple objects"),
                               modelObject=modelXbrl, key=_errKey)
                     del oimObject[DUPJSONKEY]
@@ -666,12 +696,13 @@ def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
                           _("File MUST use utf-8 encoding: %(file)s \"metadata\" worksheet, error %(error)s"),
                           file=filepath, error=str(ex))
                 except json.JSONDecodeError as ex:
-                    raise OIMException("oimce:unsupportedDocumentType",
+                    raise OIMException("{}:invalidJSON".format(errPrefix),
                             "JSON error while %(action)s, %(file)s \"metadata\" worksheet, error %(error)s",
                             file=filepath, action=currentAction, error=ex)
             # identify document type (JSON or CSV)
             documentInfo = jsonGet(oimObject, "documentInfo", {})
             documentType = jsonGet(documentInfo, "documentType")
+            documentBase = jsonGet(documentInfo, "baseURL")
             if documentType in jsonDocumentTypes:
                 isCSV = False
                 isJSON = True
@@ -707,10 +738,16 @@ def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
                     for mbrName, mbrObj in obj.items():
                         mbrPath = path + mbrName
                         if mbrPath in oimMemberTypes:
-                            if not isinstance(mbrObj, oimMemberTypes[mbrPath]):
+                            mbrTypes = oimMemberTypes[mbrPath]
+                            if (not ((mbrTypes is QNameType or (isinstance(mbrTypes,tuple) and QNameType in mbrTypes)) and QNamePattern.match(mbrObj)) and
+                                not ((mbrTypes is SQNameType or (isinstance(mbrTypes,tuple) and SQNameType in mbrTypes)) and SQNamePattern.match(mbrObj)) and
+                                not ((mbrTypes is LangType or (isinstance(mbrTypes,tuple) and LangType in mbrTypes)) and languagePattern.match(mbrObj)) and
+                                not ((mbrTypes is URIType or (isinstance(mbrTypes,tuple) and URIType in mbrTypes)) and relativeUrlPattern.match(mbrObj)) and
+                                not isinstance(mbrObj, mbrTypes)):
                                 invalidMemberTypes.append(mbrPath)
                         elif ":" in mbrName and path + "*:*" in oimMemberTypes:
-                            if not isinstance(mbrObj, oimMemberTypes[path + "*:*"]):
+                            if not (QNamePattern.match(mbrName) and
+                                    isinstance(mbrObj, oimMemberTypes[path + "*:*"])):
                                 invalidMemberTypes.append(mbrPath)
                             mbrPath = path + "*.*" # for recursion
                         elif path + "*" in oimMemberTypes:
@@ -850,27 +887,29 @@ def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
                 if  len(modelXbrl.errors) > numErrorsBeforeJsonCheck:
                     raise OIMException()
     
-                oimObject["=entryParameters"] = (isJSON, isCSV, isXL, isCSVorXL, oimWb, documentInfo, documentType)
+                oimObject["=entryParameters"] = (isJSON, isCSV, isXL, isCSVorXL, oimWb, documentInfo, documentType, documentBase)
                 
             return oimObject
         
         errorIndexBeforeLoadOim = len(modelXbrl.errors)
         oimObject = loadOimObject(oimFile, None)
-        isJSON, isCSV, isXL, isCSVorXL, oimWb, oimDocumentInfo, documentType = oimObject["=entryParameters"]
+        isJSON, isCSV, isXL, isCSVorXL, oimWb, oimDocumentInfo, documentType, documentBase = oimObject["=entryParameters"]
         del oimObject["=entryParameters"]
         
         currentAction = "identifying Metadata objects"
         taxonomyRefs = oimDocumentInfo.get("taxonomy", EMPTY_LIST)
         namespaces = oimDocumentInfo.get("namespaces", EMPTY_DICT)
         linkTypes = oimDocumentInfo.get("linkTypes", EMPTY_DICT)
-        linkGroups = oimDocumentInfo.get("linkGroups",EMPTY_DICT)
-        featuresDict = oimDocumentInfo["features"]
+        linkGroups = oimDocumentInfo.get("linkGroups", EMPTY_DICT)
+        featuresDict = oimDocumentInfo.get("features", EMPTY_DICT)
         if isJSON:
             errPrefix = "xbrlje"
+            NSReservedAliasURIs.update(JSONNSReservedAliasURIs)
             factItems = oimObject.get("facts",{}).items()
             footnotes = oimObject.get("facts",{}).values() # shares this object
         else: # isCSVorXL
             errPrefix = "xbrlce"
+            NSReservedAliasURIs.update(CSVNSReservedAliasURIs)
             reportDimensions = oimObject.get("dimensions", EMPTY_DICT)
             reportDecimals = oimObject.get("decimals", None)
             reportParameters = oimObject.get("parameters", {}) # fresh empty dict because csv-loaded parameters get added
@@ -890,18 +929,27 @@ def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
         # check features
         for featureSQName, isActive in featuresDict.items():
             featurePrefix = featureSQName.partition(":")[0]
-            if not NCNamePattern.match(featurePrefix):
-                error("oimce:invalidURIAlias",
-                                _("The prefix of feature %(feature)s must match the NCName lexical pattern"),
-                                modelObject=modelXbrl, feature=featureSQName)
-                continue
-            elif featurePrefix not in namespaces:
+            if featurePrefix not in namespaces:
                 error("oimce:unboundPrefix",
                       _("The feature QName prefix was not defined in namespaces: %(feature)s."),
                       modelObject=modelXbrl, feature=featureSQName)
                 continue
-            
 
+        # check maps
+        for alias, uris in NSReservedAliasURIs.items():
+            for uri in uris:
+                NSReservedURIAlias[uri] = alias
+                
+        for map in ("namespaces", "linkTypes", "linkGroups"):
+            for key, value in oimDocumentInfo.get(map, EMPTY_DICT).items():
+                if key in OIMReservedAliasURIs[map] and value not in OIMReservedAliasURIs[map][key]:
+                    error("oimce:invalidURIForReservedAlias",
+                          _("The %(map)s URI \"%(uri)s\" is used on standard alias \"%(alias)s\" which requires URI \"%(standardUri)s\"."),
+                          modelObject=modelXbrl, map=map, alias=key, uri=value, standardUri=OIMReservedAliasURIs[map][key][0])
+                elif value in OIMReservedURIAlias[map] and key != OIMReservedURIAlias[map][value]:
+                    error("oimce:invalidAliasForReservedURI",
+                          _("The %(map)s URI \"%(uri)s\" is bound to alias \"%(key)s\" instead of standard alias \"%(alias)s\"."),
+                          modelObject=modelXbrl, map=key, key=key, uri=value, alias=OIMReservedURIAlias[map][value])
                 
         if isCSVorXL:
             currentAction = "loading CSV facts tables"
@@ -1298,7 +1346,8 @@ def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
                   schemaRefs=taxonomyRefs,
                   isEntry=True,
                   initialComment="extracted from OIM {}".format(mappedUri),
-                  documentEncoding="utf-8")
+                  documentEncoding="utf-8",
+                  base=documentBase)
             modelXbrl.modelDocument.inDTS = True
         else: # API implementation
             modelXbrl = ModelXbrl.create(
@@ -1307,7 +1356,8 @@ def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
                 instanceFileName, 
                 schemaRefs=taxonomyRefs, 
                 isEntry=True, 
-                initialComment="extracted from OIM {}".format(mappedUri))
+                initialComment="extracted from OIM {}".format(mappedUri),
+                base=documentBase)
             _return = modelXbrl.modelDocument
         
         firstCntxUnitFactElt = None
@@ -1380,12 +1430,7 @@ def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
                 error("xbrle:misplacedNoteIDDimension",
                       _("Unexpected noteId dimension on non-footnote fact, id %(id)s"),
                       modelObject=modelXbrl, id=id, noteId=dimensions["noteId"])
-            if not NCNamePattern.match(conceptPrefix):
-                error("oimce:invalidURIAlias",
-                                _("The prefix of concept %(concept)s must match the NCName lexical pattern"),
-                                modelObject=modelXbrl, concept=conceptSQName)
-                continue
-            elif conceptPrefix not in namespaces:
+            if conceptPrefix not in namespaces:
                 error("oimce:unboundPrefix",
                       _("The concept QName prefix was not defined in namespaces: %(concept)s."),
                       modelObject=modelXbrl, concept=conceptSQName)
@@ -1415,11 +1460,7 @@ def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
                 entitySQName = dimensions.get("entity")
                 if entitySQName is not None:
                     entityPrefix = entitySQName.partition(":")[0]
-                    if not NCNamePattern.match(entityPrefix):
-                        error("oimce:invalidURIAlias",
-                                        _("The prefix of entity %(entity)s must match the NCName lexical pattern"),
-                                        modelObject=modelXbrl, entity=entitySQName)
-                    elif entityPrefix not in namespaces:
+                    if entityPrefix not in namespaces:
                         error("oimce:unboundPrefix",
                               _("The entity QName prefix was not defined in namespaces: %(entity)s."),
                               modelObject=modelXbrl, entity=entitySQName)
@@ -1461,7 +1502,7 @@ def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
                           _("Missing period for %(periodType)s fact %(factId)s."),
                           modelObject=modelXbrl, factId=id, periodType=concept.periodType, period=period)
                     continue # skip creating fact because context would be bad
-                elif ((concept.periodType == "duration" and (_periodType != "forever" or _start == _end)) or
+                elif ((concept.periodType == "duration" and (_periodType != "forever" and (not _start or _start == _end))) or
                       (concept.periodType == "instant" and _start and _start != _end)):
                     error("xbrle:invalidPeriodDimension",
                           _("Invalid period for %(periodType)s fact %(factId)s period %(period)s."),
@@ -1608,6 +1649,26 @@ def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
                         continue
                     attrs[XbrlConst.qnXsiNil] = "true"
                     text = None
+                elif concept.isEnumeration2Item:
+                    qnames = fact["value"].split(" ")
+                    expandedNames = set()
+                    isFactValid = True
+                    for qn in qnames:
+                        if not PrefixedQName.match(qn):
+                            isFactValid = False
+                        else:
+                            _qname = qname(qn, namespaces)
+                            if not _qname:
+                                isFactValid = False
+                            else:
+                                expandedNames.add(_qname.expandedName)
+                    if isFactValid:
+                        text = " ".join(sorted(expandedNames))
+                    else:
+                        error("xbrle:invalidFactValue",
+                              _("Enumeration item must be list of QNames: %(concept)s."),
+                              modelObject=modelXbrl, concept=conceptSQName)
+                        continue
                 else:
                     text = fact["value"]
                     
@@ -1657,11 +1718,26 @@ def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
         currentAction = "creating footnotes"
         footnoteLinks = OrderedDict() # ELR elements
         factLocs = {} # index by (linkrole, factId)
-        footnoteNbr = 0
+        footnoteLinkNotes = defaultdict(set) # linkrole: noteIds
+        # footnoteNbr = 0
         locNbr = 0
         definedInstanceRoles = set()
         undefinedFootnoteTypes = set()
         undefinedFootnoteGroups = set()
+        footnotesIdTargets = set()
+        for factOrFootnote in footnotes:
+            if isJSON:
+                for ftGroups in factOrFootnote.get("links", {}).values():
+                    for ftTgtIds in ftGroups.values():
+                        for tgtId in ftTgtIds:
+                            if tgtId in xbrlNoteTbl:
+                                footnotesIdTargets.add(tgtId)
+            elif isCSVorXL: # footnotes contains footnote objects
+                for ftGroups in factOrFootnote.values():
+                    for ftSrcIdTgtIds in ftGroups.values():
+                        for ftTgtIds in ftSrcIdTgtIds.values():
+                            for tgtId in ftTgtIds:
+                                footnotesIdTargets.add(tgtId)
         for factOrFootnote in footnotes:
             if isJSON:
                 factFootnotes = []
@@ -1700,10 +1776,10 @@ def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
                                         footnote.setdefault("noteRefs" if tgtId in xbrlNoteTbl else "factRefs", []).append(tgtId)
                                     factFootnotes.append(footnote)
             for footnote in factFootnotes:
-                factIDs = (footnote["id"], )
+                factId = footnote["id"]
                 linkrole = footnote["footnoteGroup"]
                 arcrole = footnote["footnoteType"]
-                if not factIDs or not linkrole or not arcrole or not (
+                if not factId or not linkrole or not arcrole or not (
                     footnote.get("factRefs") or footnote.get("footnote") is not None or footnote.get("noteRefs") is not None):
                     if not linkrole:
                         warning("xbrlje:unknownLinkGroup",
@@ -1741,43 +1817,53 @@ def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
                                                        attributes={"{http://www.w3.org/1999/xlink}type": "extended",
                                                                    "{http://www.w3.org/1999/xlink}role": linkrole})
                 footnoteLink = footnoteLinks[linkrole]
-                if (linkrole, factIDs) not in factLocs:
+                factIDs = (factId,)
+                if factId in xbrlNoteTbl: # factId is a note, not a fact
+                    fromLabel = "f_{}".format(factId)
+                    factLocs[(linkrole, factIDs)] = fromLabel
+                elif (linkrole, factIDs) not in factLocs:
                     locNbr += 1
                     locLabel = "l_{:02}".format(locNbr)
                     factLocs[(linkrole, factIDs)] = locLabel
-                    for factId in factIDs:
-                        addChild(footnoteLink, XbrlConst.qnLinkLoc, 
-                                 attributes={XLINKTYPE: "locator",
-                                             XLINKHREF: "#" + factId,
-                                             XLINKLABEL: locLabel})
+                    addChild(footnoteLink, XbrlConst.qnLinkLoc, 
+                             attributes={XLINKTYPE: "locator",
+                                         XLINKHREF: "#" + factId,
+                                         XLINKLABEL: locLabel})
                 locFromLabel = factLocs[(linkrole, factIDs)]
                 if "noteRefs" in footnote:
-                    footnoteNbr += 1
-                    footnoteToLabel = "f_{:02}".format(footnoteNbr)
+                    # footnoteNbr += 1
+                    # footnoteToLabel = "f_{:02}".format(footnoteNbr)
                     for noteId in footnote.get("noteRefs"):
+                        footnoteToLabel = "f_{}".format(noteId)
                         noteFactIDsNotReferenced.discard(noteId)
-                        xbrlNote = xbrlNoteTbl[noteId]
-                        attrs = {XLINKTYPE: "resource",
-                                 XLINKLABEL: footnoteToLabel}
-                        try:
-                            if "dimensions" in xbrlNote:
-                                attrs[XMLLANG] = xbrlNote["dimensions"]["language"]
-                            elif "aspects" in xbrlNote:
-                                attrs[XMLLANG] = xbrlNote["aspects"]["language"]
-                        except KeyError:
-                            pass
-                        tgtElt = addChild(footnoteLink, XbrlConst.qnLinkFootnote, attributes=attrs)
-                        srcElt = etree.fromstring("<footnote xmlns=\"http://www.w3.org/1999/xhtml\">{}</footnote>"
-                                                  .format(xbrlNote["value"]), parser=modelXbrl.modelDocument.parser)
-                        if srcElt.__len__() > 0: # has html children
-                            setXmlns(modelXbrl.modelDocument, "xhtml", "http://www.w3.org/1999/xhtml")
-                        copyIxFootnoteHtml(srcElt, tgtElt, withText=True, isContinChainElt=False)
-                    footnoteArc = addChild(footnoteLink, 
-                                           XbrlConst.qnLinkFootnoteArc, 
-                                           attributes={XLINKTYPE: "arc",
-                                                       XLINKARCROLE: arcrole,
-                                                       XLINKFROM: locFromLabel,
-                                                       XLINKTO: footnoteToLabel})
+                        if noteId not in footnoteLinkNotes[linkrole]:
+                            footnoteLinkNotes[linkrole].add(noteId)
+                            xbrlNote = xbrlNoteTbl[noteId]
+                            attrs = {XLINKTYPE: "resource",
+                                     XLINKLABEL: footnoteToLabel,
+                                     # "id": noteId --> causes duplicate id's in v-70, why is this needed?
+                                     }
+                            #if noteId in footnotesIdTargets: # footnote resource is target of another footnote loc
+                            #    attrs["id"] = noteId
+                            try:
+                                if "dimensions" in xbrlNote:
+                                    attrs[XMLLANG] = xbrlNote["dimensions"]["language"]
+                                elif "aspects" in xbrlNote:
+                                    attrs[XMLLANG] = xbrlNote["aspects"]["language"]
+                            except KeyError:
+                                pass
+                            tgtElt = addChild(footnoteLink, XbrlConst.qnLinkFootnote, attributes=attrs)
+                            srcElt = etree.fromstring("<footnote xmlns=\"http://www.w3.org/1999/xhtml\">{}</footnote>"
+                                                      .format(xbrlNote["value"]), parser=modelXbrl.modelDocument.parser)
+                            if srcElt.__len__() > 0: # has html children
+                                setXmlns(modelXbrl.modelDocument, "xhtml", "http://www.w3.org/1999/xhtml")
+                            copyIxFootnoteHtml(srcElt, tgtElt, withText=True, isContinChainElt=False)
+                        footnoteArc = addChild(footnoteLink, 
+                                               XbrlConst.qnLinkFootnoteArc, 
+                                               attributes={XLINKTYPE: "arc",
+                                                           XLINKARCROLE: arcrole,
+                                                           XLINKFROM: locFromLabel,
+                                                           XLINKTO: footnoteToLabel})
                 if "factRefs" in footnote:
                     factRef = footnote.get("factRefs")
                     fact2IDs = tuple(sorted(factRef))
@@ -1800,7 +1886,7 @@ def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
                     if arcrole == factFootnote:
                         error("xbrle:illegalStandardFootnoteTarget",
                               _("Standard footnote %(sourceId)s targets must be an xbrl:note, targets %(targetIds)s."),
-                              modelObject=modelXbrl, sourceId=", ".join(factIDs), targetIds=", ".join(fact2IDs))
+                              modelObject=modelXbrl, sourceId=factId, targetIds=", ".join(fact2IDs))
         if noteFactIDsNotReferenced:
             error("xbrle:unusedNoteFact",
                     _("Note facts MUST be referenced by at least one link group, IDs: %(noteFactIds)s."),
@@ -2039,12 +2125,13 @@ def validateFinally(val, *args, **kwargs):
                             _("Instance MUST NOT contain xml:base attributes: element %(qname)s, xml:base %(base)s"),
                             modelObject=elt, qname=elt.qname if isinstance(elt, ModelObject) else elt.tag, 
                             base=elt.get("{http://www.w3.org/XML/1998/namespace}base"))
-        # todo: multi-document inline instances   
-        for doc in modelXbrl.modelDocument.referencesDocument.keys():
-            if doc.type == Type.LINKBASE:
-                val.modelXbrl.error("xbrlxe:unsupportedLinkbaseReference",
-                                    _("Linkbase reference not allowed from instqnce document."),
-                                    modelObject=(modelXbrl.modelDocument,doc))
+        # todo: multi-document inline instances 
+        if modelXbrl.modelDocument.type in (ModelDocument.Type.INSTANCE, ModelDocument.Type.INLINEXBRL, ModelDocument.Type.INLINEXBRLDOCUMENTSET):
+            for doc in modelXbrl.modelDocument.referencesDocument.keys():
+                if doc.type == Type.LINKBASE:
+                    val.modelXbrl.error("xbrlxe:unsupportedLinkbaseReference",
+                                        _("Linkbase reference not allowed from instance document."),
+                                        modelObject=(modelXbrl.modelDocument,doc))
 
 def excelLoaderOptionExtender(parser, *args, **kwargs):
     parser.add_option("--saveOIMinstance", 

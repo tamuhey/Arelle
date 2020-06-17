@@ -92,7 +92,7 @@ class CntlrWinMain (Cntlr.Cntlr):
             #label = Label(None, image=image)
             #parent.iconwindow(label)
         else:
-            self.iconImage = PhotoImage(file=imgpath + "arelle.gif") # must keep reference during life of window
+            self.iconImage = PhotoImage(file=imgpath + "arelle-mac-icon-4.gif") # must keep reference during life of window
             parent.tk.call('wm', 'iconphoto', parent._w, self.iconImage)
             #parent.iconbitmap("@" + imgpath + "arelle.xbm")
             # try with gif file
@@ -890,7 +890,7 @@ class CntlrWinMain (Cntlr.Cntlr):
                 hasView = ViewWinRelationshipSet.viewRelationshipSet(modelXbrl, self.tabWinTopRt, "XBRL-dimensions", lang=self.labelLang)
                 if hasView and topView is None: topView = modelXbrl.views[-1]
                 currentAction = "anchoring relationships view"
-                hasView = ViewWinRelationshipSet.viewRelationshipSet(modelXbrl, self.tabWinTopRt, XbrlConst.widerNarrower, lang=self.labelLang)
+                hasView = ViewWinRelationshipSet.viewRelationshipSet(modelXbrl, self.tabWinTopRt, XbrlConst.widerNarrower, lang=self.labelLang, noRelationshipsMsg=False)
                 if hasView and topView is None: topView = modelXbrl.views[-1]
                 if modelXbrl.hasTableRendering:
                     currentAction = "rendering view"

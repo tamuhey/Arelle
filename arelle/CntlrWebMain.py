@@ -182,6 +182,8 @@ validationOptions = {
     "efm": ("validateEFM", True),
     "efm-pragmatic": ("disclosureSystemName", "efm-pragmatic"),
     "efm-strict": ("disclosureSystemName", "efm-strict"),
+    "efm-all-years": ("disclosureSystemName", "efm-all-years"),
+    "esef": ("disclosureSystemName", "esef"),
     "disclosure-system": ("disclosureSystemName", None),
     "ifrs": ("gfmName", "ifrs"),
     "hmrc": ("gfmName", "hmrc"),
@@ -241,7 +243,7 @@ def validation(file=None):
     if isValidation:
         if view or viewArcrole:
             errors.append(_("Only validation or one view can be specified in one requested."))
-        if media not in ('xml', 'xhtml', 'html', 'json', 'text') and not (sourceZipStream and media == 'zip'):
+        if media not in ('xml', 'xhtml', 'html', 'json', 'text', 'zip') and not (sourceZipStream and media == 'zip'):
             errors.append(_("Media '{0}' is not supported for validation (please select xhtml, html, xml, json or text)").format(media))
     elif view or viewArcrole:
         if media not in ('xml', 'xhtml', 'html', 'csv', 'xlsx', 'json'):
