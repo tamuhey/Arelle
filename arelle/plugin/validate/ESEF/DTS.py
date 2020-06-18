@@ -36,7 +36,7 @@ def checkFilingDTS(val, modelDocument, visited):
 
         for doc, docRef in modelDocument.referencesDocument.items():
             if docRef.referenceType in ("import","include") and disallowedURIsPattern.match(doc.uri):
-                val.modelXbrl.error("ESEF.3.1.1.extensionImportNotAllowed",
+                val.modelXbrl.warning("ESEF.3.1.1.extensionImportNotAllowed",
                                     _("Taxonomy reference not allowed for extension schema: %(taxonomy)s"),
                                     modelObject=modelDocument, taxonomy=doc.uri)
         
@@ -70,7 +70,7 @@ def checkFilingDTS(val, modelDocument, visited):
                         typedDimsInExtTxmy.append(modelConcept)
                     if modelConcept.isExplicitDimension and not dimensionDefaults.fromModelObject(modelConcept):
                         val.modelXbrl.error("ESEF.3.4.3.extensionTaxonomyDimensionNotAssigedDefaultMemberInDedicatedPlaceholder",
-                            _("Each dimension in an issuer specific extension taxonomy MUST be assigned to a default member in the ELR with role URI http://www.esma.europa.eu/xbrl/role/ifrs-dim_role-990000 defined in esef_cor.xsd schema file. %(qname)s"),
+                            _("Each dimension in an issuer specific extension taxonomy MUST be assigned to a default member in the ELR with role URI http://www.esma.europa.eu/xbrl/role/core/ifrs-dim_role-990000 defined in esef_cor.xsd schema file. %(qname)s"),
                             modelObject=modelConcept, qname=modelConcept.qname)
                     if modelConcept.isDomainMember and modelConcept in val.domainMembers and modelConcept.typeQname != qnDomainItemType:
                         domainMembersWrongType.append(modelConcept)
@@ -136,7 +136,7 @@ def checkFilingDTS(val, modelDocument, visited):
                 if (isinstance(modelType,ModelType) and isExtension(val, modelType) and 
                     modelType.typeDerivedFrom is not None and modelType.typeDerivedFrom.qname.namespaceURI == xbrli and
                     not modelType.particlesList):
-                    val.modelXbrl.warning("ESEF.RTS.Annex.IV.Par.11.customDataTypeDuplicatingXbrlOrDtrEntry",
+                    val.modelXbrl.error("ESEF.RTS.Annex.IV.Par.11.customDataTypeDuplicatingXbrlOrDtrEntry",
                         _("Extension taxonomy element must not define a type where one is already defined by the XBRL specifications or in the XBRL Data Types Registry: %(qname)s"),
                         modelObject=modelType, qname=modelType.qname)
         if tuplesInExtTxmy:
@@ -185,7 +185,7 @@ def checkFilingDTS(val, modelDocument, visited):
                                     for e in modelDocument.xmlRootElement.iterdescendants(tag="{http://www.xbrl.org/2003/linkbase}linkbase")
                                     if isinstance(e,ModelObject)]
         if embeddedLinkbaseElements:
-                val.modelXbrl.error("ESEF.3.1.1.linkbasesNotSeparateFiles",
+                val.modelXbrl.warning("ESEF.3.1.1.linkbasesNotSeparateFiles",
                     _("Each linkbase type SHOULD be provided in a separate linkbase file, but a linkbase was found in %(schema)s."),
                     modelObject=embeddedLinkbaseElements, schema=modelDocument.basename)
 
@@ -261,7 +261,7 @@ def checkFilingDTS(val, modelDocument, visited):
             if (prohibitingArcElt.get("use") == "prohibited" and 
                 prohibitingArcElt.get("{http://www.w3.org/1999/xlink}arcrole")  == XbrlConst.dimensionDefault):
                 val.modelXbrl.error("ESEF.3.4.3.extensionTaxonomyOverridesDefaultMembers",
-                    _("The extension taxonomy MUST not modify (prohibit and/or override) default members assigned to dimensions by the ESEF taxonomy."),
+                    _("The extension taxonomy MUST not prohibit default members assigned to dimensions by the ESEF taxonomy."),
                     modelObject=modelDocument.xmlRootElement, linkbasesFound=", ".join(sorted(linkbasesFound)))
                 
         

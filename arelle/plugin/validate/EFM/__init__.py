@@ -245,7 +245,8 @@ def validateXbrlDtsDocument(val, modelDocument, isFilingDocument, *args, **kwarg
 def filingStart(cntlr, options, filesource, entrypointFiles, sourceZipStream=None, responseZipStream=None, *args, **kwargs):
     modelManager = cntlr.modelManager
     # cntlr.addToLog("TRACE EFM filing start val={} plugin={}".format(modelManager.validateDisclosureSystem, getattr(modelManager.disclosureSystem, "EFMplugin", False)))
-    if modelManager.validateDisclosureSystem and getattr(modelManager.disclosureSystem, "EFMplugin", False):
+    if modelManager.validateDisclosureSystem and (getattr(modelManager.disclosureSystem, "EFMplugin", False) or
+                                                  getattr(modelManager.disclosureSystem, "ESEFplugin", False)):
         # cntlr.addToLog("TRACE EFM filing start 2 classes={} moduleInfos={}".format(pluginMethodsForClasses, modulePluginInfos))
         modelManager.efmFiling = Filing(cntlr, options, filesource, entrypointFiles, sourceZipStream, responseZipStream)
         # this event is called for filings (of instances) as well as test cases, for test case it just keeps options accessible
@@ -666,7 +667,7 @@ class Report:
 __pluginInfo__ = {
     # Do not use _( ) in pluginInfo itself (it is applied later, after loading
     'name': 'Validate EFM',
-    'version': '1.20.1.1', # SEC EDGAR release 20.1.1
+    'version': '1.20.2', # SEC EDGAR release 20.2
     'description': '''EFM Validation.''',
     'license': 'Apache-2',
     'import': ('transforms/SEC',), # SEC inline can use SEC transformations

@@ -38,7 +38,7 @@ from .Consts import submissionTypesAllowingWellKnownSeasonedIssuer, \
                     submissionTypesAllowingVoluntaryFilerFlag, docTypesNotAllowingInlineXBRL, \
                     docTypesRequiringRrSchema, docTypesNotAllowingIfrs, \
                     untransformableTypes, rrUntransformableEltsPattern, \
-                    docTypes20F
+                    docTypes20F, ifrsUsgaapConflictClasses, ifrsSrtConflictClasses
                                         
 from .Dimensions import checkFilingDimensions
 from .PreCalAlignment import checkCalcsTreeWalk
@@ -773,10 +773,10 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
 
         #6.5.12 equivalent facts
         factsForLang = {}
-        factForConceptContextUnitLangHash = defaultdict(list)
+        factForConceptContextUnitHash = defaultdict(list)
         keysNotDefaultLang = {}
         for f1 in modelXbrl.facts:
-            if f1.context is not None and f1.concept is not None:
+            if f1.context is not None and f1.concept is not None and f1.concept.type is not None:
                 # build keys table for 6.5.14
                 if not f1.isNil:
                     langTestKey = "{0},{1},{2}".format(f1.qname, f1.contextID, f1.unitID)
@@ -803,13 +803,14 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                                 edgarCode="du-0537-Nonzero-Digits-Truncated",
                                 modelObject=f1, fact=f1.qname, contextID=f1.contextID, decimals=f1.decimals, value=f1.value)
                 # 6.5.12 test
-                factForConceptContextUnitLangHash[f1.conceptContextUnitLangHash].append(f1)
+                factForConceptContextUnitHash[f1.conceptContextUnitHash].append(f1)
         # 6.5.12 test
         aspectEqualFacts = defaultdict(list)
-        for hashEquivalentFacts in factForConceptContextUnitLangHash.values():
+        for hashEquivalentFacts in factForConceptContextUnitHash.values():
             if len(hashEquivalentFacts) > 1:
                 for f in hashEquivalentFacts:
-                    aspectEqualFacts[(f.qname,f.contextID,f.unitID,f.xmlLang)].append(f)
+                    aspectEqualFacts[(f.qname,f.contextID,f.unitID,
+                                      f.xmlLang if f.concept.type.isWgnStringFactType else None)].append(f)
                 for fList in aspectEqualFacts.values():
                     f0 = fList[0]
                     if f0.concept.isNumeric:
@@ -834,7 +835,7 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                             edgarCode="du-0512-Duplicate-Facts",
                             modelObject=fList, fact=f0.qname, contextID=f0.contextID, values=", ".join(strTruncate(f.value, 128) for f in fList))
                 aspectEqualFacts.clear()
-        del factForConceptContextUnitLangHash, aspectEqualFacts
+        del factForConceptContextUnitHash, aspectEqualFacts
         val.modelXbrl.profileActivity("... filer fact checks", minTimeToShow=1.0)
 
         #6.5.14 facts without english text
@@ -2066,49 +2067,48 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
     val.modelXbrl.profileActivity("... filer DTS checks", minTimeToShow=1.0)
 
     # checks for namespace clashes
+    def elementsReferencingDocs(docs):
+        return set(doc.referencesDocument[d].referringModelObject
+                   for doc in modelXbrl.urlDocs.values()
+                   for d in conflictDocuments
+                   if d in doc.referencesDocument)
     if isEFM:
         # check number of us-roles taxonomies referenced
-        for conflictClass, modelDocuments in val.standardNamespaceConflicts.items():                                                                
-            if (len(modelDocuments) > 1 and 
+        for conflictClass, conflictDocuments in val.standardNamespaceConflicts.items():                                                                
+            if (len(conflictDocuments) > 1 and 
                 (conflictClass != 'srt+us-gaap' or ('us-types' in val.standardNamespaceConflicts and
                                                     'srt-types' in val.standardNamespaceConflicts)) and # ignore multi us-gaap/srt conflicts without the other
                 (conflictClass != 'ifrs+us-gaap' or ('us-types' in val.standardNamespaceConflicts and
                                                      'ifrs-full' in val.standardNamespaceConflicts)) # ignore multi us-gaap/ifrs conflicts without the other
                 ):
                 if conflictClass == 'ifrs+us-gaap':
-                    if set(d.targetNamespace for d in val.standardNamespaceConflicts['ifrs+us-gaap']) >= {
-                        "http://xbrl.ifrs.org/taxonomy/2018-03-16/ifrs-full", "http://fasb.org/us-gaap/2017-01-31"}:
-                        conflictClass = 'ifrs-2018+us-gaap-2017'
-                    elif set(d.targetNamespace for d in val.standardNamespaceConflicts['ifrs+us-gaap']) >= {
-                        "http://xbrl.ifrs.org/taxonomy/2019-03-27/ifrs-full", "http://fasb.org/us-gaap/2018-01-31"}:
-                        conflictClass = 'ifrs-2019+us-gaap-2018'
-                    elif set(d.targetNamespace for d in val.standardNamespaceConflicts['ifrs+us-gaap']) >= {
-                        "http://xbrl.ifrs.org/taxonomy/2018-03-16/ifrs-full", "http://fasb.org/us-gaap/2020-01-31"}:
-                        conflictClass = 'ifrs-2018+us-gaap-2020'
-                    else:
-                        continue
+                    conflictClass = None
+                    for _class, _conflicts in ifrsUsgaapConflictClasses.items():
+                        if set(d.targetNamespace for d in val.standardNamespaceConflicts['ifrs+us-gaap']) >= _conflicts:
+                            conflictClass = _class
+                            break
                 if conflictClass == 'srt+ifrs':
-                    if set(d.targetNamespace for d in val.standardNamespaceConflicts['srt+ifrs']) >= {
-                        "http://xbrl.ifrs.org/taxonomy/2018-03-16/ifrs-full", "http://fasb.org/srt/2020-01-31"}:
-                        conflictClass = 'ifrs-2018+srt-2020'
-                    elif set(d.targetNamespace for d in val.standardNamespaceConflicts['srt+ifrs']) >= {
-                        "http://xbrl.ifrs.org/taxonomy/2019-03-27/ifrs-full", "http://fasb.org/srt/2018-01-31"}:
-                        conflictClass = 'ifrs-2019+srt-2018'
-                    else:
-                        continue
-                modelXbrl.error("EFM.6.22.03.incompatibleSchemas",
-                    _("References for conflicting standard taxonomies %(conflictClass)s are not allowed in same DTS %(namespaceConflicts)s"),
-                    edgarCode="cp-2203-Incompatible-Taxonomy-Versions",
-                    modelObject=modelXbrl, conflictClass=conflictClass,
-                    namespaceConflicts=", ".join(sorted([conflictClassFromNamespace(d.targetNamespace) for d in modelDocuments])))
+                    conflictClass = None
+                    for _class, _conflicts in ifrsSrtConflictClasses.items():
+                        if set(d.targetNamespace for d in val.standardNamespaceConflicts['srt+ifrs']) >= _conflicts:
+                            conflictClass = _class
+                            break
+                if conflictClass:
+                    modelXbrl.error("EFM.6.22.03.incompatibleSchemas",
+                        _("References for conflicting standard taxonomies %(conflictClass)s are not allowed in same DTS %(namespaceConflicts)s"),
+                        edgarCode="cp-2203-Incompatible-Taxonomy-Versions",
+                        modelObject=elementsReferencingDocs(conflictDocuments), conflictClass=conflictClass,
+                        namespaceConflicts=", ".join(sorted([conflictClassFromNamespace(d.targetNamespace) for d in conflictDocuments])))
         if 'rr' in val.standardNamespaceConflicts and documentType not in docTypesRequiringRrSchema:
             modelXbrl.error("EFM.6.22.03.incompatibleTaxonomyDocumentType",
                 _("Taxonomy class %(conflictClass)s may not be used with document type %(documentType)s"),
-                modelObject=modelXbrl, conflictClass="RR", documentType=documentType)
+                modelObject=elementsReferencingDocs(val.standardNamespaceConflicts['rr']), conflictClass="RR", documentType=documentType)
         if 'ifrs-full' in val.standardNamespaceConflicts and documentType in docTypesNotAllowingIfrs:
+            conflictDoc = val.standardNamespaceConflicts['ifrs-full']
             modelXbrl.error("EFM.6.22.03.incompatibleTaxonomyDocumentType",
                 _("Taxonomy class %(conflictClass)s may not be used with document type %(documentType)s"),
-                modelObject=modelXbrl, conflictClass="IFRS", documentType=documentType)
+                modelObject=elementsReferencingDocs(val.standardNamespaceConflicts['ifrs-full']), 
+                conflictClass="IFRS", documentType=documentType)
         if 'ifrs-full' in val.standardNamespaceConflicts:
             ifrsNS = next(iter(val.standardNamespaceConflicts['ifrs-full'])).targetNamespace
             srtNS = None

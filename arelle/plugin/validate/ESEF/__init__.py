@@ -11,6 +11,15 @@ Taxonomy package expected to be installed:
 
 @author: Mark V Systems Limited
 (c) Copyright 2018 Mark V Systems Limited, All rights reserved.
+
+Using arelle as a web server:
+
+   arelleCmdLine.exe --webserver localhost:8080:cheroot --plugins validate/ESEF --packages {my-package-directory}/esef_taxonomy_2019.zip
+   
+Client with curl:
+
+   curl -X POST "-HContent-type: application/zip" -T TC1_valid.zip "http://localhost:8080/rest/xbrl/validation?disclosureSystem=esef&media=text"
+
 '''
 import os
 try:
@@ -28,7 +37,7 @@ from arelle.ModelValue import qname
 from arelle.PythonUtil import strTruncate
 from arelle.UrlUtil import isHttpUrl, scheme
 from arelle.XbrlConst import standardLabel
-from arelle.XmlValidate import VALID
+from arelle.XmlValidate import VALID, lexicalPatterns
 
 from arelle.ValidateXbrlCalcs import inferredDecimals, rangeValue
 from arelle.XbrlConst import (ixbrlAll, xhtml, link, parentChild, summationItem, 
@@ -42,9 +51,9 @@ from .Dimensions import checkFilingDimensions
 from .DTS import checkFilingDTS
 from .Util import isExtension
 
-datetimePattern = re.compile(r"\s*-?[0-9]{4}-[0-9]{2}-[0-9]{2}(T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?)?(Z|[+-][0-9]{2}:[0-9]{2})?\s*")
 styleIxHiddenPattern = re.compile(r"(.*[^\w]|^)-esef-ix-hidden\s*:\s*([\w.-]+).*")
 ifrsNsPattern = re.compile(r"http://xbrl.ifrs.org/taxonomy/[0-9-]{10}/ifrs-full")
+datetimePattern = lexicalPatterns["XBRLI_DATEUNION"]
 
 FOOTNOTE_LINK_CHILDREN = {qnLinkLoc, qnLinkFootnoteArc, qnLinkFootnote, qnIXbrl11Footnote}
 PERCENT_TYPE = qname("{http://www.xbrl.org/dtr/type/numeric}num:percentItemType")
@@ -91,7 +100,7 @@ def validateXbrlFinally(val, *args, **kwargs):
         if ifrsNsPattern.match(targetNs):
             _ifrsNs = targetNs
     if not _ifrsNs:
-        modelXbrl.error("ESEF.RTS.ifrsRequired",
+        modelXbrl.warning("ESEF.RTS.ifrsRequired",
                         _("RTS on ESEF requires IFRS taxonomy."), 
                         modelObject=modelXbrl)
         return
@@ -117,7 +126,7 @@ def validateXbrlFinally(val, *args, **kwargs):
         if not val.hasExtensionCal: missingFiles.append("calculation linkbase")
         if not val.hasExtensionDef: missingFiles.append("definition linkbase")
         if not val.hasExtensionLbl: missingFiles.append("label linkbase")
-        modelXbrl.warning("ESEF.3.1.1.extensionTaxonomyWrongFilesStructure",
+        modelXbrl.error("ESEF.3.1.1.extensionTaxonomyWrongFilesStructure",
             _("Extension taxonomies MUST consist of at least a schema file and presentation, calculation, definition and label linkbases"
               ": missing %(missingFiles)s"),
             modelObject=modelXbrl, missingFiles=", ".join(missingFiles))
@@ -157,21 +166,21 @@ def validateXbrlFinally(val, *args, **kwargs):
             if doc.type == ModelDocument.Type.INLINEXBRL:
                 _baseName, _baseExt = os.path.splitext(doc.basename)
                 if _baseExt not in (".xhtml",".html"):
-                    modelXbrl.warning("ESEF.RTS.Art.3.fileNameExtension",
-                        _("FileName SHOULD have the extension .xhtml or .html: %(fileName)s"),
+                    modelXbrl.error("ESEF.RTS.Art.3.fileNameExtension",
+                        _("FileName SHALL have the extension .xhtml or .html: %(fileName)s"),
                         modelObject=doc, fileName=doc.basename)
                 docinfo = doc.xmlRootElement.getroottree().docinfo
                 if " html" in docinfo.doctype:
-                    modelXbrl.warning("ESEF.RTS.Art.3.htmlDoctype",
-                        _("Doctype SHOULD NOT be html: %(fileName)s"),
+                    modelXbrl.error("ESEF.RTS.Art.3.htmlDoctype",
+                        _("Doctype SHALL NOT be html: %(fileName)s"),
                         modelObject=doc, fileName=doc.basename)
                 # check location in a taxonomy package
                 docDirPath = re.split(r"[/\\]", doc.uri)
                 reportCorrectlyPlacedInPackage = False
                 for i, dir in enumerate(docDirPath):
                     if dir.lower().endswith(".zip"):
-                        packageName = dir[:-4]
-                        if len(dir) >= i + 2 and docDirPath[i+1] == packageName and docDirPath[i+2] == "reports":
+                        packageName = dir[:-4] # web service posted zips are always named POSTupload.zip instead of the source file name
+                        if len(dir) >= i + 2 and packageName in (docDirPath[i+1],"POSTupload") and docDirPath[i+2] == "reports":
                             ixdsDocDirs.add("/".join(docDirPath[i+3:-1]))
                             reportCorrectlyPlacedInPackage = True
                         break
@@ -257,7 +266,7 @@ def validateXbrlFinally(val, *args, **kwargs):
                             elif not any(src.startswith(m) for m in allowedImgMimeTypes):
                                     modelXbrl.error("ESEF.2.5.1.embeddedImageNotUsingBase64Encoding",
                                         _("Images MUST be included in the XHTML document as a base64 encoded string, encoding disallowed: %(src)s."),
-                                        modelObject=elt, src=attrValue[:128])
+                                        modelObject=elt, src=src[:128])
                             
                         elif eltTag == "a":
                             href = elt.get("href","").strip()
@@ -324,7 +333,7 @@ def validateXbrlFinally(val, *args, **kwargs):
                                 hiddenEltIds[ixElt.id] = ixElt
                 firstIxdsDoc = False
             if eligibleForTransformHiddenFacts:
-                modelXbrl.warning("ESEF.2.4.1.transformableElementIncludedInHiddenSection",
+                modelXbrl.error("ESEF.2.4.1.transformableElementIncludedInHiddenSection",
                     _("The ix:hidden section of Inline XBRL document MUST not include elements eligible for transformation. "
                       "%(countEligible)s fact(s) were eligible for transformation: %(elements)s"),
                     modelObject=eligibleForTransformHiddenFacts, 
@@ -347,7 +356,7 @@ def validateXbrlFinally(val, *args, **kwargs):
                     (ixElt.concept.baseXsdType in untransformableTypes or ixElt.isNil)):
                     requiredToDisplayFacts.append(ixElt)
             if requiredToDisplayFacts:
-                modelXbrl.warning("ESEF.2.4.1.factInHiddenSectionNotInReport",
+                modelXbrl.error("ESEF.2.4.1.factInHiddenSectionNotInReport",
                     _("The ix:hidden section contains %(countUnreferenced)s fact(s) whose @id is not applied on any \"-esef-ix- hidden\" style: %(elements)s"),
                     modelObject=requiredToDisplayFacts, 
                     countUnreferenced=len(requiredToDisplayFacts),
@@ -408,11 +417,11 @@ def validateXbrlFinally(val, *args, **kwargs):
             else:
                 leiValidity = LeiUtil.checkLei(contextIdentifier)
                 if leiValidity == LeiUtil.LEI_INVALID_LEXICAL:
-                    modelXbrl.warning("ESEF.2.1.1.invalidIdentifierFormat",
+                    modelXbrl.error("ESEF.2.1.1.invalidIdentifierFormat",
                         _("The LEI context identifier has an invalid format: %(identifier)s"),
                         modelObject=contextElts, identifier=contextIdentifier)
                 elif leiValidity == LeiUtil.LEI_INVALID_CHECKSUM:
-                    modelXbrl.warning("ESEF.2.1.1.invalidIdentifier",
+                    modelXbrl.error("ESEF.2.1.1.invalidIdentifier",
                         _("The LEI context identifier has checksum error: %(identifier)s"),
                         modelObject=contextElts, identifier=contextIdentifier)
         if contextsWithPeriodTime:
@@ -454,7 +463,7 @@ def validateXbrlFinally(val, *args, **kwargs):
                     ns = measure.namespaceURI
                     if ns != XbrlConst.iso4217 and not ns.startswith("http://www.xbrl.org/"):
                         if measure.localName in utrUnitIds:
-                            modelXbrl.error("ESEF.RTS.III.1.G1-7-1.customUnitInUtr",
+                            modelXbrl.warning("ESEF.RTS.III.1.G1-7-1.customUnitInUtr",
                                 _("Custom measure SHOULD NOT duplicate a UnitID of UTR: %(measure)s"),
                                 modelObject=unit, measure=measure)
         del uniqueUnitHashes
@@ -544,7 +553,7 @@ def validateXbrlFinally(val, *args, **kwargs):
                             modelObject=modelXbrl, elements=", ".join(sorted(str(qn) for qn in missingElements)))
             
         if transformRegistryErrors:
-            modelXbrl.warning("ESEF.2.2.3.transformRegistry",
+            modelXbrl.error("ESEF.2.2.3.transformRegistry",
                               _("ESMA recommends applying the latest available version of the Transformation Rules Registry marked with 'Recommendation' status for these elements: %(elements)s."), 
                               modelObject=transformRegistryErrors, 
                               elements=", ".join(sorted(str(fact.qname) for fact in transformRegistryErrors)))

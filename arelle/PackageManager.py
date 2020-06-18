@@ -227,7 +227,6 @@ def parsePackage(cntlr, filesource, metadataFile, fileBase, errors=[]):
             #perform prefix remappings
             remappedUrl = resolvedUrl
             longestPrefix = 0
-            ''' HF 2020-03-11: no more remapping URLs, want the "outside" url used as entry point
             for mapFrom, mapTo in remappings.items():
                 if remappedUrl.startswith(mapFrom):
                     prefixLength = len(mapFrom)
@@ -240,7 +239,6 @@ def parsePackage(cntlr, filesource, metadataFile, fileBase, errors=[]):
                         longestPrefix = prefixLength
             if longestPrefix:
                 remappedUrl = _remappedUrl.replace(os.sep, "/")  # always used as FileSource select
-            '''
                 
             # find closest language description
             closest = ''
@@ -476,6 +474,7 @@ def packageInfo(cntlr, URL, reload=False, packageManifestName=None, errors=[]):
                        'license': parsedPackage.get('license'),
                        'fileDate': time.strftime('%Y-%m-%dT%H:%M:%S UTC', time.gmtime(os.path.getmtime(packageFilename))),
                        'URL': URL,
+                       'entryPoints': parsedPackage.get('entryPoints', {}),
                        'manifestName': packageManifestName,
                        'description': "; ".join(descriptions),
                        'publisher': parsedPackage.get('publisher'), 
