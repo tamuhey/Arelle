@@ -162,6 +162,7 @@ UrlInvalidPattern = re.compile(
 xlUnicodePattern = re.compile("_x([0-9A-F]{4})_")
 
 precisionZeroPattern = re.compile(r"^\s*0+\s*$")
+decimalsSuffixPattern = re.compile(r"(0|-?[1-9][0-9]*|INF)$")
 
 htmlBodyTemplate = "<body xmlns='http://www.w3.org/1999/xhtml'>\n{0}\n</body>\n"
 xhtmlTagPrefix = "{http://www.w3.org/1999/xhtml}"
@@ -284,6 +285,7 @@ CsvMemberTypes = {
     # columns
     "/tableTemplates/*/columns/*": dict,
     "/tableTemplates/*/columns/*/decimals": (int,str),
+    "/tableTemplates/*/columns/*/default": str,
     "/tableTemplates/*/columns/*/dimensions": dict,
     # dimensions (column)
     "/tableTemplates/*/columns/*/dimensions/concept": str,
@@ -796,7 +798,10 @@ def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
                 if modelXbrl.fileSource.exists(parameterFilePath):
                     problems = []
                     for i, row in enumerate(openCsvReader(parameterFilePath, hasHeaderRow=False)):
-                        if row[0]:
+                        if i == 0:
+                            if row != ["name", "value"]:
+                                problems.append(_("The first row must only consist of \"name\" and \"value\" but contains: {}").format(",".join(row)))
+                        elif row[0]:
                             if not IdentifierPattern.match(row[0]):
                                 problems.append(_("Row {} column 1 is not a valid identifier: {}").format(i+1, row[0]))
                             elif len(row) < 2 or not row[1]:
@@ -984,6 +989,7 @@ def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
                         # compile column dependencies
                         factDimensions = {}
                         factDecimals = {}
+                        colDefaults = {}
                         for colId, colProperties in tableTemplate["columns"].items():
                             factDimensions[colId] = colProperties.get("dimensions")
                             factDecimals[colId] = colProperties.get("decimals")
@@ -993,6 +999,8 @@ def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
                                     error("xbrlce:misplacedDecimalsOnNonFactColumn", 
                                           _("Table %(table)s column %(column)s has decimals but dimensions is absent"),
                                           table=tableId, column=colId)
+                            if "default" in colProperties:
+                                colDefaults[colId] = colProperties["default"]
                         if rowIdColName and rowIdColName not in factDecimals:
                             error("xbrlce:undefinedRowIdColumn", 
                                   _("Table %(table)s row id column %(column)s is not defined in columns"),
@@ -1236,20 +1244,23 @@ def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
                                                 if isinstance(dimValue, str) and dimValue.startswith("$"):
                                                     dimValue = dimValue[1:]
                                                     if not dimValue.startswith("$"):
-                                                        dimValue, _sep, dimAttr = dimValue.partition("@")
-                                                        if dimValue == "rowNumber":
+                                                        paramName, _sep, dimAttr = dimValue.partition("@")
+                                                        if paramName == "rowNumber":
                                                             dimValue = str(rowIndex)
-                                                        elif dimValue in colNameIndex:
-                                                            paramColsUsed.add(dimValue)
-                                                            dimValue = _cellValue(row[colNameIndex[dimValue]])
+                                                        elif paramName in colNameIndex:
+                                                            paramColsUsed.add(paramName)
+                                                            dimValue = _cellValue(row[colNameIndex[paramName]])
                                                             if dimValue == "": # csv file empty string is #none
-                                                                dimValue = "#none"
-                                                        elif dimValue in tableParameters:
-                                                            tableParametersUsed.add(dimValue)
-                                                            dimValue = tableParameters[dimValue]
-                                                        elif dimValue in reportParameters:
-                                                            reportParametersUsed.add(dimValue)
-                                                            dimValue = reportParameters[dimValue]
+                                                                if paramName in colDefaults:
+                                                                    dimValue = colDefaults[paramName]
+                                                                else:
+                                                                    dimValue = "#none"
+                                                        elif paramName in tableParameters:
+                                                            tableParametersUsed.add(paramName)
+                                                            dimValue = tableParameters[paramName]
+                                                        elif paramName in reportParameters:
+                                                            reportParametersUsed.add(paramName)
+                                                            dimValue = reportParameters[paramName]
                                                 # else if in parameters?
                                                 if dimName == "period":
                                                     _dimValue = csvPeriod(dimValue, dimAttr)
@@ -1284,28 +1295,30 @@ def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
                                     if dimValue is not None:
                                         validCsvCell = False
                                         if isinstance(dimValue, str) and dimValue.startswith("$"):
-                                            dimValue = dimValue[1:]
-                                            if dimValue in colNameIndex:
-                                                dimSource += " from CSV column " + dimValue
-                                                paramColsUsed.add(dimValue)
-                                                dimValue = _cellValue(row[colNameIndex[dimValue]])
+                                            paramName = dimValue[1:]
+                                            if paramName in colNameIndex:
+                                                dimSource += " from CSV column " + paramName
+                                                paramColsUsed.add(paramName)
+                                                dimValue = _cellValue(row[colNameIndex[paramName]])
+                                                if dimValue == "" and paramName in colDefaults:
+                                                    dimValue = colDefaults[paramName]
                                                 validCsvCell = integerPattern.match(dimValue or "") is not None # is None if is_XL
-                                            elif dimValue in tableParameters:
-                                                dimSource += " from table parameter " + dimValue
-                                                tableParametersUsed.add(dimValue)
-                                                dimValue = tableParameters[dimValue]
-                                            elif dimValue in reportParameters:
-                                                reportParametersUsed.add(dimValue)
-                                                dimSource += " from report parameter " + dimValue
-                                                dimValue = reportParameters[dimValue]
+                                            elif paramName in tableParameters:
+                                                dimSource += " from table parameter " + paramName
+                                                tableParametersUsed.add(paramName)
+                                                dimValue = tableParameters[paramName]
+                                            elif paramName in reportParameters:
+                                                reportParametersUsed.add(paramName)
+                                                dimSource += " from report parameter " + paramName
+                                                dimValue = reportParameters[paramName]
                                             else:
-                                                dimValue = "$" + dimValue # for error reporting
+                                                dimValue = "$" + paramName # for error reporting
                                         if dimValue not in ("", "#none"):
                                             if isinstance(dimValue, int) or validCsvCell:                                          
                                                 fact["decimals"] = dimValue
                                             else:
                                                 error("xbrlce:invalidDecimalsValue", 
-                                                      _("Table %(table)s row %(row)s column %(column)s has invalid decimals \"%(decimals)s\", from %(source)s, url: %(url)s"),
+                                                      _("Fact %(FactId)S has invalid decimals \"%(decimals)s\", from %(source)s, url: %(url)s"),
                                                       table=tableId, row=rowIndex+1, column=colName, decimals=dimValue, url=tableUrl, source=dimSource)
                                     yield (factId, fact)
                                 unmappedParamCols = paramColsWithValue - paramColsUsed
@@ -1674,6 +1687,15 @@ def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
                     
                 decimals = fact.get("decimals")
                 if concept.isNumeric:
+                    if isCSVorXL and isinstance(text, str): # don't check for suffix if not CSV/XL or None or int
+                        text, _sep, _decimals = text.partition("d")
+                        if _sep:
+                            if decimalsSuffixPattern.match(_decimals):
+                                decimals = _decimals
+                            else:
+                                error("xbrlce:invalidDecimalsValue", 
+                                      _("Fact %(factId)s has invalid decimals \"%(decimals)s\""),
+                                      modelObject=modelXbrl, factId=id, decimals=_sep+_decimals)
                     if _unit is None:
                         continue # skip creating fact because unit was invalid
                     attrs["unitRef"] = _unit.id
