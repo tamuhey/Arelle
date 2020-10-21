@@ -4,8 +4,7 @@ contact: Derek Gengenbacher, Austin Matherne or Sage Smith with questions regard
 
 description: Verify the arelle package container runs as expected
 
-run:
-  on-pull-request: true
+run: false
 
 scripts:
 
