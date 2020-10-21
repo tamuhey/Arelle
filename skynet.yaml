@@ -6,8 +6,6 @@ description: Verify the arelle package container runs as expected
 
 run: false
 
-scripts:
-
 also-run:
   Workiva/wf_arelle:wf-arelle-tests:
     on-pull-request: true
