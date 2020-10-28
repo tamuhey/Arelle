@@ -16,23 +16,25 @@ except ImportError:
 from arelle.ModelValue import qname
 from arelle.XbrlConst import all, notAll, hypercubeDimension, dimensionDomain, domainMember, dimensionDefault, widerNarrower
 
-allowedImgMimeTypes = (
-        "data:image/gif;base64", 
-        "data:image/jpeg;base64", "data:image/jpg;base64", # note both jpg and jpeg are in use
-        "data:image/png;base64",
-        "data:image/svg+xml;base64")
-        
 browserMaxBase64ImageLength = 5242880 # 5MB
 
 standardTaxonomyURIs = {
     "http://www.esma.europa.eu/",
+    "https://www.esma.europa.eu/",
     "http://xbrl.ifrs.org/taxonomy/",
+    "https://xbrl.ifrs.org/taxonomy/",
     "http://www.xbrl.org/taxonomy/int/lei/",
+    "https://www.xbrl.org/taxonomy/int/lei/",
     "http://www.xbrl.org/20",
+    "https://www.xbrl.org/20",
     "http://www.xbrl.org/dtr/",
+    "https://www.xbrl.org/dtr/",
     "http://www.xbrl.org/lrr/",
+    "https://www.xbrl.org/lrr/",
     "http://www.xbrl.org/utr/",
+    "https://www.xbrl.org/utr/",
     "http://www.w3.org/1999/xlink/",
+    "https://www.w3.org/1999/xlink/",
     }
 
 esefTaxonomyNamespaceURIs = {
@@ -40,15 +42,45 @@ esefTaxonomyNamespaceURIs = {
     "http://xbrl.ifrs.org/taxonomy/20",
     }
 
+outdatedTaxonomyURLs = {
+    "http://www.esma.europa.eu/taxonomy/2017-03-31/esef_cor.xsd",
+    "https://www.esma.europa.eu/taxonomy/2017-03-31/esef_cor.xsd",
+    }
+
+esefTaxonomyURLs = {
+    "http://www.esma.europa.eu/taxonomy/2019-03-27/esef_cor.xsd",
+    "https://www.esma.europa.eu/taxonomy/2019-03-27/esef_cor.xsd",
+    "http://www.esma.europa.eu/taxonomy/2020-03-16/esef_cor.xsd",
+    "https://www.esma.europa.eu/taxonomy/2020-03-16/esef_cor.xsd",
+    }
+
 disallowedURIsPattern = re.compile(
     "http://xbrl.ifrs.org/taxonomy/[0-9-]{10}/full_ifrs/full_ifrs-cor_[0-9-]{10}[.]xsd|"
     "http://www.esma.europa.eu/taxonomy/[0-9-]{10}/esef_all.xsd"
     )
 
-DefaultDimensionLinkrole = "http://www.esma.europa.eu/xbrl/role/cor/ifrs-dim_role-990000"
+DefaultDimensionLinkroles = ("http://www.esma.europa.eu/xbrl/role/cor/ifrs-dim_role-990000",)
 LineItemsNotQualifiedLinkrole = "http://www.esma.europa.eu/xbrl/role/cor/esef_role-999999"
 
-qnDomainItemType = qname("{http://www.xbrl.org/dtr/type/non-numeric}nonnum:domainItemType")
+qnDomainItemTypes = {qname("{http://www.xbrl.org/dtr/type/non-numeric}nonnum:domainItemType"),
+                     qname("{http://www.xbrl.org/dtr/type/2020-01-21}nonnum:domainItemType")}
+
+
+filenamePatterns = {
+    "cal": re.compile(r"(.{1,})-[0-9]{4}-[0-9]{2}-[0-9]{2}_cal[.]xml$"),
+    "def": re.compile(r"(.{1,})-[0-9]{4}-[0-9]{2}-[0-9]{2}_def[.]xml$"),
+    "lab": re.compile(r"(.{1,})-[0-9]{4}-[0-9]{2}-[0-9]{2}_lab-[a-zA-Z]{1,8}(-[a-zA-Z0-9]{1,8})*[.]xml$"),
+    "pre": re.compile(r"(.{1,})-[0-9]{4}-[0-9]{2}-[0-9]{2}_pre[.]xml$"),
+    "ref": re.compile(r"(.{1,})-[0-9]{4}-[0-9]{2}-[0-9]{2}_ref[.]xml$")
+    }
+
+linkbaseRefFilenamePatterns = {
+    "http://www.xbrl.org/2003/role/calculationLinkbaseRef": "cal",
+    "http://www.xbrl.org/2003/role/definitionLinkbaseRef": "def",
+    "http://www.xbrl.org/2003/role/labelLinkbaseRef": "lab",
+    "http://www.xbrl.org/2003/role/presentationLinkbaseRef": "pre",
+    "http://www.xbrl.org/2003/role/referenceLinkbaseRef": "ref"
+    }
 
 mandatory = set() # mandatory element qnames
 

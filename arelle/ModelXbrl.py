@@ -76,6 +76,8 @@ def load(modelManager, url, nextaction=None, base=None, useFileSource=None, erro
     #uncomment for trial use of lxml xml schema validation of entry document
     #XmlValidate.xmlValidate(modelXbrl.modelDocument)
     modelManager.cntlr.webCache.saveUrlCheckTimes()
+    for pluginXbrlMethod in pluginClassMethods("ModelXbrl.LoadComplete"):
+        pluginXbrlMethod(modelXbrl)
     modelManager.showStatus(_("xbrl loading finished, {0}...").format(nextaction))
     return modelXbrl
 
@@ -349,6 +351,15 @@ class ModelXbrl:
             for view in range(len(self.views)):
                 if len(self.views) > 0:
                     self.views[0].close()
+    
+    @property
+    def displayUri(self):
+        if hasattr(self, "ixdsDocUrls"):
+            return "IXDS {}".format(", ".join(os.path.basename(url) for url in self.ixdsDocUrls))
+        elif hasattr(self, "uri"):
+            return self.uri
+        else:
+            return self.fileSource.url
         
     def relationshipSet(self, arcrole, linkrole=None, linkqname=None, arcqname=None, includeProhibits=False):
         """Returns a relationship set matching specified parameters (only arcrole is required).
@@ -1015,9 +1026,12 @@ class ModelXbrl:
                                 objectUrl = arg.modelDocument.displayUri
                             except AttributeError:
                                 try:
-                                    objectUrl = self.modelDocument.displayUri
+                                    objectUrl = arg.displayUri
                                 except AttributeError:
-                                    objectUrl = getattr(self, "entryLoadingUrl", "")
+                                    try:
+                                        objectUrl = self.modelDocument.displayUri
+                                    except AttributeError:
+                                        objectUrl = getattr(self, "entryLoadingUrl", "")
                         try:
                             if objectUrl.endswith("/_IXDS"):
                                 file = objectUrl[:-6] # inline document set or report package

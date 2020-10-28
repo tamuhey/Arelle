@@ -13,6 +13,7 @@ from lxml import etree
 from arelle.XbrlConst import ixbrlAll, qnLinkFootnote, xhtml, xml, xsd, xhtml
 from arelle.ModelObject import ModelObject, ModelComment
 from arelle.ModelValue import qname, QName
+from arelle.PrototypeDtsObject import PrototypeElementTree, PrototypeObject
 htmlEltUriAttrs = resolveHtmlUri = None
 
 datetimePattern = re.compile(r"\s*([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})\s*|"
@@ -268,8 +269,11 @@ def ancestor(element, ancestorNamespaceURI, ancestorLocalNames):
         treeElt = treeElt.getparent()
     return None
     
-def parent(element, parentNamespaceURI=None, parentLocalNames=None):
-    p = element.getparent()
+def parent(element, parentNamespaceURI=None, parentLocalNames=None, ixTarget=False):
+    if ixTarget and hasattr(element, "parentElement"):
+        p = element.parentElement
+    else:
+        p = element.getparent()
     if parentNamespaceURI or parentLocalNames:
         wildNamespaceURI = not parentNamespaceURI or parentNamespaceURI == '*'
         if isinstance(p,ModelObject):
@@ -315,19 +319,20 @@ def descendantAttr(element, childNamespaceURI, childLocalNames, attrClarkName, a
     descendantElt = descendant(element, childNamespaceURI, childLocalNames, attrName, attrValue)
     return descendantElt.get(attrClarkName) if (descendantElt is not None) else None
 
-def children(element, childNamespaceURIs, childLocalNames):
+def children(element, childNamespaceURIs, childLocalNames, ixTarget=False):
     children = []
     if not isinstance(childLocalNames,tuple): childLocalNames = (childLocalNames ,)
     wildLocalName = childLocalNames == ('*',)
     wildNamespaceURI = not childNamespaceURIs or childNamespaceURIs == '*'
     if not isinstance(childNamespaceURIs,tuple): childNamespaceURIs = (childNamespaceURIs ,)
     if isinstance(element,ModelObject):
-        for child in element.iterchildren():
-            if isinstance(child,ModelObject) and \
-                (wildNamespaceURI or child.elementNamespaceURI in childNamespaceURIs) and \
-                (wildLocalName or child.localName in childLocalNames):
+        for child in (element.ixIter() if ixTarget and hasattr(element, "ixIter") else
+                      element.iterchildren()):
+            if (isinstance(child,ModelObject) and 
+                (wildNamespaceURI or (child.qname.namespaceURI if ixTarget else child.elementNamespaceURI) in childNamespaceURIs) and 
+                (wildLocalName or (child.qname.localName if ixTarget else child.localName) in childLocalNames)):
                 children.append(child)
-    elif isinstance(element,etree._ElementTree): # document root
+    elif isinstance(element, (etree._ElementTree,PrototypeElementTree)): # document root
         child = element.getroot()
         if (wildNamespaceURI or child.elementNamespaceURI in childNamespaceURIs) and \
            (wildLocalName or child.localName in childLocalNames):
@@ -373,16 +378,18 @@ def descendant(element, descendantNamespaceURI, descendantLocalNames, attrName=N
         return d[0]
     return None
     
-def descendants(element, descendantNamespaceURI, descendantLocalNames, attrName=None, attrValue=None, breakOnFirst=False):
+def descendants(element, descendantNamespaceURI, descendantLocalNames, attrName=None, attrValue=None, breakOnFirst=False, ixTarget=False):
     descendants = []
     if not isinstance(descendantLocalNames,tuple): descendantLocalNames = (descendantLocalNames ,)
     wildLocalName = descendantLocalNames == ('*',)
     wildNamespaceURI = not descendantNamespaceURI or descendantNamespaceURI == '*'
-    if isinstance(element,(ModelObject,etree._ElementTree)):
-        for child in (element.iterdescendants() if isinstance(element,ModelObject) else element.iter()):
-            if isinstance(child,ModelObject) and \
-                (wildNamespaceURI or child.elementNamespaceURI == descendantNamespaceURI) and \
-                (wildLocalName or child.localName in descendantLocalNames):
+    if isinstance(element,(ModelObject,etree._ElementTree,PrototypeElementTree,PrototypeObject)):
+        for child in (element.ixIter() if ixTarget and hasattr(element, "ixIter") else
+                      element.iterdescendants() if isinstance(element,ModelObject) else 
+                      element.iter()):
+            if (isinstance(child,(ModelObject,PrototypeObject)) and 
+                (wildNamespaceURI or (child.qname.namespaceURI if ixTarget else child.elementNamespaceURI) == descendantNamespaceURI) and 
+                (wildLocalName or (child.qname.localName if ixTarget else child.localName) in descendantLocalNames)):
                 if attrName:
                     if child.get(attrName) == attrValue or (attrValue == "*" and child.get(attrName) is not None):
                         descendants.append(child)
@@ -848,6 +855,13 @@ def elementChildSequence(element):
             childSequence.insert(1, str(siblingPosition))
         element = element.getparent()
     return "/".join(childSequence)
+
+def elementTagnamesPath(element): # returns clark notation absolute path without element sequences
+    tagnamesPath = []
+    while (element is not None):
+        tagnamesPath.insert(0, element.tag)
+        element = element.getparent()
+    return "/".join(tagnamesPath)
                         
 def xmlstring(elt, stripXmlns=False, prettyPrint=False, contentsOnly=False, includeText=False):
     if elt is None:

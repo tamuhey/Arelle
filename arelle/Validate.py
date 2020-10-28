@@ -7,7 +7,7 @@ Created on Oct 17, 2010
 import os, sys, traceback, re, logging
 from collections import defaultdict, OrderedDict
 from arelle import (FileSource, ModelXbrl, ModelDocument, ModelVersReport, XbrlConst, 
-               ValidateXbrl, ValidateFiling, ValidateHmrc, ValidateVersReport, ValidateFormula,
+               ValidateXbrl, ValidateVersReport, ValidateFormula,
                ValidateInfoset, RenderingEvaluator, ViewFileRenderedGrid, UrlUtil)
 from arelle.ModelDocument import Type, ModelDocumentReference, load as modelDocumentLoad
 from arelle.ModelDtsObject import ModelResource
@@ -31,6 +31,8 @@ class ValidationException(Exception):
     def __repr__(self):
         return "{0}({1})={2}".format(self.code,self.severity,self.message)
     
+commaSpaceSplitPattern = re.compile(r",\s*")
+    
 class Validate:
     """Validation operations are separated from the objects that are validated, because the operations are 
     complex, interwoven, and factored quite differently than the objects being validated. 
@@ -41,12 +43,7 @@ class Validate:
     def __init__(self, modelXbrl):
         self.modelXbrl = modelXbrl
         if modelXbrl.modelManager.validateDisclosureSystem:
-            if modelXbrl.modelManager.disclosureSystem.HMRC: # deprecated non-plugin validator
-                self.instValidator = ValidateHmrc.ValidateHmrc(modelXbrl)
-            elif modelXbrl.modelManager.disclosureSystem.EFMorGFM or modelXbrl.modelManager.disclosureSystem.SBRNL: # deprecated non-plugin validator
-                self.instValidator = ValidateFiling.ValidateFiling(modelXbrl)
-            else: # custom validator, probably a plug-in
-                self.instValidator = ValidateXbrl.ValidateXbrl(modelXbrl)
+            self.instValidator = ValidateXbrl.ValidateXbrl(modelXbrl)
             self.formulaValidator = ValidateXbrl.ValidateXbrl(modelXbrl)
         else:
             self.instValidator = ValidateXbrl.ValidateXbrl(modelXbrl)
@@ -63,7 +60,7 @@ class Validate:
         
     def validate(self):
         if not self.modelXbrl.modelDocument:
-            self.modelXbrl.info("arelle:notValdated",
+            self.modelXbrl.info("arelle:notValidated",
                 _("Validation skipped, document not successfully loaded: %(file)s"),
                 modelXbrl=self.modelXbrl, file=self.modelXbrl.fileSource.url)
         elif self.modelXbrl.modelDocument.type in (Type.TESTCASESINDEX, Type.REGISTRY, Type.TESTCASE, Type.REGISTRYTESTCASE):
@@ -234,9 +231,12 @@ class Validate:
                         else: # need own file source, may need instance discovery
                             filesource = FileSource.openFileSource(readMeFirstUri, self.modelXbrl.modelManager.cntlr, base=baseForElement)
                             if filesource and not filesource.selection and filesource.isArchive and filesource.isTaxonomyPackage:
+                                _rptPkgIxdsOptions = {}
+                                for pluginXbrlMethod in pluginClassMethods("ModelTestcaseVariation.ReportPackageIxdsOptions"):
+                                    pluginXbrlMethod(self, _rptPkgIxdsOptions)
                                 filesource.loadTaxonomyPackageMappings()
                                 for pluginXbrlMethod in pluginClassMethods("ModelTestcaseVariation.ReportPackageIxds"):
-                                    filesource.select(pluginXbrlMethod(filesource))
+                                    filesource.select(pluginXbrlMethod(filesource, **_rptPkgIxdsOptions))
                             modelXbrl = ModelXbrl.load(self.modelXbrl.modelManager, 
                                                        filesource,
                                                        _("validating"), 
@@ -509,10 +509,11 @@ class Validate:
         _blockedMessageCodes = modelTestcaseVariation.blockedMessageCodes # restricts codes examined when provided
         if _blockedMessageCodes:
             _blockPattern = re.compile(_blockedMessageCodes)
-            _errors = [e for e in errors if not _blockPattern.match(e)]
+            _errors = [e for e in errors if isinstance(e,str) and not _blockPattern.match(e)]
         else:
             _errors = errors
-        numErrors = len(_errors)
+        numErrors = sum(isinstance(e,(QName,_STR_BASE)) for e in _errors) # does not include asserton dict results
+        hasAssertionResult = any(isinstance(e,dict) for e in _errors)
         expected = modelTestcaseVariation.expected
         expectedCount = modelTestcaseVariation.expectedCount
         if expected == "valid":
@@ -531,9 +532,11 @@ class Validate:
             status = "fail"
             _passCount = 0
             for testErr in _errors:
+                if isinstance(testErr,_STR_BASE) and testErr.startswith("ESEF."): # compared as list of strings to QName localname
+                    testErr = testErr.rpartition(".")[2]
                 if isinstance(expected,QName) and isinstance(testErr,_STR_BASE):
                     errPrefix, sep, errLocalName = testErr.rpartition(":")
-                    if ((not sep and errLocalName == expected.localName) or
+                    if ((not sep and errLocalName in commaSpaceSplitPattern.split(expected.localName.strip())) or # ESEF has comma separated list of localnames of errors
                         (expected == qname(XbrlConst.errMsgPrefixNS.get(errPrefix) or 
                                            (errPrefix == expected.prefix and expected.namespaceURI), 
                                            errLocalName)) or
@@ -541,14 +544,20 @@ class Validate:
                         (expected.namespaceURI == XbrlConst.xdtSchemaErrorNS and errPrefix == "xmlSchema")):
                         _passCount += 1
                 elif type(testErr) == type(expected):
-                    if (testErr == expected or
+                    if isinstance(testErr,dict):
+                        if len(testErr) == len(expected) and all(
+                            k in testErr and counts == testErr[k][:len(counts)]
+                            for k, counts in expected.items()):
+                            _passCount += 1
+                    elif (testErr == expected or
                         (isinstance(expected, _STR_BASE) and (
                          (expected == "EFM.6.03.04" and testErr.startswith("xmlSchema:")) or
                          (expected == "EFM.6.03.05" and (testErr.startswith("xmlSchema:") or testErr == "EFM.5.02.01.01")) or
                          (expected == "EFM.6.04.03" and (testErr.startswith("xmlSchema:") or testErr.startswith("utr:") or testErr.startswith("xbrl.") or testErr.startswith("xlink:"))) or
                          (expected == "EFM.6.05.35" and testErr.startswith("utre:")) or
                          (expected.startswith("EFM.") and testErr.startswith(expected)) or
-                         (expected == "vere:invalidDTSIdentifier" and testErr.startswith("xbrl"))))):
+                         (expected == "vere:invalidDTSIdentifier" and testErr.startswith("xbrl"))
+                         ))):
                         _passCount += 1
             if _passCount > 0:
                 if expectedCount is not None and expectedCount != _passCount:
@@ -564,7 +573,10 @@ class Validate:
                         status = "pass"
             if not _errors and status == "fail":
                 if modelTestcaseVariation.assertions:
-                    if modelTestcaseVariation.assertions == expected:
+                    priorAsserResults = modelTestcaseVariation.assertions
+                    if len(priorAsserResults) == len(expected) and all(
+                            k in priorAsserResults and counts == priorAsserResults[k][:len(counts)]
+                            for k, counts in expected.items()):
                         status = "pass" # passing was previously successful and no further errors
                 elif (isinstance(expected,dict) and # no assertions fired, are all the expected zero counts?
                       all(countSatisfied == 0 and countNotSatisfied == 0 for countSatisfied, countNotSatisfied in expected.values())):
@@ -574,7 +586,7 @@ class Validate:
             status = "fail"
         modelTestcaseVariation.status = status
         _actual = {} # code and quantity
-        if numErrors > 0: # either coded errors or assertions (in errors list)
+        if numErrors > 0 or hasAssertionResult: # either coded errors or assertions (in errors list)
             # put error codes first, sorted, then assertion result (dict's)
             for error in _errors:
                 if isinstance(error,dict):  # asserion results

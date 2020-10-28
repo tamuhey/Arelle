@@ -1200,9 +1200,9 @@ class ModelType(ModelNamableTerm):
     def isOimTextFactType(self):
         """(str) -- True if type meets OIM requirements to be a text fact"""
         if self.modelDocument.targetNamespace.startswith(XbrlConst.dtrTypesStartsWith):
-            return self.name in XbrlConst.dtrNoLangItemTypeNames
+            return self.name not in XbrlConst.dtrNoLangItemTypeNames and self.baseXsdType in XbrlConst.xsdStringTypeNames
         if self.modelDocument.targetNamespace == XbrlConst.xbrli:
-            return self.name in XbrlConst.oimLangItemTypeNames
+            return self.baseXsdType not in XbrlConst.xsdNoLangTypeNames and self.baseXsdType in XbrlConst.xsdStringTypeNames
         qnameDerivedFrom = self.qnameDerivedFrom
         if not isinstance(qnameDerivedFrom, ModelValue.QName): # textblock not a union type
             return False
@@ -1603,8 +1603,10 @@ class ModelResource(ModelObject):
 
     @property
     def xmlLang(self):
-        """(str) -- xml:lang attribute"""
-        return XmlUtil.ancestorOrSelfAttr(self, "{http://www.w3.org/XML/1998/namespace}lang")
+        """(str) -- xml:lang attribute
+        Note that xml.xsd specifies that an empty string xml:lang attribute is an un-declaration of the
+        attribute, as if the attribute were not present.  When absent or un-declared, returns None."""
+        return XmlUtil.ancestorOrSelfAttr(self, "{http://www.w3.org/XML/1998/namespace}lang") or None
     
     def viewText(self, labelrole=None, lang=None):
         """(str) -- Text of contained (inner) text nodes except for any whose localName 

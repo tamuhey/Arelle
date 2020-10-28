@@ -18,6 +18,7 @@ eurofilingModelNamespace = "http://www.eurofiling.info/xbrl/ext/model"
 eurofilingModelPrefix = "model"
 qnNsmap = qname("nsmap") # artificial parent for insertion of xmlns in saving xml documents
 qnXbrliXbrl = qname("{http://www.xbrl.org/2003/instance}xbrli:xbrl")
+qnPrototypeXbrliXbrl = qname("{http://arelle.org/prototype/xbrli}xbrl") # prototype for inline derived xbrl instance
 qnXbrliItem = qname("{http://www.xbrl.org/2003/instance}xbrli:item")
 qnXbrliNumerator = qname("{http://www.xbrl.org/2003/instance}xbrli:numerator")
 qnXbrliDenominator = qname("{http://www.xbrl.org/2003/instance}xbrli:denominator")
@@ -171,8 +172,9 @@ dtrSQNamesTypes = (qname("{http://www.xbrl.org/dtr/type/2020-01-21}SQNamesType")
                    qname("{http://www.xbrl.org/dtr/type/WGWD/YYYY-MM-DD}SQNamesType"))
 
 wgnStringItemTypeNames = ("stringItemType", "normalizedStringItemType")
-dtrNoLangItemTypeNames = ("domainItemType", "noLangTokenItem", "noLangStringItemType")
-oimLangItemTypeNames = ("stringItemType", "normalizedStringItemType", "tokenItemType")
+dtrNoLangItemTypeNames = ("domainItemType", "noLangTokenItemType", "noLangStringItemType")
+xsdNoLangTypeNames = ("language", "Name")
+xsdStringTypeNames = ("string", "normalizedString", "token", "language", "Name", "NCName", "ID", "IDREF", "IDREFS", "ENTITY", "ENTITIES", "NMTOKEN", "NMTOKENS")
 
 ver10 = "http://xbrl.org/2010/versioning-base"
 # 2010 names

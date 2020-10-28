@@ -578,8 +578,8 @@ class CntlrWinMain (Cntlr.Cntlr):
                 filename = self.uiFileDialog("save",
                         title=_("arelle - Save Test Results"),
                         initialdir=os.path.dirname(self.modelManager.modelXbrl.modelDocument.uri),
-                        filetypes=[(_("CSV file"), "*.csv")],
-                        defaultextension=".csv")
+                        filetypes=[(_("XLSX file"), "*.xlsx"),(_("CSV file"), "*.csv"),(_("HTML file"), "*.html"),(_("XML file"), "*.xml"),(_("JSON file"), "*.json")],
+                        defaultextension=".xlsx")
                 if not filename:
                     return False
                 try:
@@ -890,7 +890,7 @@ class CntlrWinMain (Cntlr.Cntlr):
                 hasView = ViewWinRelationshipSet.viewRelationshipSet(modelXbrl, self.tabWinTopRt, "XBRL-dimensions", lang=self.labelLang)
                 if hasView and topView is None: topView = modelXbrl.views[-1]
                 currentAction = "anchoring relationships view"
-                hasView = ViewWinRelationshipSet.viewRelationshipSet(modelXbrl, self.tabWinTopRt, XbrlConst.widerNarrower, lang=self.labelLang, noRelationshipsMsg=False)
+                hasView = ViewWinRelationshipSet.viewRelationshipSet(modelXbrl, self.tabWinTopRt, XbrlConst.widerNarrower, lang=self.labelLang, noRelationshipsMsg=False, treeColHdr="Wider-Narrower Relationships")
                 if hasView and topView is None: topView = modelXbrl.views[-1]
                 if modelXbrl.hasTableRendering:
                     currentAction = "rendering view"
@@ -970,7 +970,7 @@ class CntlrWinMain (Cntlr.Cntlr):
 
     def validate(self):
         modelXbrl = self.modelManager.modelXbrl
-        if modelXbrl:
+        if modelXbrl and modelXbrl.modelDocument:
             if (modelXbrl.modelManager.validateDisclosureSystem and 
                 not modelXbrl.modelManager.disclosureSystem.selection):
                 tkinter.messagebox.showwarning(_("arelle - Warning"),

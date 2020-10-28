@@ -257,7 +257,9 @@ def checkDTS(val, modelDocument, checkedModelDocuments):
     # XML validation checks (remove if using validating XML)
     val.extendedElementName = None
     isFilingDocument = False
-    if (modelDocument.uri.startswith(val.modelXbrl.uriDir) and
+    # validate contents of entry point document or its sibling/descendant documents or in report package of entry point
+    if ((modelDocument.uri.startswith(val.modelXbrl.uriDir) or # document uri in same subtree as entry doocument
+         (val.modelXbrl.fileSource.isOpen and modelDocument.filepath.startswith(val.modelXbrl.fileSource.baseurl))) and # document in entry submission's package
         modelDocument.targetNamespace not in val.disclosureSystem.baseTaxonomyNamespaces and 
         modelDocument.xmlDocument):
         isFilingDocument = True
@@ -735,7 +737,6 @@ def checkElements(val, modelDocument, parent):
                             val.modelXbrl.error("SBR.NL.2.3.0.01",
                                 _("Xlink 1.1 simple type is not allowed (xlink:type is missing)"),
                                 modelObject=elt)
-    
             # checks for elements in linkbases
             if elt.namespaceURI == XbrlConst.link:
                 if elt.localName in ("schemaRef", "linkbaseRef", "roleRef", "arcroleRef"):
