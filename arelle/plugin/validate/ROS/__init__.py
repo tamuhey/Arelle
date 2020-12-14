@@ -78,6 +78,7 @@ def validateXbrlStart(val, parameters=None, *args, **kwargs):
     if not (val.validateROSplugin):
         return
     
+
 def validateXbrlFinally(val, *args, **kwargs):
     if not (val.validateROSplugin):
         return
@@ -269,16 +270,16 @@ def validateXbrlFinally(val, *args, **kwargs):
             mandatory.add(qname("ie-common:CompaniesRegistrationOfficeNumber", nsMap))
         
         reportedMandatory = set()
-        factForConceptContextUnitHash = defaultdict(list) 
-                
+        factForConceptContextUnitHash = defaultdict(list)
+
         for qn, facts in modelXbrl.factsByQname.items():
             if qn in mandatory:
                 reportedMandatory.add(qn)
             for f in facts:
-                if (f.parentElement.qname == qnXbrliXbrl and 
+                if (f.parentElement.qname == qnXbrliXbrl and
                     (f.isNil or getattr(f,"xValid", 0) >= VALID) and f.context is not None and f.concept is not None and f.concept.type is not None):
                     factForConceptContextUnitHash[f.conceptContextUnitHash].append(f)
-            
+
         missingElements = (mandatory - reportedMandatory) # | (reportedFootnoteIfNil - reportedFootnoteIfNil)
         
         for qnames in equivalentManatoryQNames: # remove missing elements for which an or-match was reported
@@ -291,7 +292,7 @@ def validateXbrlFinally(val, *args, **kwargs):
                             _("Required elements missing from document: %(elements)s."), 
                             modelObject=modelXbrl, elements=", ".join(sorted(str(qn) for qn in missingElements)))
                 
-        aspectEqualFacts = defaultdict(dict) # dict [(qname,lang)] of dict(cntx,unit) of [fact, fact] 
+        aspectEqualFacts = defaultdict(dict) # dict [(qname,lang)] of dict(cntx,unit) of [fact, fact]
         decVals = {}
         for hashEquivalentFacts in factForConceptContextUnitHash.values():
             if len(hashEquivalentFacts) > 1:
