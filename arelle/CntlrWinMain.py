@@ -734,7 +734,7 @@ class CntlrWinMain (Cntlr.Cntlr):
                 if not filesource.selection: # or filesource.isRss:
                     from arelle import DialogOpenArchive
                     filename = DialogOpenArchive.askArchiveFile(self, filesource)
-                    if filesource.basefile and not isHttpUrl(filesource.basefile):
+                    if filename and filesource.basefile and not isHttpUrl(filesource.basefile):
                         self.config["fileOpenDir"] = os.path.dirname(filesource.baseurl)
                 filesource.loadTaxonomyPackageMappings() # if a package, load mappings if not loaded yet
         if filename:
@@ -1515,15 +1515,19 @@ class TkinterCallWrapper:
 
 def main():
     # this is the entry called by arelleGUI.pyw for windows
-    if sys.platform == "darwin": 
-        _resourcesDir = Cntlr.resourcesDir()
-        for _tcltk in ("tcl", "tk"):
-            for _tcltkVer in ("8.5", "8.6"):
-                _tcltkDir = os.path.join(_resourcesDir, _tcltk + _tcltkVer)
-                if os.path.exists(_tcltkDir): 
-                    os.environ[_tcltk.upper() + "_LIBRARY"] = _tcltkDir
-    elif sys.platform == 'win32':
-        if getattr(sys, 'frozen', False): # windows requires fake stdout/stderr because no write/flush (e.g., EdgarRenderer LocalViewer pybottle)
+    if getattr(sys, 'frozen', False):
+        if sys.platform in ("darwin", "linux"): # Use frozen tcl, tk and TkTable libraries
+            _resourcesDir = os.path.join(Cntlr.resourcesDir(), "lib")
+            for _tcltk in ("tcl", "tk", "Tktable"):
+                for _tcltkVer in ("8.5", "8.6", "2.11"): # Tktable ver is 2.11
+                    _d = _resourcesDir
+                    while len(_d) > 3: # stop at root directory
+                        _tcltkDir = os.path.join(_d, _tcltk + _tcltkVer)
+                        if os.path.exists(_tcltkDir): 
+                            os.environ[_tcltk.upper() + "_LIBRARY"] = _tcltkDir
+                            break
+                        _d = os.path.dirname(_d)
+        elif sys.platform == 'win32': # windows requires fake stdout/stderr because no write/flush (e.g., EdgarRenderer LocalViewer pybottle)
             class dummyFrozenStream:
                 def __init__(self): pass
                 def write(self,data): pass
@@ -1553,7 +1557,7 @@ def main():
             msg = ''.join(traceback.format_exception_only(exc_type, exc_value))
             tracebk = ''.join(traceback.format_tb(exc_traceback, limit=7))
             logMsg = "{}\nCall Trace\n{}\nEnvironment {}".format(msg, tracebk, os.environ)
-            print(logMsg, file=sys.stderr)
+            #print(logMsg, file=sys.stderr)
             if syslog is not None:
                 syslog.openlog("Arelle")
                 syslog.syslog(syslog.LOG_ALERT, logMsg)
@@ -1562,7 +1566,7 @@ def main():
                     Tcl().getvar("tcl_pkgPath"), Tcl().getvar("tcl_library"), Tcl().eval('info patchlevel'))
                 if syslog is not None:
                     syslog.syslog(syslog.LOG_ALERT, logMsg)
-                print(logMsg, file=sys.stderr)
+                #print(logMsg, file=sys.stderr)
             except:
                 pass
             if syslog is not None:

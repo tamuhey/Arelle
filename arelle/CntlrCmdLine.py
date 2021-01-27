@@ -271,6 +271,8 @@ def parseAndRun(args):
     parser.add_option("--testcaseResultsCaptureWarnings", action="store_true", dest="testcaseResultsCaptureWarnings",
                       help=_("For testcase variations capture warning results, default is inconsistency or warning if there is any warning expected result.  "))
     parser.add_option("--testcaseresultscapturewarnings", action="store_true", dest="testcaseResultsCaptureWarnings", help=SUPPRESS_HELP)
+    parser.add_option("--testcaseResultOptions", choices=("match-any", "match-all"), action="store", dest="testcaseResultOptions",
+                      help=_("For testcase results, default is match any expected result, options to match any or match all expected result(s).  "))
     parser.add_option("--formulaRunIDs", action="store", dest="formulaRunIDs", help=_("Specify formula/assertion IDs to run, separated by a '|' character."))
     parser.add_option("--formularunids", action="store", dest="formulaRunIDs", help=SUPPRESS_HELP)
     parser.add_option("--formulaCompileOnly", action="store_true", dest="formulaCompileOnly", help=_("Specify formula are to be compiled but not executed."))
@@ -290,7 +292,7 @@ def parseAndRun(args):
     parser.add_option("--internetTimeout", type="int", dest="internetTimeout", 
                       help=_("Specify internet connection timeout in seconds (0 means unlimited)."))
     parser.add_option("--internettimeout", type="int", action="store", dest="internetTimeout", help=SUPPRESS_HELP)
-    parser.add_option("--internetRecheck", choices=("weekly", "daily", "never"), dest="internetRecheck", 
+    parser.add_option("--internetRecheck", choices=("weekly", "daily", "never"), action="store", dest="internetRecheck", 
                       help=_("Specify rechecking cache files (weekly is default)"))
     parser.add_option("--internetrecheck", choices=("weekly", "daily", "never"), action="store", dest="internetRecheck", help=SUPPRESS_HELP)
     parser.add_option("--internetLogDownloads", action="store_true", dest="internetLogDownloads", 
@@ -454,6 +456,42 @@ def parseAndRun(args):
         
         return cntlr
     
+def filesourceEntrypointFiles(filesource, entrypointFiles=[]):
+    if filesource.isArchive:
+        if filesource.isTaxonomyPackage:  # if archive is also a taxonomy package, activate mappings
+            filesource.loadTaxonomyPackageMappings()
+        del entrypointFiles[:] # clear out archive from entrypointFiles
+        # attempt to find inline XBRL files before instance files, .xhtml before probing others (ESMA)
+        for _archiveFile in (filesource.dir or ()): # .dir might be none if IOerror
+            if _archiveFile.endswith(".xhtml"):
+                filesource.select(_archiveFile)
+                if ModelDocument.Type.identify(filesource, filesource.url) in (ModelDocument.Type.INSTANCE, ModelDocument.Type.INLINEXBRL):
+                    entrypointFiles.append({"file":filesource.url})
+        urlsByType = {}
+        if not entrypointFiles:
+            for _archiveFile in (filesource.dir or ()): # .dir might be none if IOerror
+                filesource.select(_archiveFile)
+                identifiedType = ModelDocument.Type.identify(filesource, filesource.url)
+                if identifiedType in (ModelDocument.Type.INSTANCE, ModelDocument.Type.INLINEXBRL):
+                    urlsByType.setdefault(identifiedType, []).append(filesource.url)
+        # use inline instances, if any, else non-inline instances
+        for identifiedType in (ModelDocument.Type.INLINEXBRL, ModelDocument.Type.INSTANCE):
+            for url in urlsByType.get(identifiedType, []):
+                entrypointFiles.append({"file":url})
+            if entrypointFiles:
+                if identifiedType == ModelDocument.Type.INLINEXBRL:
+                    for pluginXbrlMethod in pluginClassMethods("InlineDocumentSet.Discovery"):
+                        entrypointFiles = pluginXbrlMethod(entrypointFiles) # group into IXDS if plugin feature is available
+                break # found inline (or non-inline) entrypoint files, don't look for any other type
+            
+    elif os.path.isdir(filesource.url):
+        del entrypointFiles[:] # clear list
+        for _file in os.listdir(filesource.url):
+            _path = os.path.join(filesource.url, _file)
+            if os.path.isfile(_path) and ModelDocument.Type.identify(filesource, _path) in (ModelDocument.Type.INSTANCE, ModelDocument.Type.INLINEXBRL):
+                entrypointFiles.append({"file":_path})
+    return entrypointFiles
+                            
 class ParserForDynamicPlugins:
     def __init__(self, options):
         self.options = options
@@ -783,6 +821,8 @@ class CntlrCmdLine(Cntlr.Cntlr):
             fo.traceVariableFiltersResult = True
         if options.testcaseResultsCaptureWarnings:
             fo.testcaseResultsCaptureWarnings = True
+        if options.testcaseResultOptions:
+            fo.testcaseResultOptions = options.testcaseResultOptions
         if options.formulaRunIDs:
             fo.runIDs = options.formulaRunIDs   
         if options.formulaCompileOnly:
@@ -834,40 +874,9 @@ class CntlrCmdLine(Cntlr.Cntlr):
             filesource = FileSource.openFileSource(_entryPoints[0].get("file",None), self, checkIfXmlIsEis=_checkIfXmlIsEis)
         _entrypointFiles = _entryPoints
         if filesource and not filesource.selection:
-            if filesource.isArchive:
-                if filesource.isTaxonomyPackage:  # if archive is also a taxonomy package, activate mappings
-                    filesource.loadTaxonomyPackageMappings()
-                if not (sourceZipStream and len(_entrypointFiles) > 0): # web loaded files specify archive files to load
-                    _entrypointFiles = [] # clear out archive from entrypointFiles
-                    # attempt to find inline XBRL files before instance files, .xhtml before probing others (ESMA)
-                    for _archiveFile in (filesource.dir or ()): # .dir might be none if IOerror
-                        if _archiveFile.endswith(".xhtml"):
-                            filesource.select(_archiveFile)
-                            if ModelDocument.Type.identify(filesource, filesource.url) in (ModelDocument.Type.INSTANCE, ModelDocument.Type.INLINEXBRL):
-                                _entrypointFiles.append({"file":filesource.url})
-                    urlsByType = {}
-                    if not _entrypointFiles:
-                        for _archiveFile in (filesource.dir or ()): # .dir might be none if IOerror
-                            filesource.select(_archiveFile)
-                            identifiedType = ModelDocument.Type.identify(filesource, filesource.url)
-                            if identifiedType in (ModelDocument.Type.INSTANCE, ModelDocument.Type.INLINEXBRL):
-                                urlsByType.setdefault(identifiedType, []).append(filesource.url)
-                    # use inline instances, if any, else non-inline instances
-                    for identifiedType in (ModelDocument.Type.INLINEXBRL, ModelDocument.Type.INSTANCE):
-                        for url in urlsByType.get(identifiedType, []):
-                            _entrypointFiles.append({"file":url})
-                        if _entrypointFiles:
-                            if identifiedType == ModelDocument.Type.INLINEXBRL:
-                                for pluginXbrlMethod in pluginClassMethods("InlineDocumentSet.Discovery"):
-                                    _entrypointFiles = pluginXbrlMethod(_entrypointFiles) # group into IXDS if plugin feature is available
-                            break # found inline (or non-inline) entrypoint files, don't look for any other type
-                    
-            elif os.path.isdir(filesource.url):
-                _entrypointFiles = []
-                for _file in os.listdir(filesource.url):
-                    _path = os.path.join(filesource.url, _file)
-                    if os.path.isfile(_path) and ModelDocument.Type.identify(filesource, _path) in (ModelDocument.Type.INSTANCE, ModelDocument.Type.INLINEXBRL):
-                        _entrypointFiles.append({"file":_path})
+            if not (sourceZipStream and len(_entrypointFiles) > 0):
+                filesourceEntrypointFiles(filesource, _entrypointFiles)
+
         for pluginXbrlMethod in pluginClassMethods("CntlrCmdLine.Filing.Start"):
             pluginXbrlMethod(self, options, filesource, _entrypointFiles, sourceZipStream=sourceZipStream, responseZipStream=responseZipStream)
         for _entrypoint in _entrypointFiles:
