@@ -360,7 +360,7 @@ def decimalRound(x, d, rounding):
         if d >= 0:
             return x.quantize(ONE.scaleb(-d),rounding)
         else: # quantize only seems to work on fractional part, convert integer to fraction at scaled point    
-            return x.scaleb(d).quantize(ONE,rounding).scaleb(-d)
+            return x.scaleb(d).quantize(ONE,rounding) * (TEN ** decimal.Decimal(-d)) # multiply by power of 10 to prevent scaleb scientific notatino
     return x # infinite, NaN, zero, or excessive decimal digits ( > 28 )
 
 def inferredPrecision(fact):
@@ -426,7 +426,7 @@ def roundValue(value, precision=None, decimals=None, scale=None):
             vFloat = float(value)
             if scale:
                 vFloat = pow(vFloat, iScale)
-    except (decimal.InvalidOperation, ValueError): # would have been a schema error reported earlier
+    except (decimal.InvalidOperation, ValueError, TypeError): # would have been a schema error reported earlier  None gives Type Error (e.g., xsi:nil)
         return NaN
     if precision is not None:
         if not isinstance(precision, (int,float)):

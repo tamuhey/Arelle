@@ -230,13 +230,28 @@ class Validate:
                                                        ixdsTarget=modelTestcaseVariation.ixdsTarget)
                         else: # need own file source, may need instance discovery
                             filesource = FileSource.openFileSource(readMeFirstUri, self.modelXbrl.modelManager.cntlr, base=baseForElement)
-                            if filesource and not filesource.selection and filesource.isArchive and filesource.isTaxonomyPackage:
-                                _rptPkgIxdsOptions = {}
-                                for pluginXbrlMethod in pluginClassMethods("ModelTestcaseVariation.ReportPackageIxdsOptions"):
-                                    pluginXbrlMethod(self, _rptPkgIxdsOptions)
-                                filesource.loadTaxonomyPackageMappings()
-                                for pluginXbrlMethod in pluginClassMethods("ModelTestcaseVariation.ReportPackageIxds"):
-                                    filesource.select(pluginXbrlMethod(filesource, **_rptPkgIxdsOptions))
+                            if filesource and not filesource.selection and filesource.isArchive:
+                                try:
+                                    if filesource.isTaxonomyPackage:
+                                        _rptPkgIxdsOptions = {}
+                                        for pluginXbrlMethod in pluginClassMethods("ModelTestcaseVariation.ReportPackageIxdsOptions"):
+                                            pluginXbrlMethod(self, _rptPkgIxdsOptions)
+                                        filesource.loadTaxonomyPackageMappings()
+                                        for pluginXbrlMethod in pluginClassMethods("ModelTestcaseVariation.ReportPackageIxds"):
+                                            filesource.select(pluginXbrlMethod(filesource, **_rptPkgIxdsOptions))
+                                    else:
+                                        from arelle.CntlrCmdLine import filesourceEntrypointFiles
+                                        entrypoints = filesourceEntrypointFiles(filesource)
+                                        if entrypoints:
+                                            # resolve an IXDS in entrypoints
+                                            for pluginXbrlMethod in pluginClassMethods("ModelTestcaseVariation.ArchiveIxds"):
+                                                pluginXbrlMethod(self, filesource,entrypoints)
+                                            filesource.select(entrypoints[0].get("file", None) )
+                                except Exception as err:
+                                    self.modelXbrl.error("exception:" + type(err).__name__,
+                                        _("Testcase variation validation exception: %(error)s, entry URL: %(instance)s"),
+                                        modelXbrl=self.modelXbrl, instance=readMeFirstUri, error=err)
+                                    continue # don't try to load this entry URL
                             modelXbrl = ModelXbrl.load(self.modelXbrl.modelManager, 
                                                        filesource,
                                                        _("validating"), 
@@ -245,7 +260,7 @@ class Validate:
                                                        ixdsTarget=modelTestcaseVariation.ixdsTarget)
                         modelXbrl.isTestcaseVariation = True
                     if modelXbrl.modelDocument is None:
-                        modelXbrl.error("arelle:notLoaded",
+                        modelXbrl.info("arelle:notLoaded",
                              _("Variation %(id)s %(name)s readMeFirst document not loaded: %(file)s"),
                              modelXbrl=testcase, id=modelTestcaseVariation.id, name=modelTestcaseVariation.name, file=os.path.basename(readMeFirstUri))
                         self.determineNotLoadedTestStatus(modelTestcaseVariation, modelXbrl.errors)
@@ -506,6 +521,8 @@ class Validate:
         return not any(not isinstance(actual,dict) for actual in modelTestcaseVariationActual)
                 
     def determineTestStatus(self, modelTestcaseVariation, errors):
+        testcaseResultOptions = self.modelXbrl.modelManager.formulaOptions.testcaseResultOptions
+        matchAllExpected = testcaseResultOptions == "match-all"
         _blockedMessageCodes = modelTestcaseVariation.blockedMessageCodes # restricts codes examined when provided
         if _blockedMessageCodes:
             _blockPattern = re.compile(_blockedMessageCodes)
@@ -516,6 +533,12 @@ class Validate:
         hasAssertionResult = any(isinstance(e,dict) for e in _errors)
         expected = modelTestcaseVariation.expected
         expectedCount = modelTestcaseVariation.expectedCount
+        if matchAllExpected:
+            if isinstance(expected, list):
+                if not expectedCount:
+                    expectedCount = len(expected)
+            elif expectedCount is None:
+                expectedCount = 0
         if expected == "valid":
             if numErrors == 0:
                 status = "pass"
@@ -526,42 +549,55 @@ class Validate:
                 status = "fail"
             else:
                 status = "pass"
-        elif expected is None and numErrors == 0:
+        elif expected in (None, []) and numErrors == 0:
             status = "pass"
-        elif isinstance(expected,(QName,_STR_BASE,dict)): # string or assertion id counts dict
+        elif isinstance(expected,(QName,_STR_BASE,dict,list)): # string or assertion id counts dict
             status = "fail"
             _passCount = 0
+            if isinstance(expected, list):
+                _expectedList = expected.copy() # need shallow copy
+            else:
+                _expectedList = [expected]
+            if not isinstance(expected, list): expected = [expected]
             for testErr in _errors:
                 if isinstance(testErr,_STR_BASE) and testErr.startswith("ESEF."): # compared as list of strings to QName localname
                     testErr = testErr.rpartition(".")[2]
-                if isinstance(expected,QName) and isinstance(testErr,_STR_BASE):
-                    errPrefix, sep, errLocalName = testErr.rpartition(":")
-                    if ((not sep and errLocalName in commaSpaceSplitPattern.split(expected.localName.strip())) or # ESEF has comma separated list of localnames of errors
-                        (expected == qname(XbrlConst.errMsgPrefixNS.get(errPrefix) or 
-                                           (errPrefix == expected.prefix and expected.namespaceURI), 
+                for _exp in _expectedList:
+                    _expMatched = False
+                    if isinstance(_exp,QName) and isinstance(testErr,_STR_BASE):
+                        errPrefix, sep, errLocalName = testErr.rpartition(":")
+                        if ((not sep and errLocalName in commaSpaceSplitPattern.split(_exp.localName.strip())) or # ESEF has comma separated list of localnames of errors
+                            (_exp == qname(XbrlConst.errMsgPrefixNS.get(errPrefix) or 
+                                           (errPrefix == _exp.prefix and _exp.namespaceURI), 
                                            errLocalName)) or
-                        # XDT xml schema tests expected results 
-                        (expected.namespaceURI == XbrlConst.xdtSchemaErrorNS and errPrefix == "xmlSchema")):
+                            # XDT xml schema tests expected results 
+                            (_exp.namespaceURI == XbrlConst.xdtSchemaErrorNS and errPrefix == "xmlSchema")):
+                            _expMatched = True
+                    elif type(testErr) == type(_exp):
+                        if isinstance(testErr,dict):
+                            if len(testErr) == len(_exp) and all(
+                                k in testErr and counts == testErr[k][:len(counts)]
+                                for k, counts in _exp.items()):
+                                _expMatched = True
+                        elif (testErr == _exp or
+                            (isinstance(_exp, _STR_BASE) and (
+                             (_exp == "EFM.6.03.04" and testErr.startswith("xmlSchema:")) or
+                             (_exp == "EFM.6.03.05" and (testErr.startswith("xmlSchema:") or testErr == "EFM.5.02.01.01")) or
+                             (_exp == "EFM.6.04.03" and (testErr.startswith("xmlSchema:") or testErr.startswith("utr:") or testErr.startswith("xbrl.") or testErr.startswith("xlink:"))) or
+                             (_exp == "EFM.6.05.35" and testErr.startswith("utre:")) or
+                             (_exp.startswith("EFM.") and testErr.startswith(_exp)) or
+                             (_exp == "vere:invalidDTSIdentifier" and testErr.startswith("xbrl"))
+                             ))):
+                            _expMatched = True
+                    if _expMatched:
                         _passCount += 1
-                elif type(testErr) == type(expected):
-                    if isinstance(testErr,dict):
-                        if len(testErr) == len(expected) and all(
-                            k in testErr and counts == testErr[k][:len(counts)]
-                            for k, counts in expected.items()):
-                            _passCount += 1
-                    elif (testErr == expected or
-                        (isinstance(expected, _STR_BASE) and (
-                         (expected == "EFM.6.03.04" and testErr.startswith("xmlSchema:")) or
-                         (expected == "EFM.6.03.05" and (testErr.startswith("xmlSchema:") or testErr == "EFM.5.02.01.01")) or
-                         (expected == "EFM.6.04.03" and (testErr.startswith("xmlSchema:") or testErr.startswith("utr:") or testErr.startswith("xbrl.") or testErr.startswith("xlink:"))) or
-                         (expected == "EFM.6.05.35" and testErr.startswith("utre:")) or
-                         (expected.startswith("EFM.") and testErr.startswith(expected)) or
-                         (expected == "vere:invalidDTSIdentifier" and testErr.startswith("xbrl"))
-                         ))):
-                        _passCount += 1
+                        if matchAllExpected:
+                            _expectedList.remove(_exp)
+                        break
             if _passCount > 0:
-                if expectedCount is not None and expectedCount != _passCount:
-                    status = "fail (count)"
+                if expectedCount is not None and (expectedCount != _passCount or 
+                                                  (matchAllExpected and expectedCount != numErrors)):
+                    status = "fail"
                 else:
                     status = "pass"
             #if expected == "EFM.6.03.02" or expected == "EFM.6.03.08": # 6.03.02 is not testable

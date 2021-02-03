@@ -301,13 +301,19 @@ class ModelTestcaseVariation(ModelObject):
             if expected and resultElement.get("nonStandardErrorCodes") == "true":
                 # if @expected and @nonStandardErrorCodes then use expected instead of error codes
                 return expected
-        errorElement = XmlUtil.descendant(self, None, "error")
+        errorElements = XmlUtil.descendants(self, None, "error")
         resultElement = XmlUtil.descendant(self, None, "result")
-        if errorElement is not None and not errorElement.get("nonStandardErrorCodes"):
-            _errorText = XmlUtil.text(errorElement)
-            if ' ' in _errorText: # list of tokens
-                return _errorText
-            return ModelValue.qname(errorElement, _errorText)  # turn into a QName
+        if isinstance(errorElements,list) and len(errorElements) > 0:
+            return [ModelValue.qname(e, e.stringValue) if not e.get("nonStandardErrorCodes")
+                    else e.stringValue
+                    for e in errorElements]
+        #else:
+        #    errorElement = errorElements[1]
+        #    if errorElement is not None and not errorElement.get("nonStandardErrorCodes"):
+        #        _errorText = XmlUtil.text(errorElement)
+        #        if ' ' in _errorText: # list of tokens
+        #            return _errorText
+        #        return ModelValue.qname(errorElement, _errorText)  # turn into a QName
         if resultElement is not None:
             if expected:
                 return expected
@@ -354,7 +360,7 @@ class ModelTestcaseVariation(ModelObject):
 
     @property
     def blockedMessageCodes(self):
-        blockedCodesRegex = XmlUtil.descendantAttr(self, None, "results", "blockedMessageCodes") # DQC 4/5 test suite
+        blockedCodesRegex = XmlUtil.descendantAttr(self, None, ("results","result"), "blockedMessageCodes") # DQC 4/5 test suite
         if not blockedCodesRegex:
             ignoredCodes = XmlUtil.descendants(self, None, "ignore-error") # ESEF test suite
             if ignoredCodes:
