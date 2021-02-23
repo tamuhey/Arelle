@@ -47,7 +47,7 @@ from .Consts import submissionTypesAllowingWellKnownSeasonedIssuer, \
 from .Dimensions import checkFilingDimensions
 from .PreCalAlignment import checkCalcsTreeWalk
 from .Util import conflictClassFromNamespace, abbreviatedNamespace, NOYEAR, WITHYEARandWILD, loadDeprecatedConceptDates, \
-                    loadCustomAxesReplacements, loadNonNegativeFactsNew, loadNonNegativeFactsOld, loadDeiValidations, \
+                    loadCustomAxesReplacements, loadNonNegativeFacts, loadNonNegativeFacts_2020_patch, loadDeiValidations, \
                     loadOtherStandardTaxonomies, loadUgtRelQnames, loadDqcRules, factBindings, leastDecimals, \
                     axisMemQnames, memChildQnames, loadTaxonomyCompatibility, usgaapYear
                     
@@ -145,9 +145,9 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
             dqcRules = loadDqcRules(modelXbrl) # empty {} if no rules for filing
             ugtRels = loadUgtRelQnames(modelXbrl, dqcRules) # None if no rels applicable
             if usgaapYear(modelXbrl) == "2021":
-                nonNegFacts = loadNonNegativeFactsNew(modelXbrl, dqcRules, ugtRels)
+                nonNegFacts = loadNonNegativeFacts(modelXbrl, dqcRules, ugtRels)
             else:
-                nonNegFacts = loadNonNegativeFactsOld(modelXbrl)
+                nonNegFacts = loadNonNegativeFacts_2020_patch(modelXbrl)
                 dqcRules.clear()
         
         # inline doc set has multiple instance names to check

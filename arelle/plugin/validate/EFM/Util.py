@@ -53,7 +53,7 @@ def usgaapYear(modelXbrl):
     return ""
 
     
-def loadNonNegativeFactsNew(modelXbrl, dqcRules, ugtRels):
+def loadNonNegativeFacts(modelXbrl, dqcRules, ugtRels):
     # for us-gaap newer than 2020 use DQCRT non-negative facts.
     if dqcRules and ugtRels: # not used before 2020
         if usgaapYear(modelXbrl) == "2020" and "dqcrt-2021-usgaap-2020" not in (modelXbrl.modelManager.disclosureSystem.options or ""):
@@ -91,7 +91,7 @@ def loadNonNegativeFactsNew(modelXbrl, dqcRules, ugtRels):
                                                if excludedMemberStrings else None)
 
 
-def loadNonNegativeFactsOld(modelXbrl):
+def loadNonNegativeFacts_2020_patch(modelXbrl):
     signwarnings = loadDqc0015signwarningRules(modelXbrl)
     concepts = set()
     excludedMembers = set()
@@ -126,14 +126,14 @@ def loadDqc0015signwarningRules(modelXbrl):
     modelManager = modelXbrl.modelManager
     cntlr = modelXbrl.modelManager.cntlr
     # check for cached completed signwarnings
-    _signwarningsFileName = resourcesFilePath(modelManager, "signwarnings-old.json")
+    _signwarningsFileName = resourcesFilePath(modelManager, "signwarnings-2020-patch.json")
     if os.path.exists(_signwarningsFileName):
         _file = openFileStream(modelManager.cntlr, _signwarningsFileName, 'rt', encoding='utf-8')
         signwarnings = json.load(_file) # {localName: date, ...}
         _file.close()
         return signwarnings
     # load template rules
-    _fileName = resourcesFilePath(modelManager, "signwarnings-template-old.json")
+    _fileName = resourcesFilePath(modelManager, "signwarnings-template-2020-patch.json")
     if _fileName:
         _file = openFileStream(modelXbrl.modelManager.cntlr, _fileName, 'rt', encoding='utf-8')
         signwarnings = json.load(_file, object_pairs_hook=OrderedDict) # {localName: date, ...}
