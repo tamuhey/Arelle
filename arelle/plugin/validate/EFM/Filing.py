@@ -144,8 +144,11 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
             deiValidations = loadDeiValidations(modelXbrl, isInlineXbrl)
             dqcRules = loadDqcRules(modelXbrl) # empty {} if no rules for filing
             ugtRels = loadUgtRelQnames(modelXbrl, dqcRules) # None if no rels applicable
-            nonNegFacts = loadNonNegativeFactsNew(modelXbrl, dqcRules, ugtRels) if usgaapYear(modelXbrl) == "2021" else loadNonNegativeFactsOld(modelXbrl)
-            
+            if usgaapYear(modelXbrl) == "2021":
+                nonNegFacts = loadNonNegativeFactsNew(modelXbrl, dqcRules, ugtRels)
+            else:
+                nonNegFacts = loadNonNegativeFactsOld(modelXbrl)
+                dqcRules.clear()
         
         # inline doc set has multiple instance names to check
         if modelXbrl.modelDocument.type == ModelDocument.Type.INLINEXBRLDOCUMENTSET:
