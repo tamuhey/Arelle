@@ -41,7 +41,7 @@ def abbreviatedNamespace(namespaceURI, pattern=WITHYEAR):
 def abbreviatedWildNamespace(namespaceURI):
     match = standardNamespacesPattern.match(namespaceURI or "")
     if match:
-        return "{}/*".format(match.group(2) or match.group(5))
+        return "{}/*".format(match.group(2) or match.group(6))
     return None
 
 
