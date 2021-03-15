@@ -6,8 +6,8 @@ do not convert 3 to 2
 import sys
 from decimal import Decimal
 from fractions import Fraction
-from collections import OrderedDict, MutableSet
-from collections.abc import MappingView
+from collections import OrderedDict
+from collections.abc import MappingView, MutableSet
 
 if sys.version[0] >= '3':
     import builtins
@@ -118,6 +118,11 @@ def pyNamedObject(name, *args, **kwargs):
         return objectConstructor(*args, **kwargs)
     except:
         return None
+    
+def lcStr(value): # lower case first letter of string
+    if len(value):
+        return value[0].lower() + value[1:]
+    return str
     
 def strTruncate(value, length):
     _s = str(value).strip()
