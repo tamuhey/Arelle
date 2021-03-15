@@ -1,2 +1,2 @@
 lxml==4.6.2
-openPyXL==3.0.6
+openPyXL==3.0.7
