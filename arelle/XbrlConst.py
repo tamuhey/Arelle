@@ -1,5 +1,9 @@
 from arelle.ModelValue import qname
 import os
+try:
+    from regex import compile as re_compile
+except ImportError:
+    from re import compile as re_compile
 
 xsd = "http://www.w3.org/2001/XMLSchema"
 qnXsdSchema = qname("{http://www.w3.org/2001/XMLSchema}xsd:schema")
@@ -90,6 +94,8 @@ xhtml = "http://www.w3.org/1999/xhtml"
 ixbrl = "http://www.xbrl.org/2008/inlineXBRL"
 ixbrl11 = "http://www.xbrl.org/2013/inlineXBRL"
 ixbrlAll = {ixbrl, ixbrl11}
+ixbrlTags = ("{http://www.xbrl.org/2013/inlineXBRL}*","{http://www.xbrl.org/2008/inlineXBRL}*")
+ixbrlTagPattern = re_compile("[{]http://www.xbrl.org/(2008|2013)/inlineXBRL[}]")
 qnIXbrlResources = qname("{http://www.xbrl.org/2008/inlineXBRL}resources")
 qnIXbrlTuple = qname("{http://www.xbrl.org/2008/inlineXBRL}tuple")
 qnIXbrlNonNumeric = qname("{http://www.xbrl.org/2008/inlineXBRL}nonNumeric")
@@ -535,8 +541,8 @@ errMsgPrefixNS = { # err prefixes which are not declared, such as XPath's "err" 
 qnEuFiTuple = qname("{http://www.eurofiling.info/xbrl/ext/filing-indicators}ef-find:fIndicators")
 qnEuFiIndFact = qname("{http://www.eurofiling.info/xbrl/ext/filing-indicators}ef-find:filingIndicator")
 cnEuFiIndAttr = "{http://www.eurofiling.info/xbrl/ext/filing-indicators}filed" # clark name
-qnFiFact = qname("{http://www.xbrl.org/taxonomy/int/fi/PWD/2018-01-17}fi:filed")
-qnFiDim = qname("{http://www.xbrl.org/taxonomy/int/fi/PWD/2018-01-17}fi:template")
+qnFiFact = qname("{http://www.xbrl.org/taxonomy/int/fi/REC/2021-02-03}fi:filed")
+qnFiDim = qname("{http://www.xbrl.org/taxonomy/int/fi/REC/2021-02-03}fi:template")
 
 arcroleGroupDetect = "*detect*"
 
