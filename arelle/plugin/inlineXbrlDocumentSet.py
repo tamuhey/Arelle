@@ -408,7 +408,7 @@ def runSaveTargetDocumentMenuCommand(cntlr, runInBackground=False, saveTargetFil
     else:
         if saveTargetFiling:
             targetFilename = os.path.basename(targetFilename)
-            filingZip = zipfile.ZipFile(saveTargetFiling, 'w', zipfile.ZIP_DEFLATED, True)
+            filingZip = zipfile.ZipFile(targetFilename, 'w', zipfile.ZIP_DEFLATED, True)
             filingFiles = set()
             # copy referencedDocs to two levels
             def addRefDocs(doc):
