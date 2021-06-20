@@ -4,18 +4,19 @@ registries:
     type: python-index
     url: https://workivaeast.jfrog.io/workivaeast/api/pypi/pypi-prod/simple
     replaces-base: true
-    username: "${{secrets.PYTHON_INDEX_WORKIVAEAST_JFROG_IO_WORKIVAEAST_API_PYPI_PYPI_PROD_USERNAME}}"
-    password: "${{secrets.PYTHON_INDEX_WORKIVAEAST_JFROG_IO_WORKIVAEAST_API_PYPI_PYPI_PROD_PASSWORD}}"
+    username: "${{secrets.WORKIVA_ARTIFACTORY_JFROG_USERNAME}}"
+    password: "${{secrets.WORKIVA_ARTIFACTORY_JFROG_PASSWORD}}"
 
 updates:
 - package-ecosystem: pip
   directory: "/"
+  insecure-external-code-execution: allow
   schedule:
     interval: weekly
     day: sunday
-    time: "20:00"
+    time: "18:00"
     timezone: America/Chicago
-  open-pull-requests-limit: 3
+  open-pull-requests-limit: 99
   reviewers:
   - Workiva/xt
   registries:
