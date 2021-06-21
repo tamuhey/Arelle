@@ -4,7 +4,7 @@ Created on Oct 5, 2010
 @author: Mark V Systems Limited
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
-import os, posixpath, sys, re, shutil, time, calendar, io, json, logging, shutil, cgi
+import os, posixpath, sys, re, shutil, time, calendar, io, json, logging, shutil, cgi, zlib
 if sys.version[0] >= '3':
     from urllib.parse import quote, unquote
     from urllib.error import URLError, HTTPError, ContentTooShortError
@@ -24,10 +24,13 @@ except ImportError:
 from arelle.FileSource import SERVER_WEB_CACHE, archiveFilenameParts
 from arelle.PluginManager import pluginClassMethods
 from arelle.UrlUtil import isHttpUrl
+from arelle.Version import __version__
 addServerWebCache = None
     
 DIRECTORY_INDEX_FILE = "!~DirectoryIndex~!"
 INF = float("inf")
+RETRIEVAL_RETRY_COUNT = 5
+HTTP_USER_AGENT = 'Mozilla/5.0 (Arelle/{})'.format(__version__)
 
 def proxyDirFmt(httpProxyTuple):
     if isinstance(httpProxyTuple,(tuple,list)) and len(httpProxyTuple) == 5:
@@ -82,9 +85,10 @@ class WebCache:
         self._timeout = None        
         
         self._noCertificateCheck = False
+        self._httpUserAgent = HTTP_USER_AGENT # default user agent for product
         self.resetProxies(httpProxyTuple)
         
-        self.opener.addheaders = [('User-agent', 'Mozilla/5.0 (Arelle/1.0)')]
+        self.opener.addheaders = [('User-agent', self.httpUserAgent)]
 
         #self.opener = WebCacheUrlOpener(cntlr, proxyDirFmt(httpProxyTuple)) # self.proxies)
         
@@ -169,6 +173,17 @@ class WebCache:
         if priorValue != check:
             self.resetProxies(self._httpProxyTuple)
 
+    @property
+    def httpUserAgent(self):
+        return self._httpUserAgent
+    
+    @httpUserAgent.setter
+    def httpUserAgent(self, userAgent):
+        priorValue = self._httpUserAgent
+        self._httpUserAgent = userAgent
+        if priorValue != userAgent:
+            self.resetProxies(self._httpProxyTuple)
+
     def resetProxies(self, httpProxyTuple):
         # for ntlm user and password are required
         self.hasNTLM = False
@@ -178,6 +193,8 @@ class WebCache:
             _proxyDirFmt = proxyDirFmt(httpProxyTuple)
             # only try ntlm if user and password are provided because passman is needed
             if user and not useOsProxy:
+                for pluginXbrlMethod in pluginClassMethods("Proxy.HTTPAuthenticate"):
+                    pluginXbrlMethod(self.cntlr)
                 for pluginXbrlMethod in pluginClassMethods("Proxy.HTTPNtlmAuthHandler"):
                     HTTPNtlmAuthHandler = pluginXbrlMethod()
                     if HTTPNtlmAuthHandler is not None:
@@ -201,13 +218,16 @@ class WebCache:
             self.proxy_auth_handler = proxyhandlers.ProxyBasicAuthHandler()
             self.http_auth_handler = proxyhandlers.HTTPBasicAuthHandler()
             proxyHandlers = [self.proxy_handler, self.proxy_auth_handler, self.http_auth_handler]
-        if ssl and self.noCertificateCheck:
+        if ssl and self.noCertificateCheck: # this is required in some Akamai environments, such as sec.gov
             context = ssl.create_default_context()
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
             proxyHandlers.append(proxyhandlers.HTTPSHandler(context=context))
         self.opener = proxyhandlers.build_opener(*proxyHandlers)
-        self.opener.addheaders = [('User-agent', 'Mozilla/5.0 (Arelle/1.0)')]
+        self.opener.addheaders = [
+            ('User-Agent', self.httpUserAgent),
+            ('Accept-Encoding', 'gzip, deflate')
+            ]
 
         #self.opener.close()
         #self.opener = WebCacheUrlOpener(self.cntlr, proxyDirFmt(httpProxyTuple))
@@ -442,12 +462,20 @@ class WebCache:
                         if retrievingDueToRecheckInterval:
                             return self.internetRecheckFailedRecovery(filepath, url, err, timeNowStr) 
                         if tryWebAuthentication:
+                            # check if single signon is requested (on first retry)
+                            if retryCount == RETRIEVAL_RETRY_COUNT:
+                                for pluginXbrlMethod in pluginClassMethods("Proxy.HTTPAuthenticate"):
+                                    if pluginXbrlMethod(self.cntlr): # true if succeessful single sign on
+                                        retryCount -= 1 
+                                        break
+                                if retryCount < RETRIEVAL_RETRY_COUNT:
+                                    continue # succeeded
                             # may be a web login authentication request
                             response = None  # found possible logon request
                             if self.cntlr.hasGui:
                                 response = self.cntlr.internet_logon(url, quotedUrl, 
-                                                                     _("HTTP {0} authentication request").format(err.code),                                                                                                                                          _("Unexpected HTML in {0}").format(url),
-                                                                     _("Is browser-based possible? If so, click 'yes', or 'cancel' to abort retrieval: \n\n{0}")
+                                                                     _("HTTP {0} authentication request").format(err.code),
+                                                                     _("Is browser-based internet access authentication possible? If so, click 'yes', or 'cancel' to abort retrieval: \n\n{0}")
                                                                      .format(url))
                             if response == "retry":
                                 retryCount -= 1
@@ -613,10 +641,15 @@ class WebCache:
                     if "content-length" in headers:
                         size = int(headers["Content-Length"])
                     reporthook(blocknum, bs, size)
+                isGzipped = "gzip" in headers.get("content-encoding", "")
+                if isGzipped:
+                    decompressor = zlib.decompressobj(16+zlib.MAX_WBITS) #this magic number can be inferred from the structure of a gzip file
                 while 1:
                     block = fp.read(bs)
                     if not block:
                         break
+                    if isGzipped:
+                        block = decompressor.decompress(block)
                     read += len(block)
                     tfp.write(block)
                     if blocknum == 0:

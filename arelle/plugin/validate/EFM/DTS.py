@@ -299,15 +299,21 @@ def checkFilingDTS(val, modelDocument, isEFM, isGFM, visited):
                             modelObject=modelConcept, concept=modelConcept.qname)
     
                     #6.7.32 (version 27) instant non numeric
-                    # (version 58) instant textBlock (escapedItemType derivation)
-                    if modelConcept.isItem and (not isDuration and not modelConcept.isAbstract and not isDomainItemType and
-                        (modelConcept.isTextBlock or (disclosureSystemVersion[0] < 58 and not modelConcept.isNumeric))):
-                        val.modelXbrl.error("EFM.6.07.32",
-                            _("Declaration of element %(concept)s in %(schema)s must have xbrli:periodType of 'duration' because its base type is %(baseTypeRequirement)s."),
-                            edgarCode="rq-0732-Nonnnumeric-Must-Be-Duration",
-                            modelObject=modelConcept, schema=modelDocument.basename, concept=modelConcept.qname,
-                            baseTypeRequirement="not numeric" if disclosureSystemVersion[0] < 58 else "a text block")
-                        
+                    if modelConcept.isItem and not isDuration:
+                        if val.disclosureSystemVersion[0] >= 58:
+                            #6.7.32 text block must be duration
+                            if modelConcept.isTextBlock:
+                                val.modelXbrl.error("EFM.6.07.32",
+                                    _("Declaration of element %(concept)s in %(schema)s must have xbrli:periodType of 'duration' because its base type is a text block."),
+                                    edgarCode="rq-0732-TextBlock-Must-Be-Duration",
+                                    modelObject=modelConcept, schema=modelDocument.basename, concept=modelConcept.qname)
+                        else:
+                            if not modelConcept.isNumeric and not modelConcept.isAbstract and not isDomainItemType:
+                                val.modelXbrl.error("EFM.6.07.32",
+                                    _("Declaration of element %(concept)s in %(schema)s must have xbrli:periodType of 'duration' because its base type is not numeric."),
+                                    edgarCode="rq-0732-Nonnnumeric-Must-Be-Duration",
+                                    modelObject=modelConcept, schema=modelDocument.basename, concept=modelConcept.qname)
+
                     # 6.8.5 semantic check, check LC3 name
                     if name:
                         if not name[0].isupper():
