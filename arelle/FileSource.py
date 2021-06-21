@@ -14,6 +14,8 @@ pluginClassMethods = None # dynamic import
 
 archivePathSeparators = (".zip" + os.sep, ".tar.gz" + os.sep, ".eis" + os.sep, ".xml" + os.sep, ".xfd" + os.sep, ".frm" + os.sep, '.taxonomyPackage.xml' + os.sep) + \
                         ((".zip/", ".tar.gz/", ".eis/", ".xml/", ".xfd/", ".frm/", '.taxonomyPackage.xml/') if os.sep != "/" else ()) #acomodate windows and http styles
+                    
+archiveFilenameSuffixes = {".zip", ".tar.gz", ".eis", ".xml", ".xfd", ".frm"}
 
 POST_UPLOADED_ZIP = os.sep + "POSTupload.zip"
 SERVER_WEB_CACHE = os.sep + "_HTTP_CACHE"
@@ -279,12 +281,14 @@ class FileSource:
                 # load mappings
                 self.loadTaxonomyPackageMappings()
                 
-    def loadTaxonomyPackageMappings(self):
-        if not self.mappedPaths and self.taxonomyPackageMetadataFiles:
-            metadata = self.baseurl + os.sep + self.taxonomyPackageMetadataFiles[0]
-            taxonomyPackage = PackageManager.parsePackage(self.cntlr, self, metadata,
-                                                          os.sep.join(os.path.split(metadata)[:-1]) + os.sep)
-            self.mappedPaths = taxonomyPackage["remappings"]
+    def loadTaxonomyPackageMappings(self, errors=[], expectTaxonomyPackage=None):
+        if not self.mappedPaths and (self.taxonomyPackageMetadataFiles or expectTaxonomyPackage):
+            if PackageManager.validateTaxonomyPackage(self.cntlr, self, errors=errors):
+                metadata = self.baseurl + os.sep + self.taxonomyPackageMetadataFiles[0]
+                taxonomyPackage = PackageManager.parsePackage(self.cntlr, self, metadata,
+                                                              os.sep.join(os.path.split(metadata)[:-1]) + os.sep,
+                                                              errors=errors)
+                self.mappedPaths = taxonomyPackage.get("remappings")
 
     def openZipStream(self, sourceZipStream):
         if not self.isOpen:
