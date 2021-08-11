@@ -36,21 +36,21 @@ from arelle.XbrlConst import (xbrli, qnLinkLabel, standardLabelRoles, qnLinkRefe
                               qnLinkPart, gen, link, defaultLinkRole, footnote, factFootnote, isStandardRole,
                               conceptLabel, elementLabel, conceptReference, all as hc_all, notAll as hc_notAll,
                               xhtml, qnXbrliDateItemType,
-                              dtrPrefixedContentItemTypes, dtrPrefixedContentTypes, dtrSQNameNamesItemTypes, dtrSQNameNamesTypes)
+                              dtrPrefixedContentItemTypes, dtrPrefixedContentTypes, dtrSQNameNamesItemTypes, dtrSQNameNamesTypes,
+                              lrrRoleHrefs, lrrArcroleHrefs)
 from arelle.XmlUtil import addChild, addQnameValue, copyIxFootnoteHtml, setXmlns
 from arelle.XmlValidate import integerPattern, languagePattern, NCNamePattern, QNamePattern, validate as xmlValidate, VALID
 from arelle.ValidateXbrlCalcs import inferredDecimals, rangeValue
 
 nsOims = ("http://www.xbrl.org/WGWD/YYYY-MM-DD",
           "https://www.xbrl.org/WGWD/YYYY-MM-DD",
-          "http://www.xbrl.org/CR/2020-05-06",
-          "https://xbrl.org/CR/2021-02-03",
+          "https://xbrl.org/PR/2021-08-04",
           "http://www.xbrl.org/((~status_date_uri~))",
           "https://xbrl.org/((~status_date_uri~))"
          )
 nsOimCes = ("http://www.xbrl.org/WGWD/YYYY-MM-DD/oim-common/error",
             "http://www.xbrl.org/CR/2020-05-06/oim-common/error",
-            "https://xbrl.org/CR/2021-02-03/oim-common/error",
+            "https://xbrl.org/PR/2021-08-04/oim-common/error",
             "http://www.xbrl.org/((~status_date_uri~))/oim-common/error",
             "https://xbrl.org/((~status_date_uri~))/oim-common/error"
     )
@@ -58,8 +58,7 @@ jsonDocumentTypes = (
         "http://www.xbrl.org/WGWD/YYYY-MM-DD/xbrl-json",
         "http://www.xbrl.org/YYYY-MM-DD/xbrl-json",
         "https://xbrl.org/((~status_date_uri~))/xbrl-json", # allows loading of XII "template" test cases without CI production
-        "http://www.xbrl.org/CR/2020-05-06/xbrl-json",
-        "http://www.xbrl.org/CR/2020-10-14/xbrl-json",
+        "https://xbrl.org/PR/2021-08-04/xbrl-json",
         "https://xbrl.org/CR/2021-02-03/xbrl-json"
     )
 csvDocumentTypes = (
@@ -2653,14 +2652,17 @@ def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
                                         _("FootnoteId has no arcrole %(footnoteId)s."),
                                         modelObject=modelXbrl, footnoteId=footnote.get("footnoteId"))
                     continue
-                for refType, refValue, roleTypes in (("role", linkrole, modelXbrl.roleTypes),
-                                                     ("arcrole", arcrole, modelXbrl.arcroleTypes)):
+                for refType, refValue, roleTypes, lrrRoles in (("role", linkrole, modelXbrl.roleTypes, lrrRoleHrefs),
+                                                               ("arcrole", arcrole, modelXbrl.arcroleTypes, lrrArcroleHrefs)):
                     if not (XbrlConst.isStandardRole(refValue) or XbrlConst.isStandardArcrole(refValue)):
                         if refValue not in definedInstanceRoles:
-                            if refValue in roleTypes:
+                            if refValue in roleTypes or refValue in lrrRoles:
                                 definedInstanceRoles.add(refValue)
-                                hrefElt = roleTypes[refValue][0]
-                                href = hrefElt.modelDocument.uri + "#" + hrefElt.id
+                                if refValue in roleTypes:
+                                    hrefElt = roleTypes[refValue][0]
+                                    href = hrefElt.modelDocument.uri + "#" + hrefElt.id
+                                else:
+                                    href = lrrRoles[refValue]
                                 elt = addChild(modelXbrl.modelDocument.xmlRootElement, 
                                                qname(link, refType+"Ref"), 
                                                attributes=(("{http://www.w3.org/1999/xlink}href", href),
