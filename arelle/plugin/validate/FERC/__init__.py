@@ -20,7 +20,7 @@ from arelle.XmlValidate import VALID
 
 def dislosureSystemTypes(disclosureSystem, *args, **kwargs):
     # return ((disclosure system name, variable name), ...)
-    return (("EFM", "FERCplugin"),) # use EFM type for EFM infrastructure tests
+    return (("FERC", "FERCplugin"),) # FERC disclosure system
 
 def disclosureSystemConfigURL(disclosureSystem, *args, **kwargs):
     return os.path.join(os.path.dirname(__file__), "config.xml")
@@ -29,6 +29,9 @@ def validateXbrlStart(val, parameters=None, *args, **kwargs):
     val.validateFERCplugin = val.validateDisclosureSystem and getattr(val.disclosureSystem, "FERCplugin", False)
     if not (val.validateFERCplugin):
         return
+    
+    # use UTR validation if list of URLs was provided
+    val.validateUTR = bool(val.disclosureSystem.utrUrl)
     
 def validateXbrlFinally(val, *args, **kwargs):
     if not (val.validateFERCplugin):
@@ -151,11 +154,11 @@ def validateXbrlFinally(val, *args, **kwargs):
                 formEntryXsd = "https://ecollection.ferc.gov/taxonomy/form{}/{}/form/form{}{}/form-{}{}_{}.xsd".format(
                     formNum, txDate, formNum, formLtr, formNum, formLtr, txDate)
                 # print("trace " + formEntryXsd)
-                unexpectedXsds = set(doc.modelDocument.uri
-                                     for doc, referencingDoc in modelXbrl.modelDocument.referencesDocument.items()
-                                     if "href" in referencingDoc.referenceTypes
-                                     if doc.modelDocument.uri.lower() != formEntryXsd.lower())
                 
+    unexpectedXsds = set(doc.modelDocument.uri
+                         for doc, referencingDoc in modelXbrl.modelDocument.referencesDocument.items()
+                         if "href" in referencingDoc.referenceTypes
+                         if doc.modelDocument.uri.lower() != formEntryXsd.lower())
     if unexpectedXsds:
         modelXbrl.error("FERC.22.00",
                         _("The instance document contained unexpected schema references %(schemaReferences)s."),
