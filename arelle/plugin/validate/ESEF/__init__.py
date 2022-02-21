@@ -182,8 +182,6 @@ def validateXbrlFinally(val, *args, **kwargs):
     _xhtmlNs = "{{{}}}".format(xhtml)
     _xhtmlNsLen = len(_xhtmlNs)
     modelXbrl = val.modelXbrl
-    # reset environment formula run IDs
-    modelXbrl.modelManager.formulaOptions.runIDs = val.priorFormulaOptionsRunIDs
     modelDocument = modelXbrl.modelDocument
     if not modelDocument:
         return # never loaded properly
@@ -863,55 +861,60 @@ def validateXbrlFinally(val, *args, **kwargs):
         if ("authorityRequiredTaxonomyURLs" in val.authParam and
             not any(e in val.extensionImportedUrls for e in val.authParam["authorityRequiredTaxonomyURLs"])):
             val.modelXbrl.error(
-                "UKFRC21.1.requiredFrcEntryPointNotImported",
-                 _("The issuer's extension taxonomies MUST import the UKFRC entry point of the taxonomy files prepared by %(authority)s."),
+                "UKFRC22.3.requiredFrcEntryPointNotImported",
+                 _("The issuer's extension taxonomies MUST import the FRC entry point of the taxonomy files prepared by %(authority)s."),
                 modelObject=modelDocument, authority=val.authParam["authorityName"])
             
         if not hasOutdatedUrl and not any(e in val.extensionImportedUrls for e in val.authParam["effectiveTaxonomyURLs"]):
             val.modelXbrl.error(
-                "UKFRC21.3.requiredEsefEntryPointNotImported" if val.authority == "UKFRC" else
+                "UKFRC22.1.requiredUksefEntryPointNotImported" if val.authority == "UKFRC" else
                 "ESEF.3.1.2.requiredEntryPointNotImported",
                  _("The issuer's extension taxonomies MUST import the entry point of the taxonomy files prepared by %(authority)s."),
                 modelObject=modelDocument, authority=val.authParam["authorityName"])
 
             
         # unused elements in linkbases
-        if val.authParam["G3.4.6"] == "effective":
-            unreportedLbElts = set()
-            for arcroles, err, checkRoots, lbType in (
-                        ((parentChild,), "elements{}UsedForTagging{}AppliedInPresentationLinkbase", True, "presentation"),
-                        ((summationItem,), "elements{}UsedForTagging{}AppliedInCalculationLinkbase", False, "calculation"),
-                        ((hc_all, hc_notAll, dimensionDomain,domainMember), "elements{}UsedForTagging{}AppliedInDefinitionLinkbase", False, "definition")):
-                if lbType == "calculation":
-                    reportedEltsNotInLb = set(c for c in conceptsUsedByFacts if c.isNumeric)
-                else:
-                    reportedEltsNotInLb = conceptsUsedByFacts.copy()
-                for arcrole in arcroles:
-                    for rel in modelXbrl.relationshipSet(arcrole).modelRelationships:
-                        fr = rel.fromModelObject
-                        to = rel.toModelObject
-                        if arcrole in (parentChild, summationItem):
-                            if fr is not None and not fr.isAbstract and fr not in conceptsUsed and isExtension(val, rel):
-                                unreportedLbElts.add(fr)
-                            if to is not None and not to.isAbstract and to not in conceptsUsed and isExtension(val, rel):
-                                unreportedLbElts.add(to)
-                        elif arcrole in (hc_all, domainMember, dimensionDomain):
-                            # all primary items
-                            if fr is not None and not fr.isAbstract and rel.isUsable and fr not in conceptsUsed and isExtension(val, rel) and not fr.type.isDomainItemType:
-                                unreportedLbElts.add(to)
-                            if to is not None and not to.isAbstract and rel.isUsable and to not in conceptsUsed and isExtension(val, rel) and not to.type.isDomainItemType:
-                                unreportedLbElts.add(to)
-                        reportedEltsNotInLb.discard(fr)
-                        reportedEltsNotInLb.discard(to)
-                        
-                if reportedEltsNotInLb and lbType != "calculation":
-                    modelXbrl.error("ESEF.3.4.6.UsableConceptsNotAppliedByTaggedFacts",
-                        _("All concepts used by tagged facts MUST be in extension taxonomy %(linkbaseType)s relationships: %(elements)s."),
-                        modelObject=reportedEltsNotInLb, elements=", ".join(sorted((str(c.qname) for c in reportedEltsNotInLb))), linkbaseType=lbType)
-            if unreportedLbElts:
+        unreportedLbElts = set()
+        for arcroles, err, checkRoots, lbType in (
+                    ((parentChild,), "elements{}UsedForTagging{}AppliedInPresentationLinkbase", True, "presentation"),
+                    ((summationItem,), "elements{}UsedForTagging{}AppliedInCalculationLinkbase", False, "calculation"),
+                    ((hc_all, hc_notAll, dimensionDomain,domainMember), "elements{}UsedForTagging{}AppliedInDefinitionLinkbase", False, "definition")):
+            if lbType == "calculation":
+                reportedEltsNotInLb = set(c for c in conceptsUsedByFacts if c.isNumeric)
+            else:
+                reportedEltsNotInLb = conceptsUsedByFacts.copy()
+            for arcrole in arcroles:
+                for rel in modelXbrl.relationshipSet(arcrole).modelRelationships:
+                    fr = rel.fromModelObject
+                    to = rel.toModelObject
+                    if arcrole in (parentChild, summationItem):
+                        if fr is not None and not fr.isAbstract and fr not in conceptsUsed and isExtension(val, rel):
+                            unreportedLbElts.add(fr)
+                        if to is not None and not to.isAbstract and to not in conceptsUsed and isExtension(val, rel):
+                            unreportedLbElts.add(to)
+                    elif arcrole in (hc_all, domainMember, dimensionDomain):
+                        # all primary items
+                        if fr is not None and not fr.isAbstract and rel.isUsable and fr not in conceptsUsed and isExtension(val, rel) and not fr.type.isDomainItemType:
+                            unreportedLbElts.add(to)
+                        if to is not None and not to.isAbstract and rel.isUsable and to not in conceptsUsed and isExtension(val, rel) and not to.type.isDomainItemType:
+                            unreportedLbElts.add(to)
+                    reportedEltsNotInLb.discard(fr)
+                    reportedEltsNotInLb.discard(to)
+                    
+            if reportedEltsNotInLb and lbType == "presentation":
+                # reported pri items excluded from having to be in pre LB
+                nsExcl = val.authParam.get("lineItemsMustBeInPreLbExclusionNsPattern")
+                if nsExcl:
+                    nsExclPat = re.compile(nsExcl)
+                    reportedEltsNotInLb -= set(c for c in reportedEltsNotInLb if nsExclPat.match(c.qname.namespaceURI))
+            if reportedEltsNotInLb and lbType != "calculation":
                 modelXbrl.error("ESEF.3.4.6.UsableConceptsNotAppliedByTaggedFacts",
-                    _("All usable concepts in extension taxonomy relationships MUST be applied by tagged facts: %(elements)s."),
-                    modelObject=unreportedLbElts, elements=", ".join(sorted((str(c.qname) for c in unreportedLbElts))))
+                    _("All concepts used by tagged facts MUST be in extension taxonomy %(linkbaseType)s relationships: %(elements)s."),
+                    modelObject=reportedEltsNotInLb, elements=", ".join(sorted((str(c.qname) for c in reportedEltsNotInLb))), linkbaseType=lbType)
+        if unreportedLbElts:
+            modelXbrl.error("ESEF.3.4.6.UsableConceptsNotAppliedByTaggedFacts",
+                _("All usable concepts in extension taxonomy relationships MUST be applied by tagged facts: %(elements)s."),
+                modelObject=unreportedLbElts, elements=", ".join(sorted((str(c.qname) for c in unreportedLbElts))))
                 
         # 3.4.4 check for presentation preferred labels
         missingConceptLabels = defaultdict(set) # by role
@@ -1088,6 +1091,8 @@ def validateFormulaFinished(val, *args, **kwargs): # runs *after* formula (which
         return
 
     modelXbrl = val.modelXbrl
+    # reset environment formula run IDs
+    modelXbrl.modelManager.formulaOptions.runIDs = val.priorFormulaOptionsRunIDs
     sumWrnMsgs = sumErrMsgs = 0
     for e in modelXbrl.errors:
         if isinstance(e,dict):
