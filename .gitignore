@@ -14,3 +14,4 @@ Arelle.egg-info
 .eggs
 .idea/*
 venv*
+*.iml
