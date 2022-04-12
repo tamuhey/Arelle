@@ -554,24 +554,14 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                         edgarCode="du-0525-Domain-As-Fact",
                         modelObject=f, fact=f.qname, contextID=factContextID)
                     
-                # fasb extensibleListItemType checks (2017-2018 only)
-                #if concept.instanceOfType(qnFasbExtensibleListItemTypes):
-                #    qnEnumsInvalid = []
-                #    for qnToken in value.split():
-                #        for qnValue in qnameEltPfxName(f, qnToken):
-                #            qnConcept = modelXbrl.qnameConcepts.get(qnValue)
-                #            if qnConcept is None:
-                #                qnEnumsInvalid.append(qnToken)
-                #            else:
-                #                conceptsUsed[qnConcept] = False
-                #    if qnEnumsInvalid:
-                #        modelXbrl.error("EFM.tbd",
-                #            _("The fact %(fact)s contains inappropriate enumeration items %(enumerationItems)s in context %(contextID)s.  Please remove the inappropriate enumeratiuon items."),
-                #            edgarCode="du-tbd",
-                #            modelObject=f, fact=f.qname, contextID=factContextID, enumerationItems=", ".join(qnEnumsInvalid))
-                
                 if concept.qname in deprecatedConceptDates:
                     deprecatedConceptFacts[concept.qname].append(f) 
+                    
+                if concept.isEnumeration and not f.isNil:
+                    for qnEnum in flattenSequence(f.xValue):
+                        if qnEnum in deprecatedConceptDates:
+                            deprecatedConceptFacts[qnEnum].append(f) 
+
             if factContextID in deprecatedConceptContexts: # deprecated dimension and member qnames
                 for _qname in deprecatedConceptContexts[factContextID]:
                     deprecatedConceptFacts[_qname].append(f) 
@@ -1137,6 +1127,7 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                 reportDate = str(XmlUtil.dateunionValue(val.requiredContext.endDatetime, subtractOneDay=True))
             for sevIndex, sev in enumerate(sevs):
                 subTypes = sev.get("subTypeSet", EMPTY_SET) # compiled set of sub-types
+                subTypesPattern = sev.get("subTypesPattern")
                 names = sev.get("xbrl-names", ())
                 eloName = sev.get("elo-name")
                 storeDbName = sev.get("store-db-name")
@@ -1153,7 +1144,9 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                 if checkAfter and reportDate and checkAfter >= reportDate:
                     continue
                 subFormTypesCheck = {submissionType, "{}§{}".format(submissionType, documentType)}
-                if subTypes != "all" and (subFormTypesCheck.isdisjoint(subTypes) ^ ("!not!" in subTypes)):
+                if (subTypes != "all" 
+                    and (subFormTypesCheck.isdisjoint(subTypes) ^ ("!not!" in subTypes))
+                    and (not subTypesPattern or not subTypesPattern.match(submissionType))):
                     if validation is not None: # don't process name for sev's which only store-db-field
                         for name in names:
                             if name.endswith(":*") and validation == "(supported-taxonomy)": # taxonomy-prefix filter
@@ -3004,7 +2997,7 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
         elif dqcRuleName == "DQC.US.0060":
             for id, rule in dqcRule["rules"].items():
                 for eltLn, depLns in rule["element-dependencies"].items():
-                    bindings = factBindings(val.modelXbrl, flattenToSet( (eltLn, depLns )), nils=False)
+                    bindings = factBindings(val.modelXbrl, flattenToSet( (eltLn, depLns )), nils=False, noAdditionalDims=True)
                     for b in bindings.values():
                         if eltLn in b and not any(depLn in b for depLn in depLns):
                             f = b[eltLn]
@@ -3206,3 +3199,4 @@ def cleanedCompanyName(name):
                                  ):
         name = re.sub(pattern, replacement, name, flags=re.IGNORECASE)
     return unicodedata.normalize('NFKD', name.strip().lower()).encode('ASCII', 'ignore').decode()  # remove diacritics 
+
