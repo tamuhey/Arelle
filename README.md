@@ -42,7 +42,7 @@ tracking requests and bugs.
 
 
 ## License
-[Apache License 2.0](LICENSE.txt)
+[Apache License 2.0](LICENSE.md)
 
 
 # Testing
