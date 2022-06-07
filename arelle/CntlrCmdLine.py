@@ -149,6 +149,8 @@ def parseAndRun(args):
                       help=_("Columns for fact list file"))
     parser.add_option("--factTable", "--csvFactTable", action="store", dest="factTableFile",
                       help=_("Write fact table into FILE"))
+    parser.add_option("--factTableCols", action="store", dest="factTableCols",
+                      help=_("Columns for fact table file"))
     parser.add_option("--concepts", "--csvConcepts", action="store", dest="conceptsFile",
                       help=_("Write concepts into FILE"))
     parser.add_option("--pre", "--csvPre", action="store", dest="preFile",
@@ -325,7 +327,7 @@ def parseAndRun(args):
                              "Commands show, and module urls are '|' separated: "
                              "url specifies a plug-in by its url or filename, "
                              "relative URLs are relative to installation plug-in directory, "
-                             " (e.g., 'http://arelle.org/files/hello_web.py', 'C:\Program Files\Arelle\examples\plugin\hello_dolly.py' to load, "
+                             R" (e.g., 'http://arelle.org/files/hello_web.py', 'C:\Program Files\Arelle\examples\plugin\hello_dolly.py' to load, "
                              "or ../examples/plugin/hello_dolly.py for relative use of examples directory) "
                              "Local python files do not require .py suffix, e.g., hello_dolly without .py is sufficient, "
                              "Packaged plug-in urls are their directory's url (e.g., --plugins EdgarRenderer or --plugins xbrlDB).  " ))
@@ -446,7 +448,7 @@ def parseAndRun(args):
     elif hasWebServer and options.webserver:
         # webserver incompatible with file operations
         if any((options.entrypointFile, options.importFiles, options.diffFile, options.versReportFile,
-                options.factsFile, options.factListCols, options.factTableFile, options.relationshipCols,
+                options.factsFile, options.factListCols, options.factTableFile, options.factTableCols, options.relationshipCols,
                 options.conceptsFile, options.preFile, options.tableFile, options.calFile, options.dimFile, options.anchFile, options.formulaeFile, options.viewArcrole, options.viewFile,
                 options.roleTypesFile, options.arcroleTypesFile
                 )):
@@ -750,7 +752,7 @@ class CntlrCmdLine(Cntlr.Cntlr):
             self.modelManager.disclosureSystem.select(None) # just load ordinary mappings
             self.modelManager.validateDisclosureSystem = False
         if options.utrUrl:  # override disclosureSystem utrUrl
-            self.modelManager.disclosureSystem.utrUrl = options.utrUrl
+            self.modelManager.disclosureSystem.utrUrl = [options.utrUrl]
             # can be set now because the utr is first loaded at validation time 
         if options.skipDTS: # skip DTS loading, discovery, etc
             self.modelManager.skipDTS = True
@@ -1037,7 +1039,7 @@ class CntlrCmdLine(Cntlr.Cntlr):
                     if options.factsFile:
                         ViewFileFactList.viewFacts(modelXbrl, options.factsFile, labelrole=options.labelRole, lang=options.labelLang, cols=options.factListCols)
                     if options.factTableFile:
-                        ViewFileFactTable.viewFacts(modelXbrl, options.factTableFile, labelrole=options.labelRole, lang=options.labelLang)
+                        ViewFileFactTable.viewFacts(modelXbrl, options.factTableFile, labelrole=options.labelRole, lang=options.labelLang, cols=options.factTableCols)
                     if options.conceptsFile:
                         ViewFileConcepts.viewConcepts(modelXbrl, options.conceptsFile, labelrole=options.labelRole, lang=options.labelLang)
                     if options.preFile:

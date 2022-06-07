@@ -57,7 +57,7 @@ integerPattern = re_compile(r"^[+-]?([0-9]+)$")
 floatPattern = re_compile(r"^(\+|-)?([0-9]+(\.[0-9]*)?|\.[0-9]+)([Ee](\+|-)?[0-9]+)?$|^(\+|-)?INF$|^NaN$")
 
 lexicalPatterns = {
-    "duration": re_compile("-?P((([0-9]+Y([0-9]+M)?([0-9]+D)?|([0-9]+M)([0-9]+D)?|([0-9]+D))(T(([0-9]+H)([0-9]+M)?([0-9]+(\.[0-9]+)?S)?|([0-9]+M)([0-9]+(\.[0-9]+)?S)?|([0-9]+(\.[0-9]+)?S)))?)|(T(([0-9]+H)([0-9]+M)?([0-9]+(\.[0-9]+)?S)?|([0-9]+M)([0-9]+(\.[0-9]+)?S)?|([0-9]+(\.[0-9]+)?S))))$"),
+    "duration": re_compile(r"-?P((([0-9]+Y([0-9]+M)?([0-9]+D)?|([0-9]+M)([0-9]+D)?|([0-9]+D))(T(([0-9]+H)([0-9]+M)?([0-9]+(\.[0-9]+)?S)?|([0-9]+M)([0-9]+(\.[0-9]+)?S)?|([0-9]+(\.[0-9]+)?S)))?)|(T(([0-9]+H)([0-9]+M)?([0-9]+(\.[0-9]+)?S)?|([0-9]+M)([0-9]+(\.[0-9]+)?S)?|([0-9]+(\.[0-9]+)?S))))$"),
     "gYearMonth": re_compile(r"-?([1-9][0-9]{3,}|0[0-9]{3})-(0[1-9]|1[0-2])(Z|(\+|-)((0[0-9]|1[0-3]):[0-5][0-9]|14:00))?$"),
     "gYear": re_compile(r"-?([1-9][0-9]{3,}|0[0-9]{3})(Z|(\+|-)((0[0-9]|1[0-3]):[0-5][0-9]|14:00))?$"),
     "gMonthDay": re_compile(r"--(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])(Z|(\+|-)((0[0-9]|1[0-3]):[0-5][0-9]|14:00))?$"),
@@ -376,7 +376,7 @@ def validateValue(modelXbrl, elt, attrTag, baseXsdType, value, isNillable=False,
                     xValid = VALID_ID
                 elif baseXsdType == "anyURI":
                     if value:  # allow empty strings to be valid anyURIs
-                        if UrlUtil.relativeUrlPattern.match(value) is None:
+                        if UrlUtil.isValidUriReference(value) is None:
                             raise ValueError("IETF RFC 2396 4.3 syntax")
                     # encode PSVI xValue similarly to Xerces and other implementations
                     xValue = anyURI(UrlUtil.anyUriQuoteForPSVI(value))
@@ -599,16 +599,24 @@ def validateAnyWildcard(qnElt, qnAttr, attributeWildcards):
     return False
 
 class lxmlSchemaResolver(etree.Resolver):
-    def __init__(self, cntlr):
+    def __init__(self, cntlr, modelXbrl=None):
         super(lxmlSchemaResolver, self).__init__()
         self.cntlr = cntlr
+        self.modelXbrl = modelXbrl
     def resolve(self, url, id, context): 
-        filepath = self.cntlr.webCache.getfilename(url)
-        return self.resolve_filename(filepath, context)
+        if self.modelXbrl is None or not self.modelXbrl.fileSource.isInArchive(url):
+            url = self.cntlr.webCache.getfilename(url)
+        if url: # may be None if file doesn't exist
+            if self.modelXbrl is not None: # use fileSource
+                fh = self.modelXbrl.fileSource.file(url,binary=True)[0]
+                return self.resolve_file(fh, context, close=True)
+            else: # probably no active modelXbrl yet, such as when loading packages, use url
+                return self.resolve_filename(url, context)
+        return self.resolve_empty(context)
 
-def lxmlResolvingParser(cntlr):
+def lxmlResolvingParser(cntlr, modelXbrl=None):
     parser = etree.XMLParser()
-    parser.resolvers.add(lxmlSchemaResolver(cntlr))
+    parser.resolvers.add(lxmlSchemaResolver(cntlr, modelXbrl))
     return parser
 
 def lxmlSchemaValidate(modelDocument):
@@ -630,7 +638,7 @@ def lxmlSchemaValidate(modelDocument):
                         if _sl[i] == ns and i+1 < len(_sl):
                             url = cntlr.webCache.normalizeUrl(_sl[i+1], modelDocument.baseForElement(slElt))
                             try:
-                                xsdTree = etree.parse(url,parser=lxmlResolvingParser(cntlr))
+                                xsdTree = etree.parse(url,parser=lxmlResolvingParser(cntlr, modelXbrl))
                                 break
                             except (EnvironmentError, KeyError, UnicodeDecodeError) as err:
                                 msgCode = "arelle.schemaFileError"

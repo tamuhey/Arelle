@@ -15,3 +15,4 @@ Arelle.egg-info
 .idea/*
 venv*
 *.iml
+.github/workflows/*

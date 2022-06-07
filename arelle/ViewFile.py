@@ -14,6 +14,9 @@ if sys.version[0] >= '3':
 else:
     csvOpenMode = 'wb' # for 2.7
     csvOpenNewline = None
+    
+NoneType = type(None) # for isinstance testing
+
 # deferred opening of openpyxl so it's not needed in site-packages unless it is used
 Workbook = cell = utils = Font = PatternFill = Border = Alignment = Color = fills = Side = None
 
@@ -169,7 +172,7 @@ class View:
         # widths in monospace character counts (as with xlsx files)
         if self.type == XLSX:
             for iCol, colWidth in enumerate(colWidths):
-                colLetter = chr( ord("A") + iCol )
+                colLetter = utils.get_column_letter(iCol+1)
                 self.xlsxWs.column_dimensions[colLetter].width = colWidth  
         
     def setColWrapText(self, colColWrapText):
@@ -195,7 +198,7 @@ class View:
                     cell.alignment = Alignment(horizontal="center", vertical="center")
                     cell.fill = PatternFill(patternType=fills.FILL_SOLID, fgColor=Color("00FFBF5F"))
                 else:
-                    cell.value = col if isinstance(col,(str,int,float,Decimal)) else str(col)
+                    cell.value = col if isinstance(col,(str,int,float,Decimal,NoneType)) else str(col)
                     if iCol == 0 and self.treeCols and treeIndent > 0:
                         cell.alignment = Alignment(indent=treeIndent)
                 if self.xlsxColWrapText and iCol < len(self.xlsxColWrapText) and self.xlsxColWrapText[iCol]:
@@ -346,7 +349,7 @@ class View:
                     fh.close()
                 self.modelXbrl.info("info", _("Saved output %(type)s to %(file)s"), file=self.outfile, type=fileType)
             except (IOError, EnvironmentError) as err:
-                self.modelXbrl.exception("arelle:htmlIOError", _("Failed to save output %(type)s to %(file)s: \s%(error)s"), file=self.outfile, type=fileType, error=err)
+                self.modelXbrl.exception("arelle:htmlIOError", _("Failed to save output %(type)s to %(file)s: %(error)s"), file=self.outfile, type=fileType, error=err)
         self.modelXbrl = None
         if self.type == HTML:
             self.tblElt = None
