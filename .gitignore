@@ -16,3 +16,7 @@ Arelle.egg-info
 venv*
 *.iml
 .github/workflows/*
+.idea
+/venv/
+tests/resources/conformance_suites/
+
