@@ -20,7 +20,7 @@ pycryptodome
 pg8000
 pymysql
 pyodbc
-rdflib<6
+rdflib<7
 # other
 graphviz
 Pillow
