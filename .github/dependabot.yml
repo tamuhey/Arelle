@@ -12,9 +12,8 @@ updates:
   directory: "/"
   insecure-external-code-execution: allow
   schedule:
-    interval: weekly
-    day: sunday
-    time: "18:00"
+    interval: daily
+    time: "02:00"
     timezone: America/Chicago
   open-pull-requests-limit: 99
   reviewers:
