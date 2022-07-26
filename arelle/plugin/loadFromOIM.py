@@ -96,7 +96,7 @@ NSReservedAliasURIs = {
     "xbrl": nsOims,
     "xs": (XbrlConst.xsd,),
     "enum2": XbrlConst.enum2s,
-    "oimce": nsOimCes,
+    # "oimce": nsOimCes,
     "xbrli": (XbrlConst.xbrli,),
     "xs": (XbrlConst.xsd,),
     "utr": (XbrlConst.utr,),
@@ -118,6 +118,7 @@ NSReservedAliasURIPrefixes = { # for starts-with checking
     }
 NSReservedURIAlias = {}
 
+OIMDefaultContextElement = "scenario"
 OIMReservedAliasURIs = {
     # "namespaces": NSReservedAliasURIs,  -- generated at load time
     "linkTypes": reservedLinkTypesAndGroups, 
@@ -692,7 +693,7 @@ def checkForDuplicates(modelXbrl, allowedDups, footnoteIDs):
                                     for f in fList[1:]:
                                         _d = inferredDecimals(f)
                                         _v = f.xValue
-                                        if isnan(_v):
+                                        if isnan(_v) or _inConsistent: # may have been inconsistent from f0.value
                                             _inConsistent = True
                                             break
                                         if _d in decVals:
@@ -740,7 +741,25 @@ def checkForDuplicates(modelXbrl, allowedDups, footnoteIDs):
                             value=fText[:64])
         del aspectEqualFootnotes
         '''
-        
+
+def getTaxonomyContextElement(modelXbrl):
+    # https://www.xbrl.org/Specification/xbrl-xml/REC-2021-10-13/xbrl-xml-REC-2021-10-13.html#sec-dimensions
+    # The spec states that if in the DTS:
+    # 1. neither segment nor scenario is present, scenario is used.
+    # 2. segment is present and scenario is not, segment is used.
+    # 3. scenario is present and segment is not, scenario is used.
+    # 4. segment and scenario are present and facts are valid against both of them, scenario is used.
+    # 5. segment and scenario are present and facts are only valid against scenario, scenario is used.
+    # 6. segment and scenario are present and facts are only valid against segment, segment is used.
+    # 7. segment and scenario are present and facts are invalid against both, the choice is made arbitrarily.
+    # We don't yet inspect dimensional validity and therefore incorrectly use scenario in case 6.
+    taxonomyContextRefTypes = {
+        modelRelationship.contextElement
+        for hasHypercubeRelationship in (XbrlConst.all, XbrlConst.notAll)
+        for modelRelationship in modelXbrl.relationshipSet(hasHypercubeRelationship).modelRelationships
+    }
+    return taxonomyContextRefTypes.pop() if len(taxonomyContextRefTypes) == 1 else OIMDefaultContextElement
+
 def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
     from openpyxl import load_workbook
     from openpyxl.cell import Cell
@@ -1427,6 +1446,14 @@ def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
                                 tableUrl, _sep, sheetAndRange = tableUrl.partition("#")
                                 xlSheetName, _sep, xlNamedRange = sheetAndRange.partition('!')
                             tablePath = os.path.join(_dir, tableUrl)
+                            # Remove unnecessary relative segments within path. Effected paths are handled fine
+                            # when loading from directories, but this fails when loading from ZIP archives.
+                            # OIM conformance suites expect this to be supported:
+                            # oim-conf-2021-10-13.zip/300-csv-conformant-processor/V-11,
+                            #  "/300-csv-conformant-processor/./helloWorld-value-date-table2-facts.csv"
+                            # oim-conf-2021-10-13.zip/300-csv-conformant-processor/V-12
+                            #  "/300-csv-conformant-processor/./helloWorld-SQNameSpecial-facts.csv"
+                            tablePath = os.path.normpath(tablePath)
                             if not modelXbrl.fileSource.exists(tablePath):
                                 if not tableIsOptional:
                                     error("xbrlce:missingRequiredCSVFile", 
@@ -2098,6 +2125,7 @@ def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
         
         numFactCreationXbrlErrors = 0
         
+        contextElement = getTaxonomyContextElement(modelXbrl)
         for id, fact in factItems:
             factProduced.clear()
             
@@ -2212,17 +2240,18 @@ def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
                     if lang is INVALID_REFERENCE_TARGET:
                         factProduced.invalidReferenceTarget = "language"
                         continue
-                    if not concept.type.isOimTextFactType:
+                    if concept.type.isOimTextFactType:
+                        if isJSON and not lang.islower():
+                            error("xbrlje:invalidLanguageCodeCase",
+                                  _("Language MUST be lower case: \"%(lang)s\", fact %(factId)s, concept %(concept)s."),
+                                  modelObject=modelXbrl, factId=id, concept=conceptSQName, lang=lang)
+                        factProduced.dimensionsUsed.add("language")
+                        attrs["{http://www.w3.org/XML/1998/namespace}lang"] = lang
+                    elif not isCSVorXL:
                         error("oime:misplacedLanguageDimension",
                               _("Language \"%(lang)s\" provided for non-text concept by fact %(factId)s, concept %(concept)s."),
                               modelObject=modelXbrl, factId=id, concept=conceptSQName, lang=lang)
                         continue # skip creating fact because language would be bad
-                    elif isJSON and not lang.islower():
-                        error("xbrlje:invalidLanguageCodeCase",
-                              _("Language MUST be lower case: \"%(lang)s\", fact %(factId)s, concept %(concept)s."),
-                              modelObject=modelXbrl, factId=id, concept=conceptSQName, lang=lang)
-                    factProduced.dimensionsUsed.add("language")
-                    attrs["{http://www.w3.org/XML/1998/namespace}lang"] = lang
                 entityAsQn = entityNaQName
                 entitySQName = dimensions.get("entity")
                 if entitySQName is INVALID_REFERENCE_TARGET:
@@ -2351,7 +2380,7 @@ def loadFromOIM(cntlr, error, warning, modelXbrl, oimFile, mappedUri):
                             else:
                                 mem = None # absent typed dimension
                             if mem is not None:
-                                qnameDims[dimQname] = DimValuePrototype(modelXbrl, None, dimQname, mem, "segment")
+                                qnameDims[dimQname] = DimValuePrototype(modelXbrl, None, dimQname, mem, contextElement)
                     if hasDimErr:
                         continue
                     try:
