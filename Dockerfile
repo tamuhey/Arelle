@@ -7,7 +7,7 @@ ADD . /build/
 
 RUN yum -y install python3-devel \
                    libxml2-devel \
-		   libxslt-devel && \
+                   libxslt-devel && \
     yum groupinstall -y "Development Tools" && \
     rm -rf /var/cache/yum
 
