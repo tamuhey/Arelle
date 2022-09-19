@@ -68,10 +68,7 @@ from weakref import ref as wkref
 import copy
 import sys
 import warnings
-try:
-    import regex as re
-except ImportError:
-    import re
+import regex as re
 import sre_constants
 import collections
 #~ sys.stderr.write( "testing pyparsing module, version %s, %s\n" % (__version__,__versionTime__ ) )
@@ -90,7 +87,7 @@ __all__ = [
 'htmlComment', 'javaStyleComment', 'keepOriginalText', 'line', 'lineEnd', 'lineStart', 'lineno',
 'makeHTMLTags', 'makeXMLTags', 'matchOnlyAtCol', 'matchPreviousExpr', 'matchPreviousLiteral',
 'nestedExpr', 'nullDebugAction', 'nums', 'oneOf', 'opAssoc', 'operatorPrecedence', 'printables',
-'punc8bit', 'pythonStyleComment', 'quotedString', 'removeQuotes', 'replaceHTMLEntity', 
+'punc8bit', 'pythonStyleComment', 'quotedString', 'removeQuotes', 'replaceHTMLEntity',
 'replaceWith', 'restOfLine', 'sglQuotedString', 'srange', 'stringEnd',
 'stringStart', 'traceParseAction', 'unicodeString', 'upcaseTokens', 'withAttribute',
 'indentedBlock', 'originalTextFor',
@@ -139,7 +136,7 @@ else:
             # Replace unprintables with question marks?
             #return unicode(obj).encode(sys.getdefaultencoding(), 'replace')
             # ...
-            
+
 
 # build list of single arg builtins, tolerant of Python version, that can be used as parse actions
 try:  # won't convert to 2.7
@@ -437,7 +434,7 @@ class ParseResults(object):
                 self[k] = v
                 if isinstance(v[0],ParseResults):
                     v[0].__parent = wkref(self)
-            
+
         self.__toklist += other.__toklist
         self.__accumNames.update( other.__accumNames )
         return self
@@ -445,7 +442,7 @@ class ParseResults(object):
     def __radd__(self, other):
         if isinstance(other,int) and other == 0:
             return self.copy()
-        
+
     def __repr__( self ):
         return "(%s, %s)" % ( repr( self.__toklist ), repr( self.__tokdict ) )
 
@@ -731,9 +728,9 @@ class ParserElement(object):
            NOTE: this returns a *copy* of the original C{ParserElement} object;
            this is so that the client can define a basic element, such as an
            integer, and reference it in multiple places with different names.
-           
+
            You can also set results names using the abbreviated syntax,
-           C{expr("name")} in place of C{expr.setResultsName("name")} - 
+           C{expr("name")} in place of C{expr.setResultsName("name")} -
            see L{I{__call__}<__call__>}.
         """
         newself = self.copy()
@@ -794,7 +791,7 @@ class ParserElement(object):
                         call_im_func_code = f.__call__.im_func.func_code
                     else:
                         call_im_func_code = f.__code__
-    
+
                     # not a function, must be a callable object, get info from the
                     # im_func binding of its bound __call__ method
                     if call_im_func_code.co_flags & STAR_ARGS:
@@ -1793,13 +1790,13 @@ class Regex(Token):
                 warnings.warn("invalid pattern (%s) passed to Regex" % pattern,
                     SyntaxWarning, stacklevel=2)
                 raise
-                
+
         elif isinstance(pattern, Regex.compiledREtype):
             self.re = pattern
             self.pattern = \
             self.reString = str(pattern)
             self.flags = flags
-            
+
         else:
             raise ValueError("Regex may only be constructed with a string or a compiled RE object")
 
@@ -3257,12 +3254,12 @@ def originalTextFor(expr, asString=True):
        restore the parsed fields of an HTML start tag into the raw tag text itself, or to
        revert separate tokens with intervening whitespace back to the original matching
        input text. Simpler to use than the parse action C{keepOriginalText}, and does not
-       require the inspect module to chase up the call stack.  By default, returns a 
-       string containing the original parsed text.  
-       
-       If the optional C{asString} argument is passed as False, then the return value is a 
-       C{ParseResults} containing any results names that were originally matched, and a 
-       single token containing the original matched text from the input string.  So if 
+       require the inspect module to chase up the call stack.  By default, returns a
+       string containing the original parsed text.
+
+       If the optional C{asString} argument is passed as False, then the return value is a
+       C{ParseResults} containing any results names that were originally matched, and a
+       single token containing the original matched text from the input string.  So if
        the expression passed to C{originalTextFor} contains expressions with defined
        results names, you must set C{asString} to False if you want to preserve those
        results name values."""
@@ -3280,7 +3277,7 @@ def originalTextFor(expr, asString=True):
             del t["_original_end"]
     matchExpr.setParseAction(extractText)
     return matchExpr
-    
+
 # convenience constants for positional expressions
 empty       = Empty().setName("empty")
 lineStart   = LineStart().setName("lineStart")
@@ -3562,7 +3559,7 @@ def nestedExpr(opener="(", closer=")", content=None, ignoreExpr=quotedString.cop
                                 ).setParseAction(lambda t:t[0].strip()))
             else:
                 if ignoreExpr is not None:
-                    content = (Combine(OneOrMore(~ignoreExpr + 
+                    content = (Combine(OneOrMore(~ignoreExpr +
                                     ~Literal(opener) + ~Literal(closer) +
                                     CharsNotIn(ParserElement.DEFAULT_WHITE_CHARS,exact=1))
                                 ).setParseAction(lambda t:t[0].strip()))

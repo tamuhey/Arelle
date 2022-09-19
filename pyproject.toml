@@ -1,0 +1,113 @@
+[build-system]
+requires = ["setuptools~=65.3", "wheel~=0.37"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "arelle-release"
+dynamic = ['version']
+readme = "README.md"
+license = {text = "Apache-2.0"}
+description = "An open source XBRL platform."
+authors = [
+    {name = "arelle.org", email = "support@arelle.org"}
+]
+keywords = ["xbrl"]
+classifiers = [
+    'Development Status :: 5 - Production/Stable',
+    'Intended Audience :: End Users/Desktop',
+    'Intended Audience :: Developers',
+    'License :: OSI Approved :: Apache Software License',
+    'Natural Language :: English',
+    'Programming Language :: Python :: 3',
+    'Programming Language :: Python :: 3.9',
+    'Operating System :: OS Independent',
+    'Topic :: Text Processing :: Markup :: XML'
+]
+requires-python = ">=3.7,<3.10"
+dependencies = [
+    'isodate==0.*',
+    'lxml==4.*',
+    'numpy==1.*',
+    'openpyxl==2.*',
+    'regex==2022.*',
+]
+
+[project.optional-dependencies]
+Crypto = [
+    'pycryptodome==3.*',
+]
+DB = [
+    'pg8000==1.*',
+    'PyMySQL==1.*',
+    'pyodbc==4.*',
+    'rdflib==5.*',
+]
+EFM = [
+    'holidays==0.*',
+]
+ObjectMaker = [
+    'graphviz==0.*',
+]
+WebServer = [
+    'cheroot==8.*',
+    'CherryPy==18.*',
+    'tornado==6.*',
+]
+
+[project.scripts]
+arelleCmdLine = "arelle.CntlrCmdLine:main"
+
+[project.gui-scripts]
+arelleGUI = "arelle.CntlrWinMain:main"
+
+[project.urls]
+"Homepage" = "https://arelle.org/"
+"Downloads" = "https://arelle.org/arelle/pub/"
+"Documentation" = "https://arelle.org/arelle/documentation/"
+"Blog" = "https://arelle.org/arelle/blog/"
+"Source Code" = "https://github.com/Arelle/Arelle/"
+"Bug Reports" = "https://github.com/Arelle/Arelle/issues/"
+"Support" = "https://groups.google.com/g/arelle-users/"
+
+[tool.setuptools]
+platforms = ["any"]
+
+[tool.setuptools.dynamic]
+version = {attr = "arelle.Version.__version__"}
+
+[tool.setuptools.packages.find]
+namespaces = false
+
+[tool.pytest.ini_options]
+xfail_strict = true
+
+[tool.mypy]
+# Warn when a # type: ignore comment does not specify any error codes
+enable_error_code = "ignore-without-code"
+
+python_version = "3.9"
+
+show_error_codes = true
+
+# EFM-htm is an invalid Python package name
+exclude = "arelle/plugin/validate/EFM-htm"
+
+# --- per-module options ---
+[[tool.mypy.overrides]]
+module = 'arelle.*'
+ignore_errors = true
+
+# --- strict typing ---
+# when a directory is converted, file entries are replaced by directory entry
+# when the library is converted, the above entry will be replaced (strict is demanded)
+[[tool.mypy.overrides]]
+module = [
+    'arelle.plugin.validate.ESEF.*',
+    'arelle.Cntlr',
+    'arelle.ModelObject',
+    'arelle.Updater',
+    'arelle.UrlUtil',
+    'arelle.ValidateXbrl',
+]
+ignore_errors = false
+strict = true

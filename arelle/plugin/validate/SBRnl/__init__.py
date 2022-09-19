@@ -7,10 +7,7 @@ Created on Dec 12, 2013
 import os
 from arelle import ModelDocument, ModelValue, XmlUtil
 from arelle.ModelValue import qname
-try:
-    import regex as re
-except ImportError:
-    import re
+import regex as re
 from collections import defaultdict
 from .CustomLoader import checkForBOMs
 from .Document import checkDTSdocument
@@ -43,24 +40,24 @@ def validateXbrlFinally(val):
     _statusMsg = _("validating {0} filing rules").format(val.disclosureSystem.name)
     modelXbrl.profileActivity()
     modelXbrl.modelManager.showStatus(_statusMsg)
-    
+
     validateFiling(val, modelXbrl)
 
     modelXbrl.profileActivity(_statusMsg, minTimeToShow=0.0)
     modelXbrl.modelManager.showStatus(None)
-    
+
 def validateFinally(val, *args, **kwargs):
     if not val.validateSBRNLplugin:
         return
-    
+
     del val.prefixNamespace, val.namespacePrefix, val.idObjects
-    
+
 def validateXbrlDtsDocument(val, modelDocument, isFilingDocument, *args, **kwargs):
     if not val.validateSBRNLplugin:
         return
 
     checkDTSdocument(val, modelDocument, isFilingDocument)
-                
+
 __pluginInfo__ = {
     # Do not use _( ) in pluginInfo itself (it is applied later, after loading
     'name': 'Validate SBR NL',

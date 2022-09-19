@@ -6,15 +6,26 @@ Filer Guidelines: ESMA_ESEF Manula 2019.pdf
 @author: Workiva
 (c) Copyright 2022 Workiva, All rights reserved.
 '''
+from __future__ import annotations
 import os, json
+
+from arelle.ModelObject import ModelObject
 from .Const import esefTaxonomyNamespaceURIs
 from lxml.etree import XML, XMLSyntaxError
 from arelle.FileSource import openFileStream
 from arelle.UrlUtil import scheme
+from arelle.ModelManager import ModelManager
+from arelle.ModelXbrl import ModelXbrl
+from arelle.ValidateXbrl import ValidateXbrl
+from typing import Any, Union, cast
+from arelle.ModelDocument import ModelDocument
+from arelle.typing import TypeGetText
+
+_: TypeGetText  # Handle gettext
 
 # check if a modelDocument URI is an extension URI (document URI)
 # also works on a uri passed in as well as modelObject
-def isExtension(val, modelObject):
+def isExtension(val: ValidateXbrl, modelObject: ModelObject | ModelDocument | str | None) -> bool:
     if modelObject is None:
         return False
     if isinstance(modelObject, str):
@@ -25,18 +36,21 @@ def isExtension(val, modelObject):
             not any(uri.startswith(standardTaxonomyURI) for standardTaxonomyURI in val.authParam["standardTaxonomyURIs"]))
 
 # check if in core esef taxonomy (based on namespace URI)
-def isInEsefTaxonomy(val, modelObject):
+def isInEsefTaxonomy(val: ValidateXbrl, modelObject: ModelObject | None) -> bool:
     if modelObject is None:
         return False
+
+    assert modelObject.qname is not None
     ns = modelObject.qname.namespaceURI
+    assert ns is not None
     return (any(ns.startswith(esefNsPrefix) for esefNsPrefix in esefTaxonomyNamespaceURIs))
-    
-supportedImgTypes = {
+
+supportedImgTypes: dict[bool, tuple[str, ...]] = {
     True: ("gif", "jpg", "jpeg", "png"), # file extensions
     False: ("gif", "jpeg", "png") # mime types: jpg is not a valid mime type
     }
 # check image contents against mime/file ext and for Steganography
-def checkImageContents(modelXbrl, imgElt, imgType, isFile, data):
+def checkImageContents(modelXbrl: ModelXbrl, imgElt: ModelObject, imgType: str, isFile: bool, data: bytes) -> None:
     if "svg" in imgType:
         try:
             rootElement = True
@@ -70,7 +84,7 @@ def checkImageContents(modelXbrl, imgElt, imgType, isFile, data):
     else:
         if data[:3] == b"GIF" and data[3:6] in (b'89a', b'89b', b'87a'):
             headerType = "gif"
-        elif ((data[:4] == b'\xff\xd8\xff\xe0' and data[6:11] == b'JFIF\x00') or 
+        elif ((data[:4] == b'\xff\xd8\xff\xe0' and data[6:11] == b'JFIF\x00') or
               (data[:4] == b'\xff\xd8\xff\xe1' and data[6:11] == b'Exif\x00')):
             headerType = "jpg"
         elif data[:8] == b"\x89PNG\r\n\x1a\n":
@@ -95,21 +109,20 @@ def checkImageContents(modelXbrl, imgElt, imgType, isFile, data):
                 _("Image type %(imgType)s has wrong header type: %(headerType)s"),
                 modelObject=imgElt, imgType=imgType, headerType=headerType,
                 messageCodes=("ESEF.2.5.1.imageDoesNotMatchItsFileExtension", "ESEF.2.5.1.incorrectMIMETypeSpecified"))
-            
-def resourcesFilePath(modelManager, fileName):
+
+def resourcesFilePath(modelManager: ModelManager, fileName: str) -> str:
     # resourcesDir can be in cache dir (production) or in validate/EFM/resources (for development)
     _resourcesDir = os.path.join( os.path.dirname(__file__), "resources") # dev/testing location
-    _target = "validate/ESEF/resources"
+
     if not os.path.isabs(_resourcesDir):
         _resourcesDir = os.path.abspath(_resourcesDir)
     if not os.path.exists(_resourcesDir): # production location
         _resourcesDir = os.path.join(modelManager.cntlr.webCache.cacheDir, "resources", "validation", "ESEF")
-        _target = "web-cache/resources"
+
     return os.path.join(_resourcesDir, fileName)
 
-def loadAuthorityValidations(modelXbrl):
-    _file = openFileStream(modelXbrl.modelManager.cntlr, resourcesFilePath(modelXbrl.modelManager, "authority-validations.json"), 'rt', encoding='utf-8')
+def loadAuthorityValidations(modelXbrl: ModelXbrl) -> list[Any] | dict[Any, Any]:
+    _file = openFileStream(modelXbrl.modelManager.cntlr, resourcesFilePath(modelXbrl.modelManager, "authority-validations.json"), 'rt', encoding='utf-8')  # type: ignore[no-untyped-call]
     validations = json.load(_file) # {localName: date, ...}
     _file.close()
-    return validations
-        
+    return cast(Union[dict[Any, Any], list[Any]], validations)
