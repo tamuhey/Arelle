@@ -3,7 +3,7 @@ requires = ["setuptools~=65.3", "wheel~=0.37"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "arelle-release"
+name = "w_versioned_arelle"
 dynamic = ['version']
 readme = "README.md"
 license = {text = "Apache-2.0"}
