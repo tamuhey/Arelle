@@ -4,8 +4,10 @@ Created on Oct 3, 2010
 @author: Mark V Systems Limited
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
+from __future__ import annotations
 from collections import defaultdict
 import os, sys, re, traceback, uuid
+from typing import TYPE_CHECKING, Any, cast
 import logging
 from decimal import Decimal
 from arelle import UrlUtil, XmlUtil, ModelValue, XbrlConst, XmlValidate
@@ -17,7 +19,12 @@ from arelle.PrototypeInstanceObject import FactPrototype, DimValuePrototype
 from arelle.PythonUtil import flattenSequence
 from arelle.UrlUtil import isHttpUrl
 from arelle.ValidateXbrlDimensions import isFactDimensionallyValid
-ModelRelationshipSet = None # dynamic import
+
+if TYPE_CHECKING:
+    from arelle.ModelRelationshipSet import ModelRelationshipSet as ModelRelationshipSetClass
+    from arelle.ModelInstanceObject import ModelContext
+
+
 ModelFact = None
 
 profileStatNumber = 0
@@ -27,14 +34,14 @@ DEFAULT = sys.intern(_STR_8BIT("default"))
 NONDEFAULT = sys.intern(_STR_8BIT("non-default"))
 DEFAULTorNONDEFAULT = sys.intern(_STR_8BIT("default-or-non-default"))
 EMPTY_TUPLE = ()
-    
+
 
 def load(modelManager, url, nextaction=None, base=None, useFileSource=None, errorCaptureLevel=None, **kwargs):
-    """Each loaded instance, DTS, testcase, testsuite, versioning report, or RSS feed, is represented by an 
-    instance of a ModelXbrl object. The ModelXbrl object has a collection of ModelDocument objects, each 
-    representing an XML document (for now, with SQL whenever its time comes). One of the modelDocuments of 
+    """Each loaded instance, DTS, testcase, testsuite, versioning report, or RSS feed, is represented by an
+    instance of a ModelXbrl object. The ModelXbrl object has a collection of ModelDocument objects, each
+    representing an XML document (for now, with SQL whenever its time comes). One of the modelDocuments of
     the ModelXbrl is the entry point (of discovery or of the test suite).
-    
+
     :param url: may be a filename or FileSource object
     :type url: str or FileSource
     :param nextaction: text to use as status line prompt on conclusion of loading and discovery
@@ -77,7 +84,7 @@ def load(modelManager, url, nextaction=None, base=None, useFileSource=None, erro
         loadSchemalocatedSchemas(modelXbrl)
     else:
         modelXbrl.modelDocument = None
-    
+
     #from arelle import XmlValidate
     #uncomment for trial use of lxml xml schema validation of entry document
     #XmlValidate.xmlValidate(modelXbrl.modelDocument)
@@ -100,7 +107,7 @@ def create(modelManager, newDocumentType=None, url=None, schemaRefs=None, create
                 del modelXbrl.entryLoadingUrl
                 loadSchemalocatedSchemas(modelXbrl)
     return modelXbrl
-    
+
 def loadSchemalocatedSchemas(modelXbrl):
     from arelle import ModelDocument
     if modelXbrl.modelDocument and modelXbrl.modelDocument.type < ModelDocument.Type.DTSENTRIES:
@@ -113,38 +120,39 @@ def loadSchemalocatedSchemas(modelXbrl):
             modelDocument = modelDocuments.pop()
             modelDocumentsSchemaLocated.add(modelDocument)
             modelDocument.loadSchemalocatedSchemas()
-        
+
+
 class ModelXbrl:
     """
     .. class:: ModelXbrl(modelManager)
-    
-    ModelXbrl objects represent loaded instances and inline XBRL instances and their DTSes, DTSes 
-    (without instances), versioning reports, testcase indexes, testcase variation documents, and 
+
+    ModelXbrl objects represent loaded instances and inline XBRL instances and their DTSes, DTSes
+    (without instances), versioning reports, testcase indexes, testcase variation documents, and
     other document-centric loadable objects.
-    
+
     :param modelManager: The controller's modelManager object for the current session or command line process.
     :type modelManager: ModelManager
 
         .. attribute:: urlDocs
-        
+
         Dict, by URL, of loaded modelDocuments
-        
+
         .. attribute:: errorCaptureLevel
-        
+
         Minimum logging level to capture in errors list (default is INCONSISTENCY)
-        
+
         .. attribute:: errors
-        
+
         Captured error codes (at or over minimum error capture logging level) and assertion results, which were sent to logger, via log() methods, used for validation and post-processing
-        
+
         .. attribute:: logErrorCount, logWarningCoutn, logInfoCount
-        
+
         Counts of respective error levels processed by modelXbrl logger
 
         .. attribute:: arcroleTypes
 
         Dict by arcrole of defining modelObjects
-        
+
         .. attribute:: roleTypes
 
         Dict by role of defining modelObjects
@@ -152,9 +160,9 @@ class ModelXbrl:
         .. attribute:: qnameConcepts
 
         Dict by qname (QName) of all top level schema elements, regardless of whether discovered or not discoverable (not in DTS)
-        
+
         .. attribute:: qnameAttributes
-        
+
         Dict by qname of all top level schema attributes
 
         .. attribute:: qnameAttributeGroups
@@ -166,7 +174,7 @@ class ModelXbrl:
         Dict by qname of all top level and anonymous types
 
         .. attribute:: baseSets
-        
+
         Dict of base sets by (arcrole, linkrole, arc qname, link qname), (arcrole, linkrole, *, *), (arcrole, *, *, *), and in addition, collectively for dimensions, formula,  and rendering, as arcroles 'XBRL-dimensions', 'XBRL-formula', and 'Table-rendering'.
 
         .. attribute:: relationshipSets
@@ -204,6 +212,10 @@ class ModelXbrl:
         .. attribute:: modelVariableSets
 
         Set of variableSets in formula linkbases
+
+        .. attribute:: modelConsistencyAssertions
+
+        Set of modelConsistencyAssertions in formula linkbases
 
         .. attribute:: modelCustomFunctionSignatures
 
@@ -243,23 +255,31 @@ class ModelXbrl:
 
         .. attribute:: formulaOutputInstance
 
-        Standard output instance if formulae produce one. 
+        Standard output instance if formulae produce one.
 
         .. attribute:: hasRendering
 
         True if rendering tables are discovered
 
         .. attribute:: Log
-        
+
         Logger for modelXbrl
 
     """
-    
+
+    contexts: dict[Any, Any]
+    dimensionDefaultConcepts: dict
+    ixdsHtmlElements: list
+    isDimensionsValidated: bool
+    uriDir: str
+    targetRelationships: Any
+    qnameDimensionContextElement: dict
+
     def __init__(self, modelManager, errorCaptureLevel=None):
         self.modelManager = modelManager
         self.skipDTS = modelManager.skipDTS
         self.init(errorCaptureLevel=errorCaptureLevel)
-        
+
     def init(self, keepViews=False, errorCaptureLevel=None):
         self.uuid = uuid.uuid1().urn
         self.namespaceDocs = defaultdict(list)
@@ -271,7 +291,7 @@ class ModelXbrl:
         self.arcroleTypes = defaultdict(list)
         self.roleTypes = defaultdict(list)
         self.qnameConcepts = {} # indexed by qname of element
-        self.nameConcepts = defaultdict(list) # contains ModelConcepts by name 
+        self.nameConcepts = defaultdict(list) # contains ModelConcepts by name
         self.qnameAttributes = {}
         self.qnameAttributeGroups = {}
         self.qnameGroupDefinitions = {}
@@ -287,6 +307,7 @@ class ModelXbrl:
         self.modelObjects = []
         self.qnameParameters = {}
         self.modelVariableSets = set()
+        self.modelConsistencyAssertions = set()
         self.modelCustomFunctionSignatures = {}
         self.modelCustomFunctionImplementations = set()
         self.modelRenderingTables = set()
@@ -314,7 +335,7 @@ class ModelXbrl:
 
 
     def close(self):
-        """Closes any views, formula output instances, modelDocument(s), and dereferences all memory used 
+        """Closes any views, formula output instances, modelDocument(s), and dereferences all memory used
         """
         if not self.isClosed:
             self.closeViews()
@@ -329,17 +350,17 @@ class ModelXbrl:
             self.__dict__.clear() # dereference everything before closing document
             if modelDocument:
                 modelDocument.close(urlDocs=urlDocs)
-            
+
     @property
     def isClosed(self):
         """
         :returns:  bool -- True if closed (python object has deferenced and deleted all attributes after closing)
         """
         return not bool(self.__dict__)  # closed when dict is empty
-            
+
     def reload(self,nextaction,reloadCache=False):
         """Reloads all model objects from their original entry point URL, preserving any open views (which are reloaded).
-        
+
         :param nextAction: status line text string, if any, to show upon completion
         :type nextAction: str
         :param reloadCache: True to force clearing and reloading of web cache, if working online.
@@ -350,7 +371,7 @@ class ModelXbrl:
         self.modelDocument = ModelDocument.load(self, self.fileSource.url, isEntry=True, reloadCache=reloadCache)
         self.modelManager.showStatus(_("xbrl loading finished, {0}...").format(nextaction),5000)
         self.modelManager.reloadViews(self)
-            
+
     def closeViews(self):
         """Close views associated with this modelXbrl
         """
@@ -358,7 +379,7 @@ class ModelXbrl:
             for view in range(len(self.views)):
                 if len(self.views) > 0:
                     self.views[0].close()
-    
+
     @property
     def displayUri(self):
         if hasattr(self, "ixdsDocUrls"):
@@ -367,12 +388,12 @@ class ModelXbrl:
             return self.uri
         else:
             return self.fileSource.url
-        
-    def relationshipSet(self, arcrole, linkrole=None, linkqname=None, arcqname=None, includeProhibits=False):
+
+    def relationshipSet(self, arcrole, linkrole=None, linkqname=None, arcqname=None, includeProhibits=False) -> ModelRelationshipSetClass:
         """Returns a relationship set matching specified parameters (only arcrole is required).
-        
+
         Resolve and determine relationship set.  If a relationship set of the same parameters was previously resolved, it is returned from a cache.
-        
+
         :param arcrole: Required arcrole, or special collective arcroles 'XBRL-dimensions', 'XBRL-formula', and 'Table-rendering'
         :type arcrole: str
         :param linkrole: Linkrole (wild if None)
@@ -383,30 +404,28 @@ class ModelXbrl:
         :type includeProhibits: bool
         :returns: [ModelRelationship] -- Ordered list of effective relationship objects per parameters
         """
-        global ModelRelationshipSet
-        if ModelRelationshipSet is None:
-            from arelle import ModelRelationshipSet
+        from arelle import ModelRelationshipSet
         key = (arcrole, linkrole, linkqname, arcqname, includeProhibits)
         if key not in self.relationshipSets:
             ModelRelationshipSet.create(self, arcrole, linkrole, linkqname, arcqname, includeProhibits)
         return self.relationshipSets[key]
-    
+
     def baseSetModelLink(self, linkElement):
         for modelLink in self.baseSets[("XBRL-footnotes",None,None,None)]:
             if modelLink == linkElement:
                 return modelLink
         return None
-    
+
     def roleUriTitle(self, roleURI):
         return re.sub(r"([A-Z])",r" \1", os.path.basename(roleURI)).title()
-    
-    def roleTypeDefinition(self, roleURI, lang=None):
+
+    def roleTypeDefinition(self, roleURI, lang=None) -> str:
         modelRoles = self.roleTypes.get(roleURI, ())
         if modelRoles:
             _roleType = modelRoles[0]
-            return _roleType.genLabel(lang=lang, strip=True)  or _roleType.definition or self.roleUriTitle(roleURI)
+            return cast(str, _roleType.genLabel(lang=lang, strip=True) or _roleType.definition or self.roleUriTitle(roleURI))
         return self.roleUriTitle(roleURI)
-    
+
     def roleTypeName(self, roleURI, lang=None):
         # authority-specific role type name
         for pluginXbrlMethod in pluginClassMethods("ModelXbrl.RoleTypeName"):
@@ -414,12 +433,12 @@ class ModelXbrl:
             if _roleTypeName:
                 return _roleTypeName
         return self.roleTypeDefinition(roleURI, lang)
-    
+
     def matchSubstitutionGroup(self, elementQname, subsGrpMatchTable):
         """Resolve a subsitutionGroup for the elementQname from the match table
-        
+
         Used by ModelObjectFactory to return Class type for new ModelObject subclass creation, and isInSubstitutionGroup
-        
+
         :param elementQname: Element/Concept QName to find substitution group
         :type elementQname: QName
         :param subsGrpMatchTable: Table of substitutions used to determine xml proxy object class for xml elements and substitution group membership
@@ -437,12 +456,12 @@ class ModelXbrl:
                     return subsGrpMatchTable[subsGrpQname]
                 subsGrpMdlObj = subsGrpMdlObj.substitutionGroup
         return subsGrpMatchTable.get(None)
-    
-    def isInSubstitutionGroup(self, elementQname, subsGrpQnames):
+
+    def isInSubstitutionGroup(self, elementQname, subsGrpQnames) -> bool:
         """Determine if element is in substitution group(s)
-        
+
         Used by ModelObjectFactory to return Class type for new ModelObject subclass creation, and isInSubstitutionGroup
-        
+
         :param elementQname: Element/Concept QName to determine if in substitution group(s)
         :type elementQname: QName
         :param subsGrpQnames: QName or list of QNames
@@ -451,16 +470,16 @@ class ModelXbrl:
         """
         return self.matchSubstitutionGroup(elementQname, {
                   qn:(qn is not None) for qn in (subsGrpQnames if hasattr(subsGrpQnames, '__iter__') else (subsGrpQnames,)) + (None,)})
-    
+
     def createInstance(self, url=None):
         """Creates an instance document for a DTS which didn't have an instance document, such as
         to create a new instance for a DTS which was loaded from a taxonomy or linkbase entry point.
-        
+
         :param url: File name to save the new instance document
         :type url: str
         """
         from arelle import (ModelDocument, FileSource)
-        if self.modelDocument and self.modelDocument.type == ModelDocument.Type.INSTANCE: 
+        if self.modelDocument and self.modelDocument.type == ModelDocument.Type.INSTANCE:
             # entry already is an instance, delete facts etc.
             del self.facts[:]
             self.factsInInstance.clear()
@@ -472,7 +491,7 @@ class ModelXbrl:
             self.modelDocument.schemaLocationElements.clear()
             self.modelDocument.referencedNamespaces.clear()
             for child in list(self.modelDocument.xmlRootElement):
-                if not (isinstance(child, ModelObject) and child.namespaceURI == XbrlConst.link and 
+                if not (isinstance(child, ModelObject) and child.namespaceURI == XbrlConst.link and
                         child.localName.endswith("Ref")): # remove contexts, facts, footnotes
                     self.modelDocument.xmlRootElement.remove(child)
         else:
@@ -493,15 +512,15 @@ class ModelXbrl:
             for view in self.views:
                 if isinstance(view, ViewWinDTS.ViewDTS):
                     self.modelManager.cntlr.uiThreadQueue.put((view.view, []))
-                
+
     def saveInstance(self, **kwargs):
         """Saves current instance document file.
-        
+
         :param overrideFilepath: specify to override saving in instance's modelDocument.filepath
         """
         self.modelDocument.save(**kwargs)
-            
-    @property    
+
+    @property
     def prefixedNamespaces(self):
         """Dict of prefixes for namespaces defined in DTS
         """
@@ -513,11 +532,11 @@ class ModelXbrl:
                     prefix = XmlUtil.xmlnsprefix(nsDoc.xmlRootElement, ns)
                     if prefix and prefix not in prefixedNamespaces:
                         prefixedNamespaces[prefix] = ns
-        return prefixedNamespaces 
-    
+        return prefixedNamespaces
+
     def matchContext(self, entityIdentScheme, entityIdentValue, periodType, periodStart, periodEndInstant, dims, segOCCs, scenOCCs):
         """Finds matching context, by aspects, as in formula usage, if any
-        
+
         :param entityIdentScheme: Scheme to match
         :type entityIdentScheme: str
         :param entityIdentValue: Entity identifier value to match
@@ -559,11 +578,11 @@ class ModelXbrl:
                 ):
                     return c
         return None
-                 
+
     def createContext(self, entityIdentScheme, entityIdentValue, periodType, periodStart, periodEndInstant, priItem, dims, segOCCs, scenOCCs,
                       afterSibling=None, beforeSibling=None, id=None):
         """Creates a new ModelContext and validates (integrates into modelDocument object model).
-        
+
         :param entityIdentScheme: Scheme to match
         :type entityIdentScheme: str
         :param entityIdentValue: Entity identifier value to match
@@ -602,12 +621,12 @@ class ModelXbrl:
         if periodType == "forever":
             XmlUtil.addChild(periodElt, XbrlConst.xbrli, "forever")
         elif periodType == "instant":
-            XmlUtil.addChild(periodElt, XbrlConst.xbrli, "instant", 
+            XmlUtil.addChild(periodElt, XbrlConst.xbrli, "instant",
                              text=XmlUtil.dateunionValue(periodEndInstant, subtractOneDay=True))
         elif periodType == "duration":
-            XmlUtil.addChild(periodElt, XbrlConst.xbrli, "startDate", 
+            XmlUtil.addChild(periodElt, XbrlConst.xbrli, "startDate",
                              text=XmlUtil.dateunionValue(periodStart))
-            XmlUtil.addChild(periodElt, XbrlConst.xbrli, "endDate", 
+            XmlUtil.addChild(periodElt, XbrlConst.xbrli, "endDate",
                              text=XmlUtil.dateunionValue(periodEndInstant, subtractOneDay=True))
         segmentElt = None
         scenarioElt = None
@@ -624,11 +643,11 @@ class ModelXbrl:
                 # force trying a valid prototype's context Elements
                 if not isFactDimensionallyValid(self, fp, setPrototypeContextElements=True):
                     self.info("arelle:info",
-                        _("Create context for %(priItem)s, cannot determine valid context elements, no suitable hypercubes"), 
+                        _("Create context for %(priItem)s, cannot determine valid context elements, no suitable hypercubes"),
                         modelObject=self, priItem=priItem)
                 fpDims = fp.context.qnameDims
             else:
-                fpDims = dims # dims known to be valid (such as for inline extraction) 
+                fpDims = dims # dims known to be valid (such as for inline extraction)
             for dimQname in sorted(fpDims.keys()):
                 dimValue = fpDims[dimQname]
                 if isinstance(dimValue, (DimValuePrototype,ModelDimensionValue)):
@@ -638,45 +657,45 @@ class ModelXbrl:
                     dimMemberQname = None
                     contextEltName = None
                 if contextEltName == "segment":
-                    if segmentElt is None: 
+                    if segmentElt is None:
                         segmentElt = XmlUtil.addChild(entityElt, XbrlConst.xbrli, "segment")
                     contextElt = segmentElt
                 elif contextEltName == "scenario":
-                    if scenarioElt is None: 
+                    if scenarioElt is None:
                         scenarioElt = XmlUtil.addChild(newCntxElt, XbrlConst.xbrli, "scenario")
                     contextElt = scenarioElt
                 else:
                     self.info("arelleLinfo",
-                        _("Create context, %(dimension)s, cannot determine context element, either no all relationship or validation issue"), 
+                        _("Create context, %(dimension)s, cannot determine context element, either no all relationship or validation issue"),
                         modelObject=self, dimension=dimQname),
                     continue
                 dimAttr = ("dimension", XmlUtil.addQnameValue(xbrlElt, dimQname))
                 if dimValue.isTyped:
-                    dimElt = XmlUtil.addChild(contextElt, XbrlConst.xbrldi, "xbrldi:typedMember", 
+                    dimElt = XmlUtil.addChild(contextElt, XbrlConst.xbrldi, "xbrldi:typedMember",
                                               attributes=dimAttr)
                     if isinstance(dimValue, (ModelDimensionValue, DimValuePrototype)) and dimValue.isTyped:
-                        XmlUtil.copyNodes(dimElt, dimValue.typedMember) 
+                        XmlUtil.copyNodes(dimElt, dimValue.typedMember)
                 elif dimMemberQname:
                     dimElt = XmlUtil.addChild(contextElt, XbrlConst.xbrldi, "xbrldi:explicitMember",
                                               attributes=dimAttr,
                                               text=XmlUtil.addQnameValue(xbrlElt, dimMemberQname))
         if segOCCs:
-            if segmentElt is None: 
+            if segmentElt is None:
                 segmentElt = XmlUtil.addChild(entityElt, XbrlConst.xbrli, "segment")
             XmlUtil.copyNodes(segmentElt, segOCCs)
         if scenOCCs:
-            if scenarioElt is None: 
+            if scenarioElt is None:
                 scenarioElt = XmlUtil.addChild(newCntxElt, XbrlConst.xbrli, "scenario")
             XmlUtil.copyNodes(scenarioElt, scenOCCs)
-                
+
         XmlValidate.validate(self, newCntxElt)
         self.modelDocument.contextDiscover(newCntxElt)
         return newCntxElt
-        
-        
+
+
     def matchUnit(self, multiplyBy, divideBy):
         """Finds matching unit, by measures, as in formula usage, if any
-        
+
         :param multiplyBy: List of multiply-by measure QNames (or top level measures if no divideBy)
         :type multiplyBy: [QName]
         :param divideBy: List of multiply-by measure QNames (or empty list if no divideBy)
@@ -692,7 +711,7 @@ class ModelXbrl:
 
     def createUnit(self, multiplyBy, divideBy, afterSibling=None, beforeSibling=None, id=None):
         """Creates new unit, by measures, as in formula usage, if any
-        
+
         :param multiplyBy: List of multiply-by measure QNames (or top level measures if no divideBy)
         :type multiplyBy: [QName]
         :param divideBy: List of multiply-by measure QNames (or empty list if no divideBy)
@@ -725,11 +744,11 @@ class ModelXbrl:
         XmlValidate.validate(self, newUnitElt)
         self.modelDocument.unitDiscover(newUnitElt)
         return newUnitElt
-    
+
     @property
     def nonNilFactsInInstance(self): # indexed by fact (concept) qname
         """Facts in the instance which are not nil, cached
-        
+
         :returns: set -- non-nil facts in instance
         """
         try:
@@ -737,37 +756,37 @@ class ModelXbrl:
         except AttributeError:
             self._nonNilFactsInInstance = set(f for f in self.factsInInstance if not f.isNil)
             return self._nonNilFactsInInstance
-        
+
     @property
     def factsByQname(self): # indexed by fact (concept) qname
         """Facts in the instance indexed by their QName, cached
-        
+
         :returns: dict -- indexes are QNames, values are ModelFacts
         """
         try:
             return self._factsByQname
         except AttributeError:
             self._factsByQname = fbqn = defaultdict(set)
-            for f in self.factsInInstance: 
+            for f in self.factsInInstance:
                 if f.qname is not None:
                     fbqn[f.qname].add(f)
             return fbqn
-        
+
     @property
     def factsByLocalName(self): # indexed by fact (concept) localName
         """Facts in the instance indexed by their LocalName, cached
-        
+
         :returns: dict -- indexes are LocalNames, values are ModelFacts
         """
         try:
             return self._factsByLocalName
         except AttributeError:
             self._factsByLocalName = fbln = defaultdict(set)
-            for f in self.factsInInstance: 
+            for f in self.factsInInstance:
                 if f.qname is not None:
                     fbln[f.qname.localName].add(f)
             return fbln
-        
+
     def factsByDatatype(self, notStrict, typeQname): # indexed by fact (concept) qname
         """Facts in the instance indexed by data type QName, cached as types are requested
 
@@ -787,7 +806,7 @@ class ModelXbrl:
                 if c.typeQname == typeQname or (notStrict and c.type.isDerivedFrom(typeQname)):
                     fbdt.add(f)
             return fbdt
-        
+
     def factsByPeriodType(self, periodType): # indexed by fact (concept) qname
         """Facts in the instance indexed by periodType, cached
 
@@ -806,10 +825,10 @@ class ModelXbrl:
             return self.factsByPeriodType(periodType)
         except KeyError:
             return set()  # no facts for this period type
-        
+
     def factsByDimMemQname(self, dimQname, memQname=None): # indexed by fact (concept) qname
         """Facts in the instance indexed by their Dimension  and Member QName, cached
-        
+
         :returns: dict -- indexes are (Dimension, Member) and (Dimension) QNames, values are ModelFacts
         If Member is None, returns facts that have the dimension (explicit or typed)
         If Member is NONDEFAULT, returns facts that have the dimension (explicit non-default or typed)
@@ -823,7 +842,7 @@ class ModelXbrl:
             return self.factsByDimMemQname(dimQname, memQname)
         except KeyError:
             self._factsByDimQname[dimQname] = fbdq = defaultdict(set)
-            for fact in self.factsInInstance: 
+            for fact in self.factsInInstance:
                 if fact.isItem and fact.context is not None:
                     dimValue = fact.context.dimValue(dimQname)
                     if isinstance(dimValue, ModelValue.QName):  # explicit dimension default value
@@ -839,8 +858,8 @@ class ModelXbrl:
                     else: # default typed dimension
                         fbdq[DEFAULT].add(fact)
             return fbdq[memQname]
-    
-    @property    
+
+    @property
     def contextsInUse(self):
         try:
             if self._contextsInUseMarked:
@@ -852,8 +871,8 @@ class ModelXbrl:
                     cntx._inUse = True
             self._contextsInUseMarked = True
             return self.contextsInUse
-    
-    @property    
+
+    @property
     def dimensionsInUse(self):
         try:
             return self._dimensionsInUse
@@ -862,11 +881,11 @@ class ModelXbrl:
                                         for cntx in self.contexts.values()  # use contextsInUse?  slower?
                                         for dim in cntx.qnameDims.values())
             return self._dimensionsInUse
-                
+
     def matchFact(self, otherFact, unmatchedFactsStack=None, deemP0inf=False, matchId=False, matchLang=True):
         """Finds matching fact, by XBRL 2.1 duplicate definition (if tuple), or by
         QName and VEquality (if an item), lang and accuracy equality, as in formula and test case usage
-        
+
         :param otherFact: Fact to match
         :type otherFact: ModelFact
         :deemP0inf: boolean for formula validation to deem P0 facts to be VEqual as if they were P=INF
@@ -889,10 +908,10 @@ class ModelXbrl:
                             fact.precision == otherFact.precision):
                             return fact
         return None
-            
+
     def createFact(self, conceptQname, attributes=None, text=None, parent=None, afterSibling=None, beforeSibling=None, validate=True):
         """Creates new fact, as in formula output instance creation, and validates into object model
-        
+
         :param conceptQname: QNames of concept
         :type conceptQname: QName
         :param attributes: Tuple of name, value, or tuples of name, value tuples (name,value) or ((name,value)[,(name,value...)]), where name is either QName or clark-notation name string
@@ -934,8 +953,8 @@ class ModelXbrl:
             if hasattr(self, "_factsByDimQname"):
                 del self._factsByDimQname
         self.setIsModified()
-        return newFact    
-        
+        return newFact
+
     def setIsModified(self):
         """Records that the underlying document has been modified.
         """
@@ -952,7 +971,7 @@ class ModelXbrl:
 
     def modelObject(self, objectId):
         """Finds a model object by an ordinal ID which may be buried in a tkinter view id string (e.g., 'somedesignation_ordinalnumber').
-        
+
         :param objectId: string which includes _ordinalNumber, produced by ModelObject.objectId(), or integer object index
         :type objectId: str or int
         :returns: ModelObject
@@ -964,9 +983,9 @@ class ModelXbrl:
             return self.modelObjects[_INT(objectId.rpartition("_")[2])]
         except (IndexError, ValueError):
             return None
-    
+
     # UI thread viewModelObject
-    def viewModelObject(self, objectId):
+    def viewModelObject(self, objectId: str | int) -> None:
         """Finds model object, if any, and synchronizes any views displaying it to bring the model object into scrollable view region and highlight it
         :param objectId: string which includes _ordinalNumber, produced by ModelObject.objectId(), or integer object index
         :type objectId: str or int
@@ -985,7 +1004,7 @@ class ModelXbrl:
                             modelObject,
                             err, traceback.format_tb(sys.exc_info()[2])))
 
-    def effectiveMessageCode(self, messageCodes):     
+    def effectiveMessageCode(self, messageCodes):
         """
         If codes includes EFM, GFM, HMRC, or SBR-coded error then the code chosen (if a sequence)
         corresponds to whether EFM, GFM, HMRC, or SBR validation is in effect.
@@ -993,7 +1012,7 @@ class ModelXbrl:
         effectiveMessageCode = None
         _validationType = self.modelManager.disclosureSystem.validationType
         _exclusiveTypesPattern = self.modelManager.disclosureSystem.exclusiveTypesPattern
-        
+
         for argCode in messageCodes if isinstance(messageCodes,tuple) else (messageCodes,):
             if (isinstance(argCode, ModelValue.QName) or
                 (_validationType and argCode.startswith(_validationType)) or
@@ -1012,7 +1031,7 @@ class ModelXbrl:
                 messageCodes = kwargs["messageCode"]
             messageCode = self.effectiveMessageCode(messageCodes)
             codeEffective = (messageCode and
-                             (not logger.messageCodeFilter or logger.messageCodeFilter.match(messageCode))) 
+                             (not logger.messageCodeFilter or logger.messageCodeFilter.match(messageCode)))
         else:
             codeEffective = True
         if "level" in kwargs and logger.messageLevelFilter:
@@ -1144,13 +1163,13 @@ class ModelXbrl:
         for pluginXbrlMethod in pluginClassMethods("Logging.Message.Parameters"):
             # plug in can rewrite msg string or return msg if not altering msg
             msg = pluginXbrlMethod(messageCode, msg, modelObjectArgs, fmtArgs) or msg
-        return (messageCode, 
-                (msg, fmtArgs) if fmtArgs else (msg,), 
+        return (messageCode,
+                (msg, fmtArgs) if fmtArgs else (msg,),
                 extras)
-        
+
     def loggableValue(self, argValue): # must be dereferenced and not related to object lifetimes
         if isinstance(argValue, (ModelValue.QName, ModelObject, FileNamedStringIO,
-                                 # might be a set of lxml objects not dereferencable at shutdown 
+                                 # might be a set of lxml objects not dereferencable at shutdown
                                  tuple, list, set)):
             return str(argValue)
         elif argValue is None:
@@ -1173,20 +1192,20 @@ class ModelXbrl:
         """
         """@messageCatalog=[]"""
         self.log('DEBUG', codes, msg, **args)
-                    
-    def info(self, codes, msg, **args):
+
+    def info(self, codes, msg, **args) -> None:
         """Same as error(), but as info
         """
         """@messageCatalog=[]"""
         self.log('INFO', codes, msg, **args)
-                    
-    def warning(self, codes, msg, **args):
+
+    def warning(self, codes, msg, **args) -> None:
         """Same as error(), but as warning, and no error code saved for Validate
         """
         """@messageCatalog=[]"""
         self.log('WARNING', codes, msg, **args)
-                    
-    def log(self, level, codes, msg, **args):
+
+    def log(self, level, codes, msg, **args) -> None:
         """Same as error(), but level passed in as argument
         """
         logger = self.logger
@@ -1209,23 +1228,22 @@ class ModelXbrl:
                     self.errors.append(messageCode) # assume one error occurence
             """@messageCatalog=[]"""
             logger.log(numericLevel, *logArgs, exc_info=args.get("exc_info"), extra=extras)
-                    
-    def error(self, codes, msg, **args):
-        """Logs a message as info, by code, logging-system message text (using %(name)s named arguments 
-        to compose string by locale language), resolving model object references (such as qname), 
-        to prevent non-dereferencable memory usage.  Supports logging system parameters, and 
-        special parameters modelObject, modelXbrl, or modelDocument, to provide trace 
-        information to the file, source line, and href (XPath element scheme pointer).  
+
+    def error(self, codes: str | tuple[str, ...], msg: str, **args) -> None:
+        """Logs a message as info, by code, logging-system message text (using %(name)s named arguments
+        to compose string by locale language), resolving model object references (such as qname),
+        to prevent non-dereferencable memory usage.  Supports logging system parameters, and
+        special parameters modelObject, modelXbrl, or modelDocument, to provide trace
+        information to the file, source line, and href (XPath element scheme pointer).
         Supports the logging exc_info argument.
-        
+
         Args may include a specification of one or more ModelObjects that identify the source of the
         message, as modelObject={single-modelObject, (sequence-of-modelObjects)} or modelXbrl=modelXbrl or
         modelDocument=modelDocument.
-        
+
         Args must include a named argument for each msg %(namedArg)s replacement.
-        
+
         :param codes: Message code or tuple/list of message codes
-        :type codes: str or [str]
         :param msg: Message text string to be formatted and replaced with named parameters in **args
         :param **args: Named arguments including modelObject, modelXbrl, or modelDocument, named arguments in msg string, and any exc_info argument.
         :param messageCodes: If first parameter codes, above, is dynamically formatted, this is a documentation string of the message codes only used for extraction of the message catalog document (not used in run-time processing).
@@ -1238,7 +1256,7 @@ class ModelXbrl:
         """
         """@messageCatalog=[]"""
         self.log('CRITICAL', codes, msg, **args)
-        
+
     def logProfileStats(self):
         """Logs profile stats that were collected
         """
@@ -1251,8 +1269,8 @@ class ModelXbrl:
                 " \n", # put instance reference on fresh line in traces
                 modelObject=self.modelXbrl.modelDocument, profileStats=self.profileStats,
                 timeTotal=timeTotal, timeEFM=timeEFM)
-    
-    def profileStat(self, name=None, stat=None):
+
+    def profileStat(self, name=None, stat=None) -> None:
         '''
         order 1xx - load, import, setup, etc
         order 2xx - views, 26x - table lb
@@ -1274,14 +1292,14 @@ class ModelXbrl:
                 pass
             if stat is None:
                 self._startedTimeStat = time.time()
-        
-    def profileActivity(self, activityCompleted=None, minTimeToShow=0):
+
+    def profileActivity(self, activityCompleted=None, minTimeToShow=0) -> None:
         """Used to provide interactive GUI messages of long-running processes.
-        
+
         When the time between last profileActivity and this profileActivity exceeds minTimeToShow, then
         the time is logged (if it is shorter than it is not logged), thus providing feedback of long
         running (and possibly troublesome) processing steps.
-        
+
         :param activityCompleted: Description of activity completed, or None if call is just to demark starting of a profiled activity.
         :type activityCompleted: str
         :param minTimeToShow: Seconds of elapsed time for activity, if longer then the profile message appears in the log.
@@ -1302,21 +1320,21 @@ class ModelXbrl:
 
     def saveDTSpackage(self):
         """Contributed program to save DTS package as a zip file.  Refactored into a plug-in (and may be removed from main code).
-        """ 
+        """
         if self.fileSource.isArchive:
             return
-        from zipfile import ZipFile 
-        import os 
-        entryFilename = self.fileSource.url 
-        pkgFilename = entryFilename + ".zip" 
+        from zipfile import ZipFile
+        import os
+        entryFilename = self.fileSource.url
+        pkgFilename = entryFilename + ".zip"
         with ZipFile(pkgFilename, 'w') as zip:
             numFiles = 0
-            for fileUri in sorted(self.urlDocs.keys()): 
-                if not isHttpUrl(fileUri): 
+            for fileUri in sorted(self.urlDocs.keys()):
+                if not isHttpUrl(fileUri):
                     numFiles += 1
                     # this has to be a relative path because the hrefs will break
-                    zip.write(fileUri, os.path.basename(fileUri)) 
+                    zip.write(fileUri, os.path.basename(fileUri))
         self.info("info",
-                  _("DTS of %(entryFile)s has %(numberOfFiles)s files packaged into %(packageOutputFile)s"), 
+                  _("DTS of %(entryFile)s has %(numberOfFiles)s files packaged into %(packageOutputFile)s"),
                 modelObject=self,
                 entryFile=os.path.basename(entryFilename), packageOutputFile=pkgFilename, numberOfFiles=numFiles)

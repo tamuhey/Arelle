@@ -8,11 +8,9 @@ Filer Guidelines: esma32-60-254_esef_reporting_manual.pdf
 @author: Workiva
 (c) Copyright 2022 Workiva, All rights reserved.
 '''
-
-try:
-    import regex as re
-except ImportError:
-    import re
+from __future__ import annotations
+import regex as re
+from typing import Any, Callable
 from arelle.ModelValue import qname
 from arelle.XbrlConst import all, notAll, hypercubeDimension, dimensionDomain, domainMember, dimensionDefault, widerNarrower
 
@@ -60,7 +58,7 @@ filenameRegexes = {
     "ref": r"(.{1,})-[0-9]{4}-[0-9]{2}-[0-9]{2}_ref[.]xml$"
     }
 
-mandatory = set() # mandatory element qnames
+mandatory: set[Callable[..., Any]] = set() # mandatory element qnames
 
 # hidden references
 untransformableTypes = {"anyURI", "base64Binary", "hexBinary", "NOTATION", "QName", "time",
@@ -101,7 +99,7 @@ esefMandatoryElementNames2020 = (
     "DescriptionOfNatureOfEntitysOperationsAndPrincipalActivities",
     "NameOfParentEntity",
     "NameOfUltimateParentOfGroup"
-    )     
+    )
 
 esefMandatoryElementNames2022 = (
     "AddressOfRegisteredOfficeOfEntity",
@@ -347,4 +345,4 @@ esefMandatoryElementNames2022 = (
     "NameOfUltimateParentOfGroup",
     "PrincipalPlaceOfBusiness",
     "StatementOfIFRSCompliance",
-)            
+)

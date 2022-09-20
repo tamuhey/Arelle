@@ -17,16 +17,25 @@ arelle/plugin/validate/ESEF-DQC.py
 arelle/plugin/xule
 Arelle.egg-info
 .eggs
-.idea/*
-venv*
 *.iml
-.github/workflows/*
-.idea
+
+.tox
+arelle_release.egg-info
+arelle-release*
+
 /venv/
 tests/resources/conformance_suites/
 
 ### IDE-specific ignores
 
+# PyCharm
+.idea
+
 # VS Code
 .devcontainer
 .vscode
+
+Pipfile.lock
+Pipfile
+
+.DS_Store

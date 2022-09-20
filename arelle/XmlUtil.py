@@ -4,18 +4,22 @@ Created on Oct 22, 2010
 @author: Mark V Systems Limited
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
+from __future__ import annotations
 import datetime
-try:
-    import regex as re
-except ImportError:
-    import re
+import regex as re
 from lxml import etree
 from arelle.XbrlConst import ixbrlAll, qnLinkFootnote, xhtml, xml, xsd, xhtml
-from arelle.ModelObject import ModelObject, ModelComment
+from arelle.ModelObject import ModelObject
 from arelle.ModelValue import qname, QName, tzinfoStr
 from arelle.PrototypeDtsObject import PrototypeElementTree, PrototypeObject
-htmlEltUriAttrs = resolveHtmlUri = None
+from typing import TYPE_CHECKING, Any
+from arelle.ModelObject import ModelObject
 
+if TYPE_CHECKING:
+    from arelle.ModelInstanceObject import ModelContext
+    from arelle.ModelInstanceObject import ModelUnit
+
+htmlEltUriAttrs = resolveHtmlUri = None
 datetimePattern = re.compile(r"\s*([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})?\s*|"
                              r"\s*([0-9]{4})-([0-9]{2})-([0-9]{2})(Z|[+-][0-9]{2}:[0-9]{2})?\s*")
 xmlEncodingPattern = re.compile(r"\s*<\?xml\s.*encoding=['\"]([^'\"]*)['\"].*\?>")
@@ -23,7 +27,7 @@ xpointerFragmentIdentifierPattern = re.compile(r"([\w.]+)(\(([^)]*)\))?")
 xmlnsStripPattern = re.compile(r'\s*xmlns(:[\w.-]+)?="[^"]*"')
 nonSpacePattern = re.compile(r"\S+")
 
-def xmlns(element, prefix):
+def xmlns(element, prefix) -> Any:
     ns = element.nsmap.get(prefix)
     if ns:
         return ns
@@ -31,7 +35,7 @@ def xmlns(element, prefix):
         return xml
     return ns # return results of get (which may be no namespace
 
-def xmlnsprefix(element, ns):
+def xmlnsprefix(element, ns) -> Any:
     if ns is None:
         return None
     if ns == xml: # never declared explicitly
@@ -43,7 +47,7 @@ def xmlnsprefix(element, ns):
             else:
                 return ""   # prefix none but exists, xml process as zero-length string
     return None
-    
+
 def targetNamespace(element):
     treeElt = element
     while treeElt is not None:
@@ -99,7 +103,7 @@ def prefixedNameToNamespaceLocalname(element, prefixedName, defaultNsmap=None):
         localName = names[2]
     ns = xmlns(element, prefix)
     if ns is None:
-        if prefix: 
+        if prefix:
             if prefix in defaultNsmap:
                 ns = defaultNsmap[prefix]
             else:
@@ -139,20 +143,20 @@ def encoding(xml, default="utf-8"):
         return match.group(1)
     return default
 
-def text(element):   
+def text(element):
     return textNotStripped(element).strip()
 
-def childText(element, childNamespaceURIs, childLocalNames):   
+def childText(element, childNamespaceURIs, childLocalNames):
     element = child(element, childNamespaceURIs, childLocalNames)
     return textNotStripped(element).strip() if element is not None else None
 
 def textNotStripped(element):
-    if element is None: 
+    if element is None:
         return ""
     return element.textValue  # allows embedded comment nodes, returns '' if None
 
 # ixEscape can be None, "html" (xhtml namespace becomes default), "xhtml", or "xml"
-def innerText(element, ixExclude=False, ixEscape=None, ixContinuation=False, ixResolveUris=False, strip=True):   
+def innerText(element, ixExclude=False, ixEscape=None, ixContinuation=False, ixResolveUris=False, strip=True):
     try:
         text = "".join(text for text in innerTextNodes(element, ixExclude, ixEscape, ixContinuation, ixResolveUris))
         if strip:
@@ -161,7 +165,7 @@ def innerText(element, ixExclude=False, ixEscape=None, ixContinuation=False, ixR
     except (AttributeError, TypeError):
         return ""
 
-def innerTextList(element, ixExclude=False, ixEscape=None, ixContinuation=False, ixResolveUris=False):   
+def innerTextList(element, ixExclude=False, ixEscape=None, ixContinuation=False, ixResolveUris=False):
     try:
         return ", ".join(text.strip() for text in innerTextNodes(element, ixExclude, ixEscape, ixContinuation, ixResolveUris) if len(text.strip()) > 0)
     except (AttributeError, TypeError):
@@ -176,7 +180,7 @@ def innerTextNodes(element, ixExclude, ixEscape, ixContinuation, ixResolveUris):
             yield escapedText(element.text) if ixEscape else element.text
         for child in element.iterchildren():
             if isinstance(child,ModelObject) and (
-               not ixExclude or 
+               not ixExclude or
                not ((child.localName == "exclude" or ixExclude == "tuple") and child.namespaceURI in ixbrlAll)):
                 firstChild = True
                 for nestedText in innerTextNodes(child, ixExclude, ixEscape, False, ixResolveUris): # nested elements don't participate in continuation chain
@@ -192,7 +196,7 @@ def innerTextNodes(element, ixExclude, ixEscape, ixContinuation, ixResolveUris):
             element = getattr(element, "_continuationElement", None)
         else:
             break
-            
+
 def escapedNode(elt, start, empty, ixEscape, ixResolveUris):
     if elt.namespaceURI in ixbrlAll:
         return ''  # do not yield XML for nested facts
@@ -228,23 +232,23 @@ def escapedText(text):
                    for c in text)
 
 def collapseWhitespace(s):
-    return ' '.join( nonSpacePattern.findall(s) ) 
-                                         
+    return ' '.join( nonSpacePattern.findall(s) )
+
 def parentId(element, parentNamespaceURI, parentLocalName):
     while element is not None:
         if element.namespaceURI == parentNamespaceURI and element.localName == parentLocalName:
             return element.get("id")
         element = element.getparent()
     return None
-    
+
 def hasChild(element, childNamespaceURI, childLocalNames):
     result = children(element, childNamespaceURI, childLocalNames)
     return bool(result)
-    
+
 def hasDescendant(element, descendantNamespaceURI, descendantLocalNames):
     d = descendants(element, descendantNamespaceURI, descendantLocalNames)
     return bool(d)
-    
+
 def hasAncestor(element, ancestorNamespaceURI, ancestorLocalNames):
     treeElt = element.getparent()
     while isinstance(treeElt,ModelObject):
@@ -256,7 +260,7 @@ def hasAncestor(element, ancestorNamespaceURI, ancestorLocalNames):
                 return True
         treeElt = treeElt.getparent()
     return False
-    
+
 def ancestor(element, ancestorNamespaceURI, ancestorLocalNames):
     treeElt = element.getparent()
     wildNamespaceURI = not ancestorNamespaceURI or ancestorNamespaceURI == '*'
@@ -268,7 +272,7 @@ def ancestor(element, ancestorNamespaceURI, ancestorLocalNames):
                 return treeElt
         treeElt = treeElt.getparent()
     return None
-    
+
 def parent(element, parentNamespaceURI=None, parentLocalNames=None, ixTarget=False):
     if ixTarget and hasattr(element, "parentElement"):
         p = element.parentElement
@@ -301,7 +305,7 @@ def ancestors(element, ancestorNamespaceURI=None, ancestorLocalNames=None):
                 ancestors.append(treeElt)
         treeElt = treeElt.getparent()
     return ancestors
-    
+
 def ancestorOrSelfAttr(element, attrClarkName):
     treeElt = element
     while isinstance(treeElt,ModelObject):
@@ -315,11 +319,11 @@ def childAttr(element, childNamespaceURI, childLocalNames, attrClarkName):
     childElt = child(element, childNamespaceURI, childLocalNames)
     return childElt.get(attrClarkName) if childElt is not None else None
 
-def descendantAttr(element, childNamespaceURI, childLocalNames, attrClarkName, attrName=None, attrValue=None):
+def descendantAttr(element, childNamespaceURI, childLocalNames, attrClarkName, attrName=None, attrValue=None) -> Any:
     descendantElt = descendant(element, childNamespaceURI, childLocalNames, attrName, attrValue)
     return descendantElt.get(attrClarkName) if (descendantElt is not None) else None
 
-def children(element, childNamespaceURIs, childLocalNames, ixTarget=False):
+def children(element, childNamespaceURIs, childLocalNames, ixTarget=False) -> list[ModelObject | ModelContext | ModelUnit]:
     children = []
     if not isinstance(childLocalNames,tuple): childLocalNames = (childLocalNames ,)
     wildLocalName = childLocalNames == ('*',)
@@ -328,8 +332,8 @@ def children(element, childNamespaceURIs, childLocalNames, ixTarget=False):
     if isinstance(element,ModelObject):
         for child in (element.ixIter() if ixTarget and hasattr(element, "ixIter") else
                       element.iterchildren()):
-            if (isinstance(child,ModelObject) and 
-                (wildNamespaceURI or (child.qname.namespaceURI if ixTarget else child.elementNamespaceURI) in childNamespaceURIs) and 
+            if (isinstance(child,ModelObject) and
+                (wildNamespaceURI or (child.qname.namespaceURI if ixTarget else child.elementNamespaceURI) in childNamespaceURIs) and
                 (wildLocalName or (child.qname.localName if ixTarget else child.localName) in childLocalNames)):
                 children.append(child)
     elif isinstance(element, (etree._ElementTree,PrototypeElementTree)): # document root
@@ -337,6 +341,7 @@ def children(element, childNamespaceURIs, childLocalNames, ixTarget=False):
         if (wildNamespaceURI or child.elementNamespaceURI in childNamespaceURIs) and \
            (wildLocalName or child.localName in childLocalNames):
             children.append(child)
+
     return children
 
 def child(element, childNamespaceURI=None, childLocalNames=("*",)):
@@ -356,13 +361,13 @@ def previousSiblingElement(element):
         if isinstance(result,ModelObject):
             return result
     return None
-    
+
 def nextSiblingElement(element):
     for result in element.itersiblings(preceding=False):
         if isinstance(result,ModelObject):
             return result
     return None
-    
+
 def childrenAttrs(element, childNamespaceURI, childLocalNames, attrLocalName):
     childrenElts = children(element, childNamespaceURI, childLocalNames)
     childrenAttrs = []
@@ -372,12 +377,12 @@ def childrenAttrs(element, childNamespaceURI, childLocalNames, attrLocalName):
     childrenAttrs.sort()
     return childrenAttrs
 
-def descendant(element, descendantNamespaceURI, descendantLocalNames, attrName=None, attrValue=None):
+def descendant(element, descendantNamespaceURI, descendantLocalNames, attrName=None, attrValue=None) -> Any:
     d = descendants(element, descendantNamespaceURI, descendantLocalNames, attrName, attrValue, breakOnFirst=True)
     if d:
         return d[0]
     return None
-    
+
 def descendants(element, descendantNamespaceURI, descendantLocalNames, attrName=None, attrValue=None, breakOnFirst=False, ixTarget=False):
     descendants = []
     if not isinstance(descendantLocalNames,tuple): descendantLocalNames = (descendantLocalNames ,)
@@ -385,22 +390,22 @@ def descendants(element, descendantNamespaceURI, descendantLocalNames, attrName=
     wildNamespaceURI = not descendantNamespaceURI or descendantNamespaceURI == '*'
     if isinstance(element,(ModelObject,etree._ElementTree,PrototypeElementTree,PrototypeObject)):
         for child in (element.ixIter() if ixTarget and hasattr(element, "ixIter") else
-                      element.iterdescendants() if isinstance(element,ModelObject) else 
+                      element.iterdescendants() if isinstance(element,ModelObject) else
                       element.iter()):
-            if (isinstance(child,(ModelObject,PrototypeObject)) and 
-                (wildNamespaceURI or (child.qname.namespaceURI if ixTarget else child.elementNamespaceURI) == descendantNamespaceURI) and 
+            if (isinstance(child,(ModelObject,PrototypeObject)) and
+                (wildNamespaceURI or (child.qname.namespaceURI if ixTarget else child.elementNamespaceURI) == descendantNamespaceURI) and
                 (wildLocalName or (child.qname.localName if ixTarget else child.localName) in descendantLocalNames)):
                 if attrName:
                     if child.get(attrName) == attrValue or (attrValue == "*" and child.get(attrName) is not None):
                         descendants.append(child)
                         if breakOnFirst:
                             break
-                else: 
+                else:
                     descendants.append(child)
                     if breakOnFirst:
                         break
     return descendants
-    
+
 def isDescendantOf(element, ancestorElement):
     while element is not None:
         if element == ancestorElement:
@@ -434,7 +439,7 @@ def schemaDescendant(element, descendantNamespaceURI, descendantLocalName, name)
 def schemaBaseTypeDerivedFrom(element):
     for child in element.iterchildren():
         if child.tag in ("{http://www.w3.org/2001/XMLSchema}extension","{http://www.w3.org/2001/XMLSchema}restriction"):
-            return child.get("base") 
+            return child.get("base")
         elif child.tag == "{http://www.w3.org/2001/XMLSchema}union":
             return (child.get("memberTypes") or "").split() + [
                     schemaBaseTypeDerivedFrom(_child)
@@ -452,7 +457,7 @@ def schemaFacets(element, facetTags, facets=None):
     if facets is None: facets = []
     for child in element.iterchildren():
         if child.tag in facetTags:
-            facets.append(child) 
+            facets.append(child)
         elif child.tag in ("{http://www.w3.org/2001/XMLSchema}complexType",
                            "{http://www.w3.org/2001/XMLSchema}simpleType",
                            "{http://www.w3.org/2001/XMLSchema}restriction",
@@ -465,11 +470,11 @@ def schemaAttributesGroups(element, attributes=None, attributeWildcards=None, at
     if attributes is None: attributes = []; attributeWildcards = []; attributeGroups = []
     for child in element.iterchildren():
         if child.tag == "{http://www.w3.org/2001/XMLSchema}attribute":
-            attributes.append(child) 
+            attributes.append(child)
         elif child.tag == "{http://www.w3.org/2001/XMLSchema}anyAttribute":
-            attributeWildcards.append(child) 
+            attributeWildcards.append(child)
         elif child.tag == "{http://www.w3.org/2001/XMLSchema}attributeGroup":
-            attributeGroups.append(child) 
+            attributeGroups.append(child)
         elif child.tag in {"{http://www.w3.org/2001/XMLSchema}complexType",
                            "{http://www.w3.org/2001/XMLSchema}simpleType",
                            "{http://www.w3.org/2001/XMLSchema}complexContent",
@@ -506,11 +511,11 @@ def emptyContentModel(element):
 def addChild(parent, childName1, childName2=None, attributes=None, text=None, afterSibling=None, beforeSibling=None, appendChild=True):
     from arelle.FunctionXs import xsString
     modelDocument = parent.modelDocument
-                    
+
     if isinstance(childName1, QName):
         addQnameValue(modelDocument, childName1)
         if childName1.prefix:
-            child = modelDocument.parser.makeelement(childName1.clarkNotation, nsmap={childName1.prefix:childName1.namespaceURI}) 
+            child = modelDocument.parser.makeelement(childName1.clarkNotation, nsmap={childName1.prefix:childName1.namespaceURI})
         else:
             child = modelDocument.parser.makeelement(childName1.clarkNotation)
     else:   # called with namespaceURI, localName
@@ -574,7 +579,7 @@ def copyNodes(parent, elts):
         for childNode in origElt:
             if isinstance(childNode,ModelObject):
                 copyNodes(copyElt,childNode)
-                
+
 def copyChildren(parent, elt):
     for childNode in elt:
         if isinstance(childNode,ModelObject):
@@ -586,7 +591,7 @@ def copyIxFootnoteHtml(srcXml, tgtHtml, targetModelDocument=None, withText=False
     if not (isinstance(srcXml,ModelObject) and srcXml.localName == "exclude" and srcXml.namespaceURI in ixbrlAll):
         tgtStackLen = len(tgtStack)
         if withText:
-            _tx = srcXml.text            
+            _tx = srcXml.text
             if _tx:
                 tgtElt, tgtNode = tgtStack[-1]
                 setattr(tgtElt, tgtNode, (getattr(tgtElt, tgtNode) or "") + _tx)
@@ -616,14 +621,14 @@ def copyIxFootnoteHtml(srcXml, tgtHtml, targetModelDocument=None, withText=False
         contAt = getattr(srcXml, "_continuationElement", None)
         if contAt is not None:
             copyIxFootnoteHtml(contAt, tgtHtml, targetModelDocument, withText=withText, isContinChainElt=True, tgtStack=tgtStack, srcLevel=0)
-        
+
 def addComment(parent, commentText):
     comment = str(commentText)
     if '--' in comment: # replace -- with - - (twice, in case more than 3 '-' together)
         comment = comment.replace('--', '- -').replace('--', '- -')
     child = etree.Comment( comment )
     parent.append(child)
-    
+
 def addProcessingInstruction(parent, piTarget, piText, insertBeforeChildElements=True, insertBeforeParentElement=False):
     child = etree.ProcessingInstruction(piTarget, piText)
     if insertBeforeParentElement:
@@ -636,11 +641,11 @@ def addProcessingInstruction(parent, piTarget, piText, insertBeforeChildElements
         parent.insert(i, child)
     else: # can go after elements
         parent.append(child)
-    
+
 def addQnameValue(modelDocument, qnameValue):
     if not isinstance(qnameValue, QName):
         return qnameValue # may be just a string
-    if hasattr(modelDocument, "modelDocument"): 
+    if hasattr(modelDocument, "modelDocument"):
         modelDocument = modelDocument.modelDocument
         xmlRootElement = modelDocument.xmlRootElement
     elif isinstance(modelDocument, etree._ElementTree):
@@ -713,7 +718,7 @@ def tzinfo(tz):
         return datetime.timezone(datetime.timedelta(0))
     else:
         return datetime.timezone(datetime.timedelta(hours=int(tz[0:3]), minutes=int(tz[4:6])))
-    
+
 def datetimeValue(element, addOneDay=False, none=None):
     if element is None:
         if none == "minyear":
@@ -742,9 +747,9 @@ def datetimeValue(element, addOneDay=False, none=None):
         else:
             result = datetime.datetime(int(match.group(9)),int(match.group(10)),int(match.group(11)),0,0,0,0,tzinfo(match.group(12)))
         if addOneDay and match.lastindex >= 11:
-            result += datetime.timedelta(1) 
+            result += datetime.timedelta(1)
         if hour24:  #add one day
-            result += datetime.timedelta(1) 
+            result += datetime.timedelta(1)
     except (ValueError, OverflowError, IndexError, AttributeError):
         if not "result" in locals(): # if not set yet, punt with max datetime
             result = DATETIME_MAXYEAR
@@ -837,12 +842,12 @@ def elementFragmentIdentifier(element):
             element = element.getparent()
         location = "/".join(childSequence)
         return "element({0})".format(location)
-    
+
 def elementIndex(element):
     if isinstance(element,etree.ElementBase):
         return element.elementSequence
     return 0
-    
+
 def elementChildSequence(element):
     childSequence = [""] # "" represents document element for / (root) on the join below
     while element is not None:
@@ -857,7 +862,7 @@ def elementTagnamesPath(element): # returns clark notation absolute path without
         tagnamesPath.insert(0, element.tag)
         element = element.getparent()
     return "/".join(tagnamesPath)
-                        
+
 def xmlstring(elt, stripXmlns=False, prettyPrint=False, contentsOnly=False, includeText=False):
     if elt is None:
         return ""
@@ -899,7 +904,7 @@ def writexml(writer, node, encoding=None, indent='', xmlcharrefreplace=False, pa
     elif isinstance(node,etree._ProcessingInstruction): # ok to use minidom implementation
         writer.write(indent + str(node) + "\n")
     elif isinstance(node,etree._Element):
-        if parentNsmap is None: 
+        if parentNsmap is None:
             parent = node.getparent()
             if parent is not None:
                 parentNsmap = parent.nsmap
@@ -930,7 +935,7 @@ def writexml(writer, node, encoding=None, indent='', xmlcharrefreplace=False, pa
         if isXmlElement: writer.write(indent)
         writer.write("<" + tag)
         attrs = {}
-        for prefix, ns in sorted((k if k is not None else '', v) 
+        for prefix, ns in sorted((k if k is not None else '', v)
                                  # items wrapped in set for 2.7 compatibility
                                  for k, v in (_DICT_SET(node.nsmap.items()) - _DICT_SET(parentNsmap.items()))):
             if prefix:
@@ -977,11 +982,11 @@ def writexml(writer, node, encoding=None, indent='', xmlcharrefreplace=False, pa
             writer.write("\"")
         hasChildNodes = False
         firstChild = True
-        
+
         text = node.text
         if text is not None:
             text = ''.join("&amp;" if c == "&"
-                           else "&#160;" if c == "\u00A0" 
+                           else "&#160;" if c == "\u00A0"
                            else "&lt;" if c == "<"
                            else "&gt;" if c == ">"
                            else "&#173;" if c == "\u00AD"
@@ -991,7 +996,7 @@ def writexml(writer, node, encoding=None, indent='', xmlcharrefreplace=False, pa
         tail = node.tail
         if tail is not None:
             tail = ''.join("&amp;" if c == "&"
-                           else "&#160;" if c == "\u00A0" 
+                           else "&#160;" if c == "\u00A0"
                            else "&lt;" if c == "<"
                            else "&gt;" if c == ">"
                            else "&#173;" if c == "\u00AD"
@@ -1006,8 +1011,8 @@ def writexml(writer, node, encoding=None, indent='', xmlcharrefreplace=False, pa
                 if text and (indent is None or not text.isspace()):
                     writer.write(text)
                 firstChild = False
-            writexml(writer, child, 
-                     indent=indent+'    ' if indent is not None and not isFootnote else None, 
+            writexml(writer, child,
+                     indent=indent+'    ' if indent is not None and not isFootnote else None,
                      xmlcharrefreplace=xmlcharrefreplace)
         if hasChildNodes:
             if isXmlElement and not isFootnote and indent is not None:

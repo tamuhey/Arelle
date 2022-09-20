@@ -4,29 +4,22 @@ Created on Oct 22, 2010
 @author: Mark V Systems Limited
 (c) Copyright 2010 Mark V Systems Limited, All rights reserved.
 '''
-import os, sys
-try:
-    import regex as re
-except ImportError:
-    import re
-if sys.version[0] >= '3':
-    from urllib.request import pathname2url
-    from urllib.parse import urldefrag, unquote, quote, urljoin
-    isPy3 = True
-else:
-    from urlparse import urldefrag, urljoin
-    from urllib import quote
-    from urllib import pathname2url
-    from arelle.PythonUtil import py3unquote as unquote
-    isPy3 = False
+from __future__ import annotations
+import os
+from typing import Any
+import regex as re
+from urllib.request import pathname2url
+from urllib.parse import urldefrag, unquote, quote, urljoin
+from email.utils import parsedate
+from datetime import datetime
 
-def authority(url, includeScheme=True):
+def authority(url: str, includeScheme: bool=True) -> str:
     if url:
-        authSep = url.find(':') 
+        authSep = url.find(':')
         if authSep > -1:
             scheme = url[0:authSep]
             authPart = authSep + (3 if scheme in ("http", "https", "ftp") else 1) # allow urn:
-            pathPart = url.find('/', authPart) 
+            pathPart = url.find('/', authPart)
             if pathPart > -1:
                 if includeScheme:
                     return url[0:pathPart]
@@ -36,7 +29,7 @@ def authority(url, includeScheme=True):
                 return url[authPart:]
     return url  #no path part of url
 
-def scheme(url): # returns None if no scheme part
+def scheme(url: str) -> str | None: # returns None if no scheme part
     return (url or "").rpartition(":")[0] or None
 
 absoluteUrlPattern = None
@@ -48,28 +41,21 @@ absoluteUrlPattern = None
 # This regular expression is only partial validation.
 relativeUrlPattern = re.compile(r"^(urn:|(([a-zA-Z][a-zA-Z0-9.+-]+):)?(//([^/\?#]*))?(?![^:/]*:[^/]*(/|$)))([^\?#]*)(\?([^#]*))?(#([^#]*))?$")
 
-def splitDecodeFragment(url):
+def splitDecodeFragment(url: str) -> tuple[str, str]:
     if url is None: # urldefrag returns byte strings for none, instead of unicode strings
-        return _STR_UNICODE(""), _STR_UNICODE("")
+        return "", ""
     urlPart, fragPart = urldefrag(url)
-    if isPy3:
-        return (urlPart, unquote(fragPart, "utf-8", errors=None))
-    else:
-        return _STR_UNICODE(urlPart), unquote(_STR_UNICODE(fragPart), "utf-8", errors=None)
-    
-def anyUriQuoteForPSVI(uri):
+    return (urlPart, unquote(fragPart, "utf-8"))
+
+def anyUriQuoteForPSVI(uri: str) -> str:
     # only quote if quotable character found
     if any(c in {' ', '<', '>', '"', '{', '}', '|', '\\', '^', '~', '`'} or
            not '\x1f' < c < '\x7f'
            for c in uri):
-        if not isPy3:  # patch for unicode per http://hg.python.org/cpython/rev/1e21d94e05f4/
-            return quote(uri.encode(b'utf-8', b'strict'),
-                         safe=b"/_.-%#!~*'();?:@&=+$,")  # b'str' converts to 2.7 str type which is required here
-        else:
-            return quote(uri, safe="/_.-%#!~*'();?:@&=+$,")
+        return quote(uri, safe="/_.-%#!~*'();?:@&=+$,")
     return uri
 
-def isValidAbsolute(url):
+def isValidAbsolute(url: str) -> bool:
     global absoluteUrlPattern
     if absoluteUrlPattern is None:
         absoluteUrlPattern = re.compile(
@@ -131,9 +117,9 @@ def isValidAbsolute(url):
             "|%[0-9A-F][0-9A-F]|[!$&'()*+,;=]|:|@)*)*)|(?P<ipath>))(?:\\?(?P<iquery>(?:(?:(?:[a-zA-Z0-9._~-]"
             "|[\xa0-\ud7ff\uf900-\ufdcf\ufdf0-\uffef])|%[0-9A-F][0-9A-F]|[!$&'()*+,;=]|:|@)|[\ue000-\uf8ff]"
             "|/|\\?)*))?(?:\\#(?P<ifragment>(?:(?:(?:[a-zA-Z0-9._~-]|[\xa0-\ud7ff\uf900-\ufdcf\ufdf0-\uffef])"
-            "|%[0-9A-F][0-9A-F]|[!$&'()*+,;=]|:|@)|/|\\?)*))?)"   
-            '''         
-            
+            "|%[0-9A-F][0-9A-F]|[!$&'()*+,;=]|:|@)|/|\\?)*))?)"
+            '''
+
             ''' for Python 3.3 only
             "(?P<scheme>[a-zA-Z][a-zA-Z0-9+.-]*):"
             "(?://(?P<iauthority>(?:(?P<iuserinfo>(?:(?:[a-zA-Z0-9._~-]|"
@@ -251,7 +237,7 @@ def isValidAbsolute(url):
             "\U000b0000-\U000bfffd\U000c0000-\U000cfffd\U000d0000-\U000dfffd\U000e1000-\U000efffd])"
             "|%[0-9A-F][0-9A-F]|[!$&'()*+,;=]|:|@)|/|\\?)*))?)"
             '''
-            
+
             # note this pattern does not process urn: as valid!!!
             # regex to validate a full URL from http://stackoverflow.com/questions/827557/how-do-you-validate-a-url-with-a-regular-expression-in-python/835527#835527
             r"(?:(http|https|ftp)://(?:(?:(?:(?:(?:[a-zA-Z\d](?:(?:[a-zA-Z\d]|-)*[a-zA-Z\d])?)\."
@@ -360,14 +346,14 @@ def isValidAbsolute(url):
             r"\$\-_.!~*'(),])|(?:%[a-fA-F\d]{2})|[:@&=+])*)(?:/(?:(?:(?:[a-zA-Z\d\$\-"
             r"_.!~*'(),])|(?:%[a-fA-F\d]{2})|[:@&=+])*))*)?))|(?:(?:(?:(?:(?:[a-zA-"
             r"Z\d\$\-_.!~*'(),])|(?:%[a-fA-F\d]{2})|[:@&=+])*)(?:/(?:(?:(?:[a-zA-Z\d"
-            r"\$\-_.!~*'(),])|(?:%[a-fA-F\d]{2})|[:@&=+])*))*)?)))" 
+            r"\$\-_.!~*'(),])|(?:%[a-fA-F\d]{2})|[:@&=+])*))*)?)))"
             )
     return absoluteUrlPattern.match(url) is not None
-       
-def isValidUriReference(url):
+
+def isValidUriReference(url: str) -> bool:
     return relativeUrlPattern.match(url) is not None
-    
-def isAbsolute(url):
+
+def isAbsolute(url: str) -> bool:
     if url:
         scheme, sep, path = url.partition(":")
         if scheme in ("http", "https", "ftp"):
@@ -376,26 +362,24 @@ def isAbsolute(url):
             return True
     return False
 
-def isHttpUrl(url):
+def isHttpUrl(url: str) -> bool:
     return isinstance(url,str) and (url.startswith("http://") or url.startswith("https://"))
 
-def ensureUrl(maybeUrl):
+def ensureUrl(maybeUrl: str) -> str:
     if isAbsolute(maybeUrl) or isHttpUrl(maybeUrl):
         return maybeUrl
     # probably a local file
     return urljoin('file:', pathname2url(maybeUrl))
-    
-def parseRfcDatetime(rfc2822date):
-    from email.utils import parsedate
-    from datetime import datetime
+
+def parseRfcDatetime(rfc2822date: str) -> datetime | None:
     if rfc2822date:
         d = parsedate(rfc2822date)
         if d:
             return datetime(d[0],d[1],d[2],d[3],d[4],d[5])
     return None
-       
+
 zipRelativeFilePattern = re.compile(r".*[.]zip[/\\](.*)$")
-def relativeUri(baseUri, relativeUri): # return uri relative to this modelDocument uri
+def relativeUri(baseUri: str, relativeUri: str) -> str: # return uri relative to this modelDocument uri
     if isHttpUrl(relativeUri):
         return relativeUri
     # check if base is zip-relative and relativeUri is not

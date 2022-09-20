@@ -15,19 +15,19 @@ def parentMenuCommand(cntl):
     for i in range(1,100):
         for pluginMethod in pluginClassMethods("Import.Packaged.Entry{}".format(i)):
             pluginMethod()
-	
+
 def parentCommandLineOptionExtender(parser):
-    parser.add_option("--packagedParentImportExample", 
-                      action="store_true", 
-                      dest="packagedParentImportExample", 
+    parser.add_option("--packagedParentImportExample",
+                      action="store_true",
+                      dest="packagedParentImportExample",
                       help=_('Test that imported plug-ins were actually loaded and activated"'))
 
 def parentCommandLineUtilityRun(cntlr, options, **kwargs):
-	if options.packagedParentImportExample:
-	    parentMenuCommand(cntlr)
-    
+    if options.packagedParentImportExample:
+        parentMenuCommand(cntlr)
+
 def foo():
-	print ("parent (__init__) of imported packaged plug-ins")
+    print ("parent (__init__) of imported packaged plug-ins")
 
 __pluginInfo__ = {
     'name': 'Import Test Package Parent',
