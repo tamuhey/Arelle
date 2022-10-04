@@ -11,7 +11,6 @@ mkdir -p "${BUILD_DIR}" "${DIST_DIR}"
 
 cp -p arelleGUI.pyw arelleGUI.py
 
-python3 buildVersion.py
 python3 pygettext.py -v -o arelle/locale/messages.pot arelle/*.pyw arelle/*.py
 python3 generateMessagesCatalog.py
 python3 distro.py build_exe
@@ -30,4 +29,6 @@ cp -p "$(find /lib /usr -name libxml2.so.2)" "${BUILD_DIR}/"
 cp -p "$(find /lib /usr -name libxslt.so.1)" "${BUILD_DIR}/"
 cp -p "$(find /lib /usr -name libz.so.1)" "${BUILD_DIR}/"
 
-tar -czf "${DIST_DIR}/arelle-${DISTRO}-x86_64-$(date +%Y-%m-%d).tgz" --directory "${BUILD_DIR}" .
+VERSION=$(python3 -c "import arelle._version; print(arelle._version.version)")
+
+tar -czf "${DIST_DIR}/arelle-${DISTRO}-${VERSION}.tgz" --directory "${BUILD_DIR}" .

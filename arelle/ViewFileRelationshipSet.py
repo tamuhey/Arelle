@@ -1,8 +1,5 @@
 '''
-Created on Oct 6, 2010
-
-@author: Mark V Systems Limited
-(c) Copyright 2010 Mark V Systems Limited, All rights reserved.
+See COPYRIGHT.md for copyright information.
 '''
 from arelle import ModelObject, ModelDtsObject, XbrlConst, XmlUtil, ViewFile
 from arelle.ModelDtsObject import ModelRelationship
@@ -52,7 +49,7 @@ class ViewRelationshipSet(ViewFile.View):
             heading = ["Wider-Narrower", "Wider"]
         elif isinstance(arcrole, (list,tuple)) or XbrlConst.isResourceArcrole(arcrole):
             self.isResourceArcrole = True
-            self.showReferences = isinstance(arcrole, _STR_BASE) and arcrole.endswith("-reference")
+            self.showReferences = isinstance(arcrole, str) and arcrole.endswith("-reference")
             heading = ["Resource Relationships", "Arcrole","Resource","ResourceRole","Language"]
         else:
             heading = [os.path.basename(arcrole).title() + " Relationships"]

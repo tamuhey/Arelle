@@ -1,16 +1,11 @@
 '''
-Created on Oct 5, 2010
-Refactored on Jun 11, 2011 to ModelDtsObject, ModelInstanceObject, ModelTestcaseObject
-
-@author: Mark V Systems Limited
-(c) Copyright 2010 Mark V Systems Limited, All rights reserved.
+See COPYRIGHT.md for copyright information.
 '''
 from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Generator, Optional, cast
 from lxml import etree
 from arelle import Locale
 from arelle.ModelValue import qname, qnameEltPfxName, QName
-import arelle.XmlUtil
 
 if TYPE_CHECKING:
     from arelle.ModelDocument import ModelDocument
@@ -25,13 +20,16 @@ if TYPE_CHECKING:
     from arelle.ModelInstanceObject import ModelInlineFact
     from arelle.ModelInstanceObject import ModelDimensionValue
 
+XmlUtil: Any = None
 VALID_NO_CONTENT = None
 
 emptySet: set[Any] = set()
 
 def init() -> None: # init globals
-    global VALID_NO_CONTENT
-    from arelle.XmlValidate import VALID_NO_CONTENT # type: ignore[misc]
+    global XmlUtil, VALID_NO_CONTENT
+    if XmlUtil is None:
+        from arelle import XmlUtil
+        from arelle.XmlValidate import VALID_NO_CONTENT  # type: ignore[misc]
 
 class ModelObject(etree.ElementBase):
     """ModelObjects represent the XML elements within a document, and are implemented as custom
@@ -110,6 +108,10 @@ class ModelObject(etree.ElementBase):
     _parentQname: QName | None
     _elementSequence: int
     _namespaceURI: str | None
+    _hashSEqual: int
+    _hashXpathEqual: int
+    sValue = str
+    xValue = Any # this can be any thing
     xlinkLabel: str
 
     def _init(self) -> None:
@@ -216,7 +218,7 @@ class ModelObject(etree.ElementBase):
         try:
             return self._elementQname
         except AttributeError:
-            self._elementQname = cast(QName, qname(self))
+            self._elementQname = qname(self)
             return self._elementQname
 
     def vQname(self, validationModelXbrl: ModelXbrl | None = None) -> QName:
@@ -288,8 +290,7 @@ class ModelObject(etree.ElementBase):
         :returns: QName -- the resolved prefixed name, or None if no prefixed name was provided
         """
         if prefixedName:    # passing None would return element qname, not prefixedName None Qname
-            return_value = qnameEltPfxName(self, prefixedName) # type: ignore[no-untyped-call]
-            return cast(Optional[QName], return_value)
+            return qnameEltPfxName(self, prefixedName)
         else:
             return None
 
@@ -345,7 +346,7 @@ class ModelObject(etree.ElementBase):
             elif id in doc.idObjects:
                 return cast(ModelObject, doc.idObjects[id])
             else:
-                xpointedElement = arelle.XmlUtil.xpointerElement(doc,id) # type: ignore[no-untyped-call]
+                xpointedElement = XmlUtil.xpointerElement(doc,id)
                 # find element
                 for docModelObject in doc.xmlRootElement.iter():
                     if docModelObject == xpointedElement:
@@ -371,7 +372,7 @@ class ModelObject(etree.ElementBase):
             label = labelsRelationshipSet.label(self, role, lang) # type: ignore[no-untyped-call]
             if label is not None:
                 if strip: return cast(str, label.strip())
-                return cast(str, Locale.rtlString(label, lang=lang)) # type: ignore[no-untyped-call]
+                return Locale.rtlString(label, lang=lang)
         if fallbackToQname:
             return str(self.qname)
         elif fallbackToXlinkLabel and hasattr(self,"xlinkLabel"):
@@ -385,7 +386,7 @@ class ModelObject(etree.ElementBase):
     @property
     def propertyView(self) -> tuple[Any, ...]:
         return (("QName", self.elementQname),) + tuple(
-                (arelle.XmlUtil.clarkNotationToPrefixedName(self, _tag, isAttribute=True), _value) # type: ignore[no-untyped-call, misc]
+                (XmlUtil.clarkNotationToPrefixedName(self, _tag, isAttribute=True), _value)
                 for _tag, _value in self.items())
 
     def __repr__(self) -> str:

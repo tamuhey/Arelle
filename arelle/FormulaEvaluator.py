@@ -1,8 +1,5 @@
 '''
-Created on Jan 9, 2011
-
-@author: Mark V Systems Limited
-(c) Copyright 2011 Mark V Systems Limited, All rights reserved.
+See COPYRIGHT.md for copyright information.
 '''
 from arelle import (XPathContext, XbrlConst, XmlUtil, XbrlUtil, XmlValidate)
 from arelle.FunctionXs import xsString
@@ -651,7 +648,7 @@ def isVbTupleWithOnlyAnUncoveredDimension(xpCtx, vb, facts):
 
 def implicitFilter(xpCtx, vb, facts, uncoveredAspectFacts):
     # determine matchable aspects
-    aspects = (vb.aspectsDefined | _DICT_SET(uncoveredAspectFacts.keys())) - vb.aspectsCovered - {Aspect.DIMENSIONS}
+    aspects = (vb.aspectsDefined | uncoveredAspectFacts.keys()) - vb.aspectsCovered - {Aspect.DIMENSIONS}
     if not aspects:
         if isVbTupleWithOnlyAnUncoveredDimension(xpCtx, vb, facts):
             return [] # matching a tuple with an existing uncovered dimension to items

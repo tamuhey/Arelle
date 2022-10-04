@@ -1,8 +1,5 @@
 '''
-Created on Dec 20, 2010
-
-@author: Mark V Systems Limited
-(c) Copyright 2010 Mark V Systems Limited, All rights reserved.
+See COPYRIGHT.md for copyright information.
 '''
 import math, re, sre_constants
 from arelle.ModelObject import ModelObject, ModelAttribute
@@ -14,6 +11,7 @@ from arelle.Locale import format_picture
 from arelle.XmlValidate import VALID_NO_CONTENT
 from decimal import Decimal
 from lxml import etree
+from numbers import Number
 
 DECIMAL_5 = Decimal(.5)
 
@@ -107,14 +105,14 @@ def fn_round(xc, p, contextItem, args):
     x = numericArg(xc, p, args)
     if math.isinf(x) or math.isnan(x):
         return x
-    return _INT(x + (DECIMAL_5 if isinstance(x,Decimal) else .5))  # round towards +inf
+    return int(x + (DECIMAL_5 if isinstance(x,Decimal) else .5))  # round towards +inf
 
 def fn_round_half_to_even(xc, p, contextItem, args):
     if len(args) > 2 or len(args) == 0: raise XPathContext.FunctionNumArgs()
     x = numericArg(xc, p, args)
     if len(args) == 2:
         precision = args[1]
-        if len(precision) != 1 or not isinstance(precision[0],_INT_TYPES): raise XPathContext.FunctionArgType(2,"integer")
+        if len(precision) != 1 or not isinstance(precision[0],int): raise XPathContext.FunctionArgType(2,"integer")
         precision = precision[0]
         return round(x, precision)
     return round(x)
@@ -159,7 +157,7 @@ def string_join(xc, p, contextItem, args):
     joiner = stringArg(xc, args, 1, "xs:string")
     atomizedArgs = []
     for x in xc.atomize( p, args[0] ):
-        if isinstance(x, _STR_BASE):
+        if isinstance(x, str):
             atomizedArgs.append(x)
         else:
             raise XPathContext.FunctionArgType(0,"xs:string*")
@@ -169,9 +167,9 @@ def substring(xc, p, contextItem, args):
     l = len(args)
     if l < 2 or l > 3: raise XPathContext.FunctionNumArgs()
     string = stringArg(xc, args, 0, "xs:string?")
-    start = _INT(round( numericArg(xc, p, args, 1) )) - 1
+    start = int(round( numericArg(xc, p, args, 1) )) - 1
     if l == 3:
-        length = _INT(round( numericArg(xc, p, args, 2) ))
+        length = int(round( numericArg(xc, p, args, 2) ))
         if start < 0:
             length += start
             if length < 0: length = 0
@@ -556,9 +554,9 @@ def boolean(xc, p, contextItem, args):
     if len(inputSequence) == 1:
         if isinstance(item, bool):
             return item
-        if isinstance(item, _STR_BASE):
+        if isinstance(item, str):
             return len(item) > 0
-        if isinstance(item, _NUM_TYPES):
+        if isinstance(item, Number):
             return not math.isnan(item) and item != 0
     raise XPathContext.XPathException(p, 'err:FORG0006', _('Effective boolean value indeterminate'))
 
@@ -620,9 +618,9 @@ def subsequence(xc, p, contextItem, args):
     l = len(args)
     if l < 2 or l > 3: raise XPathContext.FunctionNumArgs()
     sequence = args[0]
-    start = _INT(round( numericArg(xc, p, args, 1) )) - 1
+    start = int(round( numericArg(xc, p, args, 1) )) - 1
     if l == 3:
-        length = _INT(round( numericArg(xc, p, args, 2) ))
+        length = int(round( numericArg(xc, p, args, 2) ))
         if start < 0:
             length += start
             if length < 0: length = 0

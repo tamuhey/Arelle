@@ -1,8 +1,5 @@
 '''
-Created on Oct 20, 2010
-
-@author: Mark V Systems Limited
-(c) Copyright 2010 Mark V Systems Limited, All rights reserved.
+See COPYRIGHT.md for copyright information.
 '''
 import zipfile, tarfile, os, io, errno, base64, gzip, zlib, re, struct, random, time
 from lxml import etree
@@ -734,7 +731,7 @@ def gaeGet(key):
     if chunk_keys is None:
         return None
     chunks = []
-    if isinstance(chunk_keys, _STR_BASE):
+    if isinstance(chunk_keys, str):
         chunks.append(chunk_keys)  # only one shard
     else:
         for chunk_key in chunk_keys:
@@ -754,7 +751,7 @@ def gaeDelete(key):
     chunk_keys = gaeMemcache.get(key)
     if chunk_keys is None:
         return False
-    if isinstance(chunk_keys, _STR_BASE):
+    if isinstance(chunk_keys, str):
         chunk_keys = []
     chunk_keys.append(key)
     gaeMemcache.delete_multi(chunk_keys)

@@ -1,8 +1,5 @@
 '''
-Created on Dec 9, 2010
-
-@author: Mark V Systems Limited
-(c) Copyright 2010 Mark V Systems Limited, All rights reserved.
+See COPYRIGHT.md for copyright information.
 '''
 from collections import defaultdict
 import datetime, re
@@ -1436,7 +1433,7 @@ class ModelConceptRelation(ModelFilter):
     @property
     def generations(self):
         try:
-            return _INT( XmlUtil.childText(self, XbrlConst.crf, "generations") )
+            return int( XmlUtil.childText(self, XbrlConst.crf, "generations") )
         except (TypeError, ValueError):
             if self.axis in ('sibling', 'child', 'parent'):
                 return 1
@@ -2638,7 +2635,7 @@ class ModelPrecisionFilter(ModelFilter):
 
     def filter(self, xpCtx, varBinding, facts, cmplmt):
         minimum = self.minimum
-        numMinimum = float('INF') if minimum == 'INF' else _INT(minimum)
+        numMinimum = float('INF') if minimum == 'INF' else int(minimum)
         return set(fact for fact in facts
                    if cmplmt ^ (self.minimum != 'INF' and
                                 not fact.isNil and

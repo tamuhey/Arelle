@@ -1,14 +1,12 @@
 '''
-Created on Dec 31, 2010
-
-@author: Mark V Systems Limited
-(c) Copyright 2010 Mark V Systems Limited, All rights reserved.
+See COPYRIGHT.md for copyright information.
 '''
 import xml.dom, datetime
 from arelle import (ModelValue, XmlUtil)
 from arelle.ModelObject import ModelObject, ModelAttribute
 from arelle.XPathContext import (XPathException, FunctionArgType)
 from arelle.PythonUtil import pyTypeName
+from numbers import Number
 
 def anytypeArg(xc, args, i, type, missingArgFallback=None):
     if len(args) > i:
@@ -37,7 +35,7 @@ def numericArg(xc, p, args, i=0, missingArgFallback=None, emptyFallback=0, conve
     item = anytypeArg(xc, args, i, "numeric?", missingArgFallback)
     if item == (): return emptyFallback
     numeric = xc.atomize(p, item)
-    if not isinstance(numeric,_NUM_TYPES):
+    if not isinstance(numeric, Number):
         if convertFallback is None:
             raise FunctionArgType(i,"numeric?",numeric)
         try:
@@ -50,11 +48,11 @@ def integerArg(xc, p, args, i=0, missingArgFallback=None, emptyFallback=0, conve
     item = anytypeArg(xc, args, i, "integer?", missingArgFallback)
     if item == (): return emptyFallback
     numeric = xc.atomize(p, item)
-    if not isinstance(numeric,_INT_TYPES):
+    if not isinstance(numeric,int):
         if convertFallback is None:
             raise FunctionArgType(i,"integer?",numeric)
         try:
-            numeric = _INT(numeric)
+            numeric = int(numeric)
         except ValueError:
             numeric = convertFallback
     return numeric
@@ -77,10 +75,10 @@ def testTypeCompatiblity(xc, p, op, a1, a2):
         if a1.dateOnly == a2.dateOnly:
             return # can't interoperate between date and datetime
     elif isinstance(a1, bool) != isinstance(a2, bool):
-        pass # fail if one arg is bool and the other is not (don't let bool be subclass of num types)
+        pass # fail if one arg is bool and the other is not (don't le t bool be subclass of num types)
     elif ((type(a1) == type(a2)) or
-        (isinstance(a1,_NUM_TYPES) and isinstance(a2,_NUM_TYPES)) or
-        (isinstance(a1,_STR_BASE) and isinstance(a2,_STR_BASE))):
+          (isinstance(a1, Number) and isinstance(a2, Number)) or
+          (isinstance(a1, str) and isinstance(a2, str))):
         return
     elif op in ('+','-'):
         if ((isinstance(a1,ModelValue.DateTime) and isinstance(a2,(ModelValue.YearMonthDuration,datetime.timedelta))) or

@@ -1,8 +1,5 @@
 '''
-Created on Feb 20, 2011
-
-@author: Mark V Systems Limited
-(c) Copyright 2011 Mark V Systems Limited, All rights reserved.
+See COPYRIGHT.md for copyright information.
 '''
 import os, logging
 from lxml import etree
@@ -259,7 +256,7 @@ def validate(modelXbrl, elt, recurse=True, attrQname=None, ixFacts=False):
                         element=qnElt,
                         typeName=baseXsdType,
                         attributes=','.join(str(a) for a in missingAttributes))
-                extraAttributes = presentAttributes - _DICT_SET(definedAttributes.keys()) - XbrlConst.builtinAttributes
+                extraAttributes = presentAttributes - definedAttributes.keys() - XbrlConst.builtinAttributes
                 if extraAttributes:
                     attributeWildcards = type.attributeWildcards
                     extraAttributes -= set(a
@@ -414,7 +411,7 @@ def validateValue(modelXbrl, elt, attrTag, baseXsdType, value, isNillable=False,
                                      "int","unsignedInt",
                                      "short","unsignedShort",
                                      "byte","unsignedByte"}:
-                    xValue = sValue = _INT(value)
+                    xValue = sValue = int(value)
                     if ((baseXsdType in {"nonNegativeInteger","unsignedLong","unsignedInt"}
                          and xValue < 0) or
                         (baseXsdType == "nonPositiveInteger" and xValue > 0) or
@@ -464,9 +461,9 @@ def validateValue(modelXbrl, elt, attrTag, baseXsdType, value, isNillable=False,
                     xValue = [qnameEltPfxName(elt, qn, prefixException=ValueError) for qn in value.split()]
                     sValue = value
                 elif baseXsdType in ("XBRLI_DECIMALSUNION", "XBRLI_PRECISIONUNION"):
-                    xValue = sValue = value if value == "INF" else _INT(value)
+                    xValue = sValue = value if value == "INF" else int(value)
                 elif baseXsdType in ("XBRLI_NONZERODECIMAL"):
-                    xValue = sValue = _INT(value)
+                    xValue = sValue = int(value)
                     if xValue == 0:
                         raise ValueError("invalid value")
                 elif baseXsdType == "xsd-pattern":

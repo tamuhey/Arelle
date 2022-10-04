@@ -1,12 +1,9 @@
 '''
-Created on Oct 3, 2010
-
 This module is Arelle's controller in command line non-interactive mode
 
 (This module can be a pattern for custom integration of Arelle into an application.)
 
-@author: Mark V Systems Limited
-(c) Copyright 2010 Mark V Systems Limited, All rights reserved.
+See COPYRIGHT.md for copyright information.
 '''
 from arelle import PythonUtil # define 2.x or 3.x string types
 import gettext, time, datetime, os, shlex, sys, traceback, fnmatch, threading, json, logging, platform
@@ -23,12 +20,16 @@ from arelle.ModelFormulaObject import FormulaOptions
 from arelle import PluginManager
 from arelle.PluginManager import pluginClassMethods
 from arelle.UrlUtil import isHttpUrl
+from arelle.Version import copyrightLabel
 from arelle.WebCache import proxyTuple
+from arelle.SystemInfo import get_system_info
+from pprint import pprint
 import logging
 from lxml import etree
 win32file = win32api = win32process = pywintypes = None
 STILL_ACTIVE = 259 # MS Windows process status constants
 PROCESS_QUERY_INFORMATION = 0x400
+UILANG_OPTION = '--uiLang'
 
 def main():
     """Main program to initiate application from command line or as a separate process (e.g, java Runtime.getRuntime().exec).  May perform
@@ -57,15 +58,18 @@ def parseAndRun(args):
         hasWebServer = True
     except ImportError:
         hasWebServer = False
-    cntlr = CntlrCmdLine()  # need controller for plug ins to be loaded
-
+    uiLang = None
     # Check if there is UI language override to use the selected language
     # for help and error messages...
     for _i, _arg in enumerate(args):
-        if _arg.startswith('--uiLang'):
-            _uiLang = args[_i+1]
-            cntlr.setUiLanguage(_uiLang)
+        if _arg.startswith((f'{UILANG_OPTION}=', f'{UILANG_OPTION.lower()}=')):
+            uiLang = _arg[9:]
             break
+        elif _arg in (UILANG_OPTION, UILANG_OPTION.lower()) and _i + 1 < len(args):
+            uiLang = args[_i+1]
+            break
+
+    cntlr = CntlrCmdLine(uiLang=uiLang)  # need controller for plug ins to be loaded
 
     usage = "usage: %prog [options]"
 
@@ -107,6 +111,9 @@ def parseAndRun(args):
                              "are individually so validated. "
                              "If formulae are present they will be validated and run unless --formula=none is specified. "
                              ))
+    parser.add_option("--noValidateTestcaseSchema", action="store_false", dest="validateTestcaseSchema", default=True,
+                      help=_("Validate testcases against their schemas."))
+    parser.add_option("--novalidatetestcaseschema", action="store_false", dest="validateTestcaseSchema", default=True, help=SUPPRESS_HELP)
     parser.add_option("--calcDecimals", action="store_true", dest="calcDecimals",
                       help=_("Specify calculation linkbase validation inferring decimals."))
     parser.add_option("--calcdecimals", action="store_true", dest="calcDecimals", help=SUPPRESS_HELP)
@@ -292,9 +299,9 @@ def parseAndRun(args):
     parser.add_option("--formularunids", action="store", dest="formulaRunIDs", help=SUPPRESS_HELP)
     parser.add_option("--formulaCompileOnly", action="store_true", dest="formulaCompileOnly", help=_("Specify formula are to be compiled but not executed."))
     parser.add_option("--formulacompileonly", action="store_true", dest="formulaCompileOnly", help=SUPPRESS_HELP)
-    parser.add_option("--uiLang", action="store", dest="uiLang",
-                      help=_("Language for user interface (override system settings, such as program messages).  Does not save setting."))
-    parser.add_option("--uilang", action="store", dest="uiLang", help=SUPPRESS_HELP)
+    parser.add_option(UILANG_OPTION, action="store", dest="uiLang",
+                      help=_("Language for user interface (override system settings, such as program messages).  Does not save setting.  Requires locale country code, e.g. en-GB or en-US."))
+    parser.add_option(UILANG_OPTION.lower(), action="store", dest="uiLang", help=SUPPRESS_HELP)
     parser.add_option("--proxy", action="store", dest="proxy",
                       help=_("Modify and re-save proxy settings configuration.  "
                              "Enter 'system' to use system proxy setting, 'none' to use no proxy, "
@@ -382,6 +389,8 @@ def parseAndRun(args):
     parser.add_option("-a", "--about",
                       action="store_true", dest="about",
                       help=_("Show product version, copyright, and license."))
+    parser.add_option("--diagnostics", action="store_true", dest="diagnostics",
+                      help=_("output system diagnostics information"))
 
     if not args and cntlr.isGAE:
         args = ["--webserver=::gae"]
@@ -413,10 +422,10 @@ def parseAndRun(args):
 
     (options, leftoverArgs) = parser.parse_args(args)
     if options.about:
-        print(_("\narelle(r) {0} ({1}bit {6})\n\n"
+        print(_("\narelle(r) {version} ({wordSize}bit {platform})\n\n"
                 "An open source XBRL platform\n"
-                "(c) 2010-{2} Mark V Systems Limited\n"
-                "All rights reserved\nhttp://www.arelle.org\nsupport@arelle.org\n\n"
+                "{copyrightLabel}\n"
+                "http://www.arelle.org\nsupport@arelle.org\n\n"
                 "Licensed under the Apache License, Version 2.0 (the \"License\"); "
                 "you may not \nuse this file except in compliance with the License.  "
                 "You may obtain a copy \nof the License at "
@@ -427,14 +436,21 @@ def parseAndRun(args):
                 "See the License for the specific language governing permissions and \n"
                 "limitations under the License."
                 "\n\nIncludes:"
-                "\n   Python(r) {4[0]}.{4[1]}.{4[2]} (c) 2001-2013 Python Software Foundation"
+                "\n   Python(r) {pythonVersion} (c) 2001-2013 Python Software Foundation"
                 "\n   PyParsing (c) 2003-2013 Paul T. McGuire"
-                "\n   lxml {5[0]}.{5[1]}.{5[2]} (c) 2004 Infrae, ElementTree (c) 1999-2004 by Fredrik Lundh"
-                "{3}"
-                "\n   May include installable plug-in modules with author-specific license terms"
-                ).format(Version.__version__, cntlr.systemWordSize, Version.copyrightLatestYear,
-                         _("\n   Bottle (c) 2011-2013 Marcel Hellkamp") if hasWebServer else "",
-                         sys.version_info, etree.LXML_VERSION, platform.machine()))
+                "\n   lxml {lxmlVersion} (c) 2004 Infrae, ElementTree (c) 1999-2004 by Fredrik Lundh"
+                "{bottleCopyright}"
+                "\n   May include installable plug-in modules with author-specific license terms").format(
+                    version=Version.__version__,
+                    wordSize=cntlr.systemWordSize,
+                    platform=platform.machine(),
+                    copyrightLabel=copyrightLabel,
+                    pythonVersion=f'{sys.version_info[0]}.{sys.version_info[1]}.{sys.version_info[2]}',
+                    lxmlVersion=f'{etree.LXML_VERSION[0]}.{etree.LXML_VERSION[1]}.{etree.LXML_VERSION[2]}',
+                    bottleCopyright="\n   Bottle (c) 2011-2013 Marcel Hellkamp" if hasWebServer else ""
+        ))
+    elif options.diagnostics:
+        pprint(get_system_info())
     elif options.disclosureSystemName in ("help", "help-verbose"):
         text = _("Disclosure system choices: \n{0}").format(' \n'.join(cntlr.modelManager.disclosureSystem.dirlist(options.disclosureSystemName)))
         try:
@@ -461,6 +477,7 @@ def parseAndRun(args):
             cntlr.startLogging(logFileName='logToBuffer',
                                logTextMaxLength=options.logTextMaxLength,
                                logRefObjectProperties=options.logRefObjectProperties)
+            cntlr.postLoggingInit() # Cntlr options after logging is started
             from arelle import CntlrWebMain
             app = CntlrWebMain.startWebserver(cntlr, options)
             if options.webserver == '::wsgi':
@@ -473,6 +490,7 @@ def parseAndRun(args):
                            logToBuffer=getattr(options, "logToBuffer", False),
                            logTextMaxLength=options.logTextMaxLength, # e.g., used by EdgarRenderer to require buffered logging
                            logRefObjectProperties=options.logRefObjectProperties)
+        cntlr.postLoggingInit() # Cntlr options after logging is started
         cntlr.run(options)
 
         return cntlr
@@ -529,8 +547,8 @@ class CntlrCmdLine(Cntlr.Cntlr):
     Initialization sets up for platform via Cntlr.Cntlr.
     """
 
-    def __init__(self, logFileName=None):
-        super(CntlrCmdLine, self).__init__(hasGui=False)
+    def __init__(self, logFileName=None, uiLang=None):
+        super(CntlrCmdLine, self).__init__(hasGui=False, uiLang=uiLang)
         self.preloadedPlugins =  {}
 
     def run(self, options, sourceZipStream=None, responseZipStream=None):
@@ -581,8 +599,6 @@ class CntlrCmdLine(Cntlr.Cntlr):
 
         setDisableRTL(options.disableRtl) # not saved to config
 
-        if options.uiLang: # set current UI Lang (but not config setting)
-            self.setUiLanguage(options.uiLang)
         if options.proxy:
             if options.proxy != "show":
                 proxySettings = proxyTuple(options.proxy)
@@ -791,6 +807,7 @@ class CntlrCmdLine(Cntlr.Cntlr):
             self.modelManager.collectProfileStats = True
         if options.outputAttribution:
             self.modelManager.outputAttribution = options.outputAttribution
+        self.modelManager.validateTestcaseSchema = options.validateTestcaseSchema
         if options.internetConnectivity == "offline":
             self.webCache.workOffline = True
         elif options.internetConnectivity == "online":

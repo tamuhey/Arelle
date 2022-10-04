@@ -19,6 +19,8 @@ classifiers = [
     'License :: OSI Approved :: Apache Software License',
     'Natural Language :: English',
     'Programming Language :: Python :: 3',
+    'Programming Language :: Python :: 3.7',
+    'Programming Language :: Python :: 3.8',
     'Programming Language :: Python :: 3.9',
     'Operating System :: OS Independent',
     'Topic :: Text Processing :: Markup :: XML'
@@ -76,9 +78,12 @@ platforms = ["any"]
 namespaces = false
 
 [tool.setuptools_scm]
+tag_regex = "^(?:[\\w-]+-?)?(?P<version>[vV]?\\d+(?:\\.\\d+){0,2}[^\\+]*)(?:\\+.*)?$"
+write_to = "arelle/_version.py"
 
 [tool.pytest.ini_options]
 xfail_strict = true
+empty_parameter_set_mark = "fail_at_collect"
 
 [tool.mypy]
 # Warn when a # type: ignore comment does not specify any error codes
@@ -102,11 +107,31 @@ ignore_errors = true
 [[tool.mypy.overrides]]
 module = [
     'arelle.plugin.validate.ESEF.*',
+    'arelle.plugin.validate.ESEF_2022.*',
     'arelle.Cntlr',
+    'arelle.Locale',
     'arelle.ModelObject',
+    'arelle.ModelValue',
+    'arelle.SystemInfo',
     'arelle.Updater',
     'arelle.UrlUtil',
     'arelle.ValidateXbrl',
+    'arelle.XbrlConst',
+    'arelle.XbrlUtil',
+    'arelle.XmlUtil',
 ]
 ignore_errors = false
 strict = true
+
+# --- Modules lacking stubs ---
+# Add any module missing library stubs or not having
+# the py.typed marker here
+[[tool.mypy.overrides]]
+module = [
+    'gtk',
+    'isodate.*',
+    'win32clipboard',
+    'win32gui',
+    'win32process',
+]
+ignore_missing_imports = true

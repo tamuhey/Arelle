@@ -1,8 +1,5 @@
 '''
-Created on Oct 17, 2010
-
-@author: Mark V Systems Limited
-(c) Copyright 2010 Mark V Systems Limited, All rights reserved.
+See COPYRIGHT.md for copyright information.
 '''
 import os, sys
 from collections import defaultdict
@@ -12,7 +9,7 @@ from arelle.ModelDtsObject import ModelConcept
 from arelle.PrototypeInstanceObject import ContextPrototype, DimValuePrototype
 from typing import cast
 
-NONDEFAULT = sys.intern(_STR_8BIT("non-default"))
+NONDEFAULT = sys.intern(str("non-default"))
 
 def loadDimensionDefaults(val):
     # load dimension defaults when required without performing validations
@@ -359,7 +356,7 @@ def isFactDimensionallyValid(val, f, setPrototypeContextElements=False, otherFac
                                                 for priItem in relevantPriItems]) & otherFacts
             relevantFactsByDims = set.instersection(relevantFactsByPriItems,
                                                     *[val.factsByDimMemQname(dimQname, NONDEFAULT)
-                                                      for dimQname in f.context.dimAspects(_DICT_SET(val.modelXbrl.qnameDimensionDefaults.keys()))])
+                                                      for dimQname in f.context.dimAspects(val.modelXbrl.qnameDimensionDefaults.keys())])
         else:
             relevantFactsByDims = None
         '''

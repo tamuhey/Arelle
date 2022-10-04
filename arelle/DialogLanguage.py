@@ -1,8 +1,5 @@
 '''
-Created on Apr 7, 2012
-
-@author: Mark V Systems Limited
-(c) Copyright 2012 Mark V Systems Limited, All rights reserved.
+See COPYRIGHT.md for copyright information.
 '''
 import os
 from tkinter import Toplevel, StringVar, N, S, E, W, EW, messagebox
@@ -114,27 +111,22 @@ class DialogLanguage(Toplevel):
         if uiLangIndex >= 0 and uiLangIndex != self.uiLangIndex: # changed
             if uiLangIndex == 0:
                 langCode = self.mainWin.modelManager.defaultLang
-                localeCode = ""
             else:
-                langCode, sep, localeCode = self.languageCodes[self.cbUiLang.value].partition(" ")
-                if not self.mainWin.isMSW:  # Windows uses string language codes
-                    localeCode = langCode.replace("-", "_") + ".UTF-8" # Unix and Mac uses en_US.UTF-8
+                langCode = self.languageCodes[self.cbUiLang.value]
 
-            newLocale = getUserLocale(localeCode)
+            newLocale = getUserLocale(langCode)
             if newLocale is not None:
                 self.mainWin.modelManager.locale = newLocale
             else:
                 messagebox.showerror(_("User interface locale error"),
-                                     _("Locale setting {0} ({1}) is not supported on this system")
-                                     .format(langCode, localeCode),
+                                     _("Locale setting {0} is not supported on this system")
+                                     .format(langCode),
                                      parent=self)
                 return
-            if localeCode != "": # not the system default
+            if uiLangIndex != 0: # not the system default
                 self.mainWin.config["userInterfaceLangOverride"] = langCode
-                self.mainWin.config["userInterfaceLocaleOverride"] = localeCode
             else: # use system default
                 self.mainWin.config.pop("userInterfaceLangOverride", None)
-                self.mainWin.config.pop("userInterfaceLocaleOverride", None)
             self.mainWin.setUiLanguage(langCode)
 
             if messagebox.askyesno(

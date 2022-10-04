@@ -1,8 +1,5 @@
 '''
-Created on Oct 3, 2010
-
-@author: Mark V Systems Limited
-(c) Copyright 2010 Mark V Systems Limited, All rights reserved.
+See COPYRIGHT.md for copyright information.
 '''
 from __future__ import annotations
 from typing import TYPE_CHECKING
@@ -12,7 +9,7 @@ from arelle.PluginManager import pluginClassMethods
 
 
 if TYPE_CHECKING:
-    from .Cntlr import Cntlr
+    from arelle.Cntlr import Cntlr
 
 def initialize(cntlr: Cntlr) -> ModelManager:
     modelManager = ModelManager(cntlr)
@@ -65,18 +62,24 @@ class ModelManager:
         self.validateDedupCalcs = False
         self.validateInfoset = False
         self.validateUtr = False
+        self.validateTestcaseSchema = True
         self.skipDTS = False
         self.skipLoading = None
         self.abortOnMajorError = False
         self.collectProfileStats = False
         self.loadedModelXbrls = []
-        from arelle import Locale
-        self.locale = Locale.getUserLocale(cntlr.config.get("userInterfaceLocaleOverride",""))
-        self.defaultLang = Locale.getLanguageCode()
         self.customTransforms = None
+        self.isLocaleSet = False
 
     def shutdown(self):
         self.status = "shutdown"
+
+    def setLocale(self) -> str | None:
+        from arelle import Locale
+        self.locale, localeSetupMessage = Locale.getUserLocale(self.cntlr.uiLocale)
+        self.defaultLang = Locale.getLanguageCode()
+        self.isLocaleSet = True
+        return localeSetupMessage
 
     def addToLog(self, message, messageCode="", file="", refs=[], level=logging.INFO):
         """Add a simple info message to the default logger

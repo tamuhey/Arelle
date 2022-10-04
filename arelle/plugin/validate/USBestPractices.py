@@ -1,12 +1,18 @@
+'''
+See COPYRIGHT.md for copyright information.
+'''
+
 # changed from reporting locs to reporting relationships: HF 2020-06-23
 
 from arelle import PluginManager
 from arelle.ModelDtsObject import ModelConcept
 from arelle.ModelValue import qname
+from arelle.Version import copyrightLabel
 from arelle.XmlValidate import UNVALIDATED, VALID
 from arelle import Locale, ModelXbrl, XbrlConst
 from arelle.FileSource import openFileSource, openFileStream, saveFile
 import os, io, re, json, time
+from math import isfinite
 from collections import defaultdict
 
 # ((year, ugtNamespace, ugtDocLB, ugtEntryPoint) ...)
@@ -135,7 +141,7 @@ def setup(val, *args, **kwargs):
                             val.usgaapDeprecations[conceptName] = (val.usgaapDeprecations.get(conceptName, ('',''))[0], modelDocumentation.text)
                         elif modelDocumentation.role == 'http://www.xbrl.org/2009/role/deprecatedDateLabel':
                             val.usgaapDeprecations[conceptName] = (modelDocumentation.text, val.usgaapDeprecations.get(conceptName, ('',''))[1])
-                    jsonStr = _STR_UNICODE(json.dumps(val.usgaapDeprecations, ensure_ascii=False, indent=0)) # might not be unicode in 2.7
+                    jsonStr = str(json.dumps(val.usgaapDeprecations, ensure_ascii=False, indent=0)) # might not be unicode in 2.7
                     saveFile(cntlr, deprecationsJsonFile, jsonStr)  # 2.7 gets unicode this way
                     deprecationsInstance.close()
                     del deprecationsInstance # dereference closed modelXbrl
@@ -186,13 +192,13 @@ def setup(val, *args, **kwargs):
                         for relFrom, rels in elrRelSet.fromModelObjects().items():
                             elrUgtCalcs[relFrom.name] = [rel.toModelObject.name for rel in rels]
                         val.usgaapCalculations[ELR] = elrUgtCalcs
-                    jsonStr = _STR_UNICODE(json.dumps(val.usgaapCalculations, ensure_ascii=False, indent=0)) # might not be unicode in 2.7
+                    jsonStr = str(json.dumps(val.usgaapCalculations, ensure_ascii=False, indent=0)) # might not be unicode in 2.7
                     saveFile(cntlr, ugtCalcsJsonFile, jsonStr)  # 2.7 gets unicode this way
                     # load default dimensions
                     for defaultDimRel in calculationsInstance.relationshipSet(XbrlConst.dimensionDefault).modelRelationships:
                         if isinstance(defaultDimRel.fromModelObject, ModelConcept) and isinstance(defaultDimRel.toModelObject, ModelConcept):
                             val.usgaapDefaultDimensions[defaultDimRel.fromModelObject.name] = defaultDimRel.toModelObject.name
-                    jsonStr = _STR_UNICODE(json.dumps(val.usgaapDefaultDimensions, ensure_ascii=False, indent=0)) # might not be unicode in 2.7
+                    jsonStr = str(json.dumps(val.usgaapDefaultDimensions, ensure_ascii=False, indent=0)) # might not be unicode in 2.7
                     saveFile(cntlr, ugtDefaultDimensionsJsonFile, jsonStr)  # 2.7 gets unicode this way
                     calculationsInstance.close()
                     del calculationsInstance # dereference closed modelXbrl
@@ -227,8 +233,8 @@ def factCheck(val, fact, *args, **kwargs):
                 # 2.4.1 decimal disagreement
                 if fact.decimals and fact.decimals != "INF":
                     vf = float(fact.value)
-                    if _ISFINITE(vf):
-                        dec = _INT(fact.decimals)
+                    if isfinite(vf):
+                        dec = int(fact.decimals)
                         vround = round(vf, dec)
                         if vf != vround:
                             val.modelXbrl.log('WARNING-SEMANTIC', "US-BPG.2.4.1",
@@ -555,7 +561,7 @@ __pluginInfo__ = {
     'description': '''XBRL-US Best Practice Guidance Validation.''',
     'license': 'Apache-2',
     'author': 'Ewe S. Gap',
-    'copyright': '(c) Copyright 2012 Mark V Systems Limited, All rights reserved.',
+    'copyright': copyrightLabel,
     # classes of mount points (required)
     'Validate.EFM.Start': setup,
     'Validate.EFM.Fact': factCheck,

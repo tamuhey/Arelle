@@ -3,12 +3,13 @@ Sample custom functions plugin for formula XML Element, Attribute creation funct
 
 >>> note that this function has been renamed xfi:create-element and moved to FunctionXfi.py <<<
 
-(c) Copyright 2012 Mark V Systems Limited, All rights reserved.
+See COPYRIGHT.md for copyright information.
 '''
 from arelle import XPathContext, XbrlUtil
 from arelle.ModelValue import qname, QName
 from arelle.ModelInstanceObject import ModelDimensionValue, XmlUtil
 from arelle.FunctionUtil import qnameArg, nodeArg, atomicArg
+from arelle.Version import authorLabel, copyrightLabel
 from arelle import XmlValidate
 from lxml import etree
 
@@ -43,7 +44,7 @@ def  xfxc_element(xc, p, contextItem, args):
     attrArg = args[1] if isinstance(args[1],(list,tuple)) else (args[1],)
     # attributes have to be pairs
     if attrArg:
-        if len(attrArg) & 1 or any(not isinstance(attrArg[i], (QName, _STR_BASE))
+        if len(attrArg) & 1 or any(not isinstance(attrArg[i], (QName, str))
                                    for i in range(0, len(attrArg),2)):
             raise XPathContext.FunctionArgType(1,"((xs:qname|xs:string),xs:anyAtomicValue)", errCode="xfxce:AttributesNotNameValuePairs")
         else:
@@ -97,8 +98,8 @@ __pluginInfo__ = {
     'version': '1.0',
     'description': "This plug-in adds a custom function to create xml elements, such as for typed dimensions, implemented by a plug-in.  ",
     'license': 'Apache-2',
-    'author': 'Mark V Systems Limited',
-    'copyright': '(c) Copyright 2012 Mark V Systems Limited, All rights reserved.',
+    'author': authorLabel,
+    'copyright': copyrightLabel,
     # classes of mount points (required)
     'Formula.CustomFunctions': xfxcFunctions,
 }

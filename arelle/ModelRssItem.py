@@ -1,8 +1,5 @@
 '''
-Created on Nov 11, 2010
-
-@author: Mark V Systems Limited
-(c) Copyright 2010 Mark V Systems Limited, All rights reserved.
+See COPYRIGHT.md for copyright information.
 '''
 import os
 from arelle import XmlUtil
@@ -94,7 +91,7 @@ class ModelRssItem(ModelObject):
             date = XmlUtil.text(XmlUtil.descendant(self, self.edgr, "filingDate"))
             d = date.split("/")
             if d and len(d) == 3:
-                self._filingDate = datetime.date(_INT(d[2]),_INT(d[0]),_INT(d[1]))
+                self._filingDate = datetime.date(int(d[2]),int(d[0]),int(d[1]))
             return self._filingDate
 
     @property
@@ -117,7 +114,7 @@ class ModelRssItem(ModelObject):
             self._acceptanceDatetime = None
             date = XmlUtil.text(XmlUtil.descendant(self, self.edgr, "acceptanceDatetime"))
             if date and len(date) == 14:
-                self._acceptanceDatetime = datetime.datetime(_INT(date[0:4]),_INT(date[4:6]),_INT(date[6:8]),_INT(date[8:10]),_INT(date[10:12]),_INT(date[12:14]))
+                self._acceptanceDatetime = datetime.datetime(int(date[0:4]),int(date[4:6]),int(date[6:8]),int(date[8:10]),int(date[10:12]),int(date[12:14]))
             return self._acceptanceDatetime
 
     @property

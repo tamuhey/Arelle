@@ -1,13 +1,12 @@
 '''
 formulaGenerator generates XBRL formula linkbases for a subset of the Sphinx language.
 
-(c) Copyright 2013 Mark V Systems Limited, California US, All rights reserved.
-Mark V copyright applies to this software, which is licensed according to the terms of Arelle(r).
+See COPYRIGHT.md for copyright information.
 
 Sphinx is a Rules Language for XBRL described by a Sphinx 2 Primer
 (c) Copyright 2012 CoreFiling, Oxford UK.
 Sphinx copyright applies to the Sphinx language, not to this software.
-Mark V Systems conveys neither rights nor license for the Sphinx language.
+Workiva, Inc. conveys neither rights nor license for the Sphinx language.
 '''
 
 import time, sys, io, os.path, re
@@ -20,12 +19,7 @@ from .SphinxMethods import aggreateFunctionImplementation
 
 
 def generateFormulaLB(cntlr, sphinxFiles, generatedSphinxFormulasDirectory):
-
-    if sys.version[0] >= '3':
-        from arelle.pyparsing.pyparsing_py3 import lineno
-    else:
-        from pyparsing import lineno
-
+    from arelle.pyparsing.pyparsing_py3 import lineno
     from .SphinxContext import SphinxContext
     from .SphinxValidator import validate
 
