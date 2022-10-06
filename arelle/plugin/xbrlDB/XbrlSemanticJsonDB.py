@@ -18,8 +18,7 @@ Example dialog or command line parameters for operation:
     timeout:
 
 
-(c) Copyright 2013 Mark V Systems Limited, California US, All rights reserved.
-Mark V copyright applies to this software, which is licensed according to the terms of Arelle(r).
+See COPYRIGHT.md for copyright information.
 
 to do:
 
@@ -176,7 +175,7 @@ class XbrlSemanticJsonDatabaseConnection():
             headers = {'User-agent':   'Arelle/1.0',
                        'Accept':       'application/json',
                        'Content-Type': "text/json; charset='UTF-8'"}
-            data = _STR_UNICODE(json.dumps(graph,
+            data = str(json.dumps(graph,
                                            sort_keys=True,  # allow comparability of json files
                                            ensure_ascii=False,
                                            indent=2,

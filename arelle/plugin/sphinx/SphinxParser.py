@@ -1,13 +1,12 @@
 '''
 SphinxParser is an example of a package plug-in parser for the CoreFiling Sphinx language.
 
-(c) Copyright 2013 Mark V Systems Limited, California US, All rights reserved.
-Mark V copyright applies to this software, which is licensed according to the terms of Arelle(r).
+See COPYRIGHT.md for copyright information.
 
 Sphinx is a Rules Language for XBRL described by a Sphinx 2 Primer
 (c) Copyright 2012 CoreFiling, Oxford UK.
 Sphinx copyright applies to the Sphinx language, not to this software.
-Mark V Systems conveys neither rights nor license for the Sphinx language.
+Workiva, Inc. conveys neither rights nor license for the Sphinx language.
 '''
 
 import time, sys, os, os.path, re, zipfile
@@ -771,19 +770,11 @@ def compileSphinxGrammar( cntlr ):
     debugParsing = True
 
     cntlr.showStatus(_("Compiling Sphinx Grammar"))
-    if sys.version[0] >= '3':
-        # python 3 requires modified parser to allow release of global objects when closing DTS
-        from arelle.pyparsing.pyparsing_py3 import (Word, Keyword, alphas,
-                     Literal, CaselessLiteral,
-                     Combine, Optional, nums, Or, Forward, Group, ZeroOrMore, StringEnd, alphanums,
-                     ParserElement, quotedString, delimitedList, Suppress, Regex, FollowedBy,
-                     lineno)
-    else:
-        from pyparsing import (Word, Keyword, alphas,
-                     Literal, CaselessLiteral,
-                     Combine, Optional, nums, Or, Forward, Group, ZeroOrMore, StringEnd, alphanums,
-                     ParserElement, quotedString, delimitedList, Suppress, Regex, FollowedBy,
-                     lineno)
+    # python 3 requires modified parser to allow release of global objects when closing DTS
+    from arelle.pyparsing.pyparsing_py3 import (
+        Word, Keyword, Literal, CaselessLiteral, Combine, Optional, nums, Forward, ZeroOrMore,
+        StringEnd, ParserElement, quotedString, delimitedList, Suppress, Regex
+    )
 
     ParserElement.enablePackrat()
 

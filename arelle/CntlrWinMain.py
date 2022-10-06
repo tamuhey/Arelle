@@ -1,10 +1,7 @@
 '''
-Created on Oct 3, 2010
-
 This module is Arelle's controller in windowing interactive UI mode
 
-@author: Mark V Systems Limited
-(c) Copyright 2010 Mark V Systems Limited, All rights reserved.
+See COPYRIGHT.md for copyright information.
 '''
 from __future__ import annotations
 
@@ -35,6 +32,7 @@ from arelle.CntlrWinTooltip import ToolTip
 from arelle import XbrlConst
 from arelle.PluginManager import pluginClassMethods
 from arelle.UrlUtil import isHttpUrl
+from arelle.Version import copyrightLabel
 import logging
 
 import threading, queue
@@ -70,8 +68,13 @@ class CntlrWinMain (Cntlr.Cntlr):
         self.filename = None
         self.dirty = False
         overrideLang = self.config.get("labelLangOverride")
+        localeSetupMessage = self.modelManager.setLocale() # set locale before GUI for menu strings, pass any msg to logger after log pane starts up
         self.labelLang = overrideLang if overrideLang else self.modelManager.defaultLang
         self.data = {}
+
+        # Background processes communicate with UI thread through this queue
+        # Prepare early so messages encountered during initialization can be queued for logging
+        self.uiThreadQueue = queue.Queue()
 
         if self.isMac: # mac Python fonts bigger than other apps (terminal, text edit, Word), and to windows Arelle
             _defaultFont = tkFont.nametofont("TkDefaultFont") # label, status bar, treegrid
@@ -351,6 +354,7 @@ class CntlrWinMain (Cntlr.Cntlr):
         from arelle import ViewWinList
         self.logView = ViewWinList.ViewList(None, self.tabWinBtm, _("messages"), True)
         self.startLogging(logHandler=WinMainLogHandler(self)) # start logger
+        self.postLoggingInit(localeSetupMessage) # Cntlr options after logging is started, logger pane now available for any locale startup messages
         logViewMenu = self.logView.contextMenu(contextMenuClick=self.contextMenuClick)
         logViewMenu.add_command(label=_("Clear"), underline=0, command=self.logClear)
         logViewMenu.add_command(label=_("Save to file"), underline=0, command=self.logSaveToFile)
@@ -429,7 +433,6 @@ class CntlrWinMain (Cntlr.Cntlr):
 
         self.logFile = None
 
-        self.uiThreadQueue = queue.Queue()     # background processes communicate with ui thread
         self.uiThreadChecker(self.statusbar)    # start background queue
 
         self.modelManager.loadCustomTransforms() # load if custom transforms not loaded
@@ -1328,10 +1331,10 @@ class CntlrWinMain (Cntlr.Cntlr):
         DialogAbout.about(self.parent,
                           _("About arelle"),
                           os.path.join(self.imagesDir, "arelle32.gif"),
-                          _("arelle\u00ae {0} ({1}bit {7})\n"
+                          _("arelle\u00ae {version} ({wordSize}bit {platform})\n"
                               "An open source XBRL platform\n"
-                              "\u00a9 2010-{2} Mark V Systems Limited\n"
-                              "All rights reserved\nhttp://www.arelle.org\nsupport@arelle.org\n\n"
+                              "{copyrightLabel}\n"
+                              "http://www.arelle.org\nsupport@arelle.org\n\n"
                               "Licensed under the Apache License, Version 2.0 (the \"License\"); "
                               "you may not use this file except in compliance with the License.  "
                               "You may obtain a copy of the License at\n\n"
@@ -1342,19 +1345,23 @@ class CntlrWinMain (Cntlr.Cntlr):
                               "See the License for the specific language governing permissions and "
                               "limitations under the License."
                               "\n\nIncludes:"
-                              "\n   Python\u00ae {4[0]}.{4[1]}.{4[2]} \u00a9 2001-2016 Python Software Foundation"
-                              "\n   Tcl/Tk {6} \u00a9 Univ. of Calif., Sun, Scriptics, ActiveState, and others"
+                              "\n   Python\u00ae {pythonVersion} \u00a9 2001-2016 Python Software Foundation"
+                              "\n   Tcl/Tk {tcltkVersion} \u00a9 Univ. of Calif., Sun, Scriptics, ActiveState, and others"
                               "\n   PyParsing \u00a9 2003-2013 Paul T. McGuire"
-                              "\n   lxml {5[0]}.{5[1]}.{5[2]} \u00a9 2004 Infrae, ElementTree \u00a9 1999-2004 by Fredrik Lundh"
-                              "{3}"
-                              "\n   May include installable plug-in modules with author-specific license terms"
-                              )
-                            .format(Version.__version__, self.systemWordSize, Version.copyrightLatestYear,
-                                    _("\n   Bottle \u00a9 2011-2013 Marcel Hellkamp"
-                                      "\n   CherryPy \u00a9 2002-2013 CherryPy Team") if self.hasWebServer else "",
-                                    sys.version_info, etree.LXML_VERSION, Tcl().eval('info patchlevel'),
-                                    platform.machine()
-                                    ))
+                              "\n   lxml {lxmlVersion} \u00a9 2004 Infrae, ElementTree \u00a9 1999-2004 by Fredrik Lundh"
+                              "{bottleCopyright}"
+                              "\n   May include installable plug-in modules with author-specific license terms").format(
+                                  version=Version.__version__,
+                                  wordSize=self.systemWordSize,
+                                  platform=platform.machine(),
+                                  copyrightLabel=copyrightLabel.replace("(c)", "\u00a9"),
+                                  pythonVersion=f'{sys.version_info[0]}.{sys.version_info[1]}.{sys.version_info[2]}',
+                                  tcltkVersion=Tcl().eval('info patchlevel'),
+                                  lxmlVersion=f'{etree.LXML_VERSION[0]}.{etree.LXML_VERSION[1]}.{etree.LXML_VERSION[2]}',
+                                  bottleCopyright=_("\n   Bottle \u00a9 2011-2013 Marcel Hellkamp"
+                                                    "\n   CherryPy \u00a9 2002-2013 CherryPy Team") if self.hasWebServer else ""
+                          ))
+
 
     # worker threads addToLog
     def addToLog(self, message, messageCode="", messageArgs=None, file="", refs=[], level=logging.INFO):
@@ -1367,7 +1374,7 @@ class CntlrWinMain (Cntlr.Cntlr):
         elif file:
             if isinstance(file, (tuple,list,set)):
                 message += " - " + ", ".join(file)
-            elif isinstance(file, _STR_BASE):
+            elif isinstance(file, str):
                 message += " - " + file
         if isinstance(messageArgs, dict):
             try:

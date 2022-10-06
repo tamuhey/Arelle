@@ -1,14 +1,11 @@
 """
-@author: Mark V Systems Limited
-(c) Copyright 2011 Mark V Systems Limited, All rights reserved.
+See COPYRIGHT.md for copyright information.
 """
 import os
 import sys
 
 from cx_Freeze import Executable, setup
 from setuptools import find_packages
-
-VERSION_FILE = "version.txt"
 
 LINUX_PLATFORM = "linux"
 MACOS_PLATFORM = "darwin"
@@ -71,9 +68,6 @@ options = {
     }
 }
 
-if os.path.exists(VERSION_FILE):
-    includeFiles.append((VERSION_FILE, VERSION_FILE))
-
 if os.path.exists("arelle/plugin/EdgarRenderer"):
     includeLibs.append("cherrypy")
     includeLibs.append("dateutil")
@@ -128,4 +122,9 @@ else:
 setup(
     executables=[guiExecutable, cliExecutable],
     options=options,
+    setup_requires=["setuptools_scm~=7.0"],
+    use_scm_version={
+        "tag_regex": r"^(?:[\w-]+-?)?(?P<version>[vV]?\d+(?:\.\d+){0,2}[^\+]*)(?:\+.*)?$",
+        "write_to": os.path.normcase("arelle/_version.py"),
+    },
 )

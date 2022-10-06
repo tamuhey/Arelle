@@ -1,13 +1,9 @@
 '''
-Created on Dec 20, 2017
-
-@author: Mark V Systems Limited
-(c) Copyright 2017 Mark V Systems Limited, All rights reserved.
-
-
+See COPYRIGHT.md for copyright information.
 '''
 import os
 from arelle import ModelDocument, XbrlConst
+from arelle.Version import authorLabel, copyrightLabel
 
 def dislosureSystemTypes(disclosureSystem, *args, **kwargs):
     # return ((disclosure system name, variable name), ...)
@@ -54,7 +50,7 @@ def validateXbrlFinally(val, *args, **kwargs):
                                if refPart.localName == "RequiredInDocument"
                                if refPart.textValue.strip().lower() == "true")
 
-        missingConcepts = requiredConcepts - _DICT_SET(modelXbrl.factsByQname.keys())
+        missingConcepts = requiredConcepts - modelXbrl.factsByQname.keys()
         if missingConcepts:
             modelXbrl.error("XDC:missingRequiredFacts",
                             _("Required facts missing from document: %(concepts)s."),
@@ -70,8 +66,8 @@ __pluginInfo__ = {
     'version': '1.0',
     'description': '''XDC Validation.''',
     'license': 'Apache-2',
-    'author': 'Mark V Systems',
-    'copyright': '(c) Copyright 2017 Mark V Systems Limited, All rights reserved.',
+    'author': authorLabel,
+    'copyright': copyrightLabel,
     # classes of mount points (required)
     'DisclosureSystem.Types': dislosureSystemTypes,
     'DisclosureSystem.ConfigURL': disclosureSystemConfigURL,

@@ -4,18 +4,18 @@
 ~~~~~~~~~~~~~~~~~~~
 
 .. py:module:: arelle.cntlr
-   :copyright: Copyright 2010-2012 Mark V Systems Limited, All rights reserved.
+   :copyright: See COPYRIGHT.md for copyright information.
    :license: Apache-2.
    :synopsis: Common controller class to initialize for platform and setup common logger functions
 """
 from __future__ import annotations
-from typing import Any, TYPE_CHECKING, TextIO, Mapping
+from typing import Any, TYPE_CHECKING, TextIO, Mapping, cast
 from arelle.typing import TypeGetText
 import tempfile, os, io, sys, logging, gettext, json, re, subprocess, math
 from arelle import ModelManager
 from arelle.WebCache import WebCache
 from arelle.Locale import getLanguageCodes, setDisableRTL
-from arelle import PluginManager, PackageManager
+from arelle import PluginManager, PackageManager, XbrlConst
 from collections import defaultdict
 
 _: TypeGetText
@@ -23,9 +23,10 @@ _: TypeGetText
 if TYPE_CHECKING:
     from arelle.ModelXbrl import ModelXbrl
 
-osPrcs = None
+osPrcs: Any = None
 LOG_TEXT_MAX_LENGTH = 32767
 cxFrozen = getattr(sys, 'frozen', False)
+
 
 def resourcesDir() -> str:
     if cxFrozen: # Check if frozen by cx_Freeze
@@ -40,9 +41,7 @@ def resourcesDir() -> str:
     # for python 3.2 remove __pycache__
     if _moduleDir.endswith("__pycache__"):
         _moduleDir = os.path.dirname(_moduleDir)
-    if _moduleDir.endswith("python32.zip/arelle"): # older cx_Freezes use this
-        _resourcesDir = os.path.dirname(os.path.dirname(os.path.dirname(_moduleDir)))
-    elif (re.match(r".*[\\/](library|python{0.major}{0.minor}).zip[\\/]arelle$".format(sys.version_info),
+    if (re.match(r".*[\\/](library|python{0.major}{0.minor}).zip[\\/]arelle$".format(sys.version_info),
                    _moduleDir)): # cx_Freexe uses library up to 3.4 and python35 after 3.5
         _resourcesDir = os.path.dirname(os.path.dirname(_moduleDir))
     else:
@@ -140,7 +139,8 @@ class Cntlr:
         logFileName: str | None = None,
         logFileMode: str | None = None,
         logFileEncoding: str | None = None,
-        logFormat: str | None = None
+        logFormat: str | None = None,
+        uiLang: str | None = None,
     ) -> None:
         self.hasWin32gui = False
         self.hasGui = hasGui
@@ -243,7 +243,7 @@ class Cntlr:
                     self.userAppDir = os.path.join( os.path.expanduser("~/.config"), "arelle")
             if hasGui:
                 try:
-                    import gtk  # type: ignore[import]
+                    import gtk
                     self.hasClipboard = True
                 except ImportError:
                     self.hasClipboard = False
@@ -275,7 +275,7 @@ class Cntlr:
             }
 
         # start language translation for domain
-        self.setUiLanguage(self.config.get("userInterfaceLangOverride",None), fallbackToDefault=True)
+        self.setUiLanguage(uiLang or self.config.get("userInterfaceLangOverride",None), fallbackToDefault=True)
         setDisableRTL(self.config.get('disableRtl', False))
 
         self.webCache = WebCache(self, self.config.get("proxySettings"))
@@ -291,21 +291,37 @@ class Cntlr:
 
         self.startLogging(logFileName, logFileMode, logFileEncoding, logFormat)
 
+    def postLoggingInit(self, localeSetupMessage: str | None = None) -> None:
+        if not self.modelManager.isLocaleSet:
+            localeSetupMessage = self.modelManager.setLocale() # set locale after logger started
+        if localeSetupMessage:
+            Cntlr.addToLog(self, localeSetupMessage, messageCode="arelle:uiLocale", level=logging.WARNING)
+
         # Cntlr.Init after logging started
         for pluginMethod in PluginManager.pluginClassMethods("Cntlr.Init"):
             pluginMethod(self)
 
-    def setUiLanguage(self, lang: str, fallbackToDefault: bool = False) -> None:
+    def setUiLanguage(self, locale: str | None, fallbackToDefault: bool = False) -> None:
         try:
-            langCodes = getLanguageCodes(lang)
+            self.uiLocale = locale
+            langCodes = getLanguageCodes(locale)
             gettext.translation("arelle",
                                 self.localeDir,
                                 langCodes).install()
-            self.uiLang = langCodes[0].lower()
-            self.uiLangDir = 'rtl' if self.uiLang[0:2] in {"ar","he"} else 'ltr'
-        except Exception:
-            if fallbackToDefault or (lang and lang.lower().startswith("en")):
-                self.uiLang = "en"
+            self.uiLang = langCodes[0]
+            if not locale and self.uiLang:
+                self.uiLocale = self.uiLang
+            self.uiLangDir = 'rtl' if self.uiLang[0:2].lower() in {"ar","he"} else 'ltr'
+        except Exception as ex:
+            if fallbackToDefault and not locale and langCodes:
+                locale = langCodes[0]
+            if fallbackToDefault or (locale and locale.lower().startswith("en")):
+                if locale and len(locale) == 5 and locale.lower().startswith("en"):
+                    self.uiLang = locale # may be en other than defaultLocale
+                else:
+                    self.uiLang = XbrlConst.defaultLocale # must work with gettext or will raise an exception
+                if not self.uiLocale:
+                    self.uiLocale = self.uiLang
                 self.uiLangDir = "ltr"
                 gettext.install("arelle",
                                 self.localeDir)
@@ -362,7 +378,7 @@ class Cntlr:
                 self.addToLog(_("Unknown log level name: {0}, please choose from {1}").format(
                     logLevel, ', '.join(logging.getLevelName(l).lower()
                                         for l in sorted([i for i in logging._levelToName.keys()
-                                                         if isinstance(i,_INT_TYPES) and i > 0]))),  # type: ignore[name-defined]
+                                                         if isinstance(i, int) and i > 0]))),
                               level=logging.ERROR, messageCode="arelle:logLevel")
             setattr(self.logger, "messageCodeFilter", None)
             setattr(self.logger, "messageLevelFilter", None)
@@ -407,9 +423,9 @@ class Cntlr:
             if isinstance(file, (tuple,list,set)):
                 for _file in file:
                     refs.append( {"href": _file} )
-            elif isinstance(file, _STR_BASE):  # type: ignore[name-defined]
+            elif isinstance(file, str):
                 refs.append( {"href": file} )
-            if isinstance(level, _STR_BASE):  # type: ignore[name-defined]
+            if isinstance(level, str):
                 # given level is str at this point, level_int will always
                 # be an int but logging.getLevelName returns Any (int if
                 # input is str, and str if input is int)
@@ -459,7 +475,7 @@ class Cntlr:
         if self.hasFileSystem:
             with io.open(self.configJsonFile, 'wt', encoding='utf-8') as f:
                 # might not be unicode in 2.7
-                jsonStr = _STR_UNICODE(json.dumps(self.config, ensure_ascii=False, indent=2)) # type: ignore[name-defined]
+                jsonStr = str(json.dumps(self.config, ensure_ascii=False, indent=2))
                 f.write(jsonStr)  # 2.7 getss unicode this way
 
     # default non-threaded viewModelObject
@@ -545,10 +561,12 @@ class Cntlr:
                     if text is None:
                         p = subprocess.Popen(['pbpaste'], stdout=subprocess.PIPE)
                         retcode = p.wait()
-                        text = p.stdout.read().decode('utf-8')  # default utf8 may not be right for mac
+                        assert p.stdout is not None
+                        text = p.stdout.read().decode('utf-8')  # default utf8 may not be right for mac type:ignore[union-attr]
                         return text
                     else:
                         p = subprocess.Popen(['pbcopy'], stdin=subprocess.PIPE)
+                        assert p.stdin is not None
                         p.stdin.write(text.encode('utf-8'))  # default utf8 may not be right for mac
                         p.stdin.close()
                         retcode = p.wait()
@@ -581,6 +599,7 @@ class Cntlr:
             if sys.platform.startswith("win"):
                 if osPrcs is None:
                     import win32process as osPrcs
+
                 process_memory = osPrcs.GetProcessMemoryInfo(osPrcs.GetCurrentProcess())['WorkingSetSize']
                 if isinstance(process_memory, int):
                     return process_memory / 1024
@@ -591,7 +610,7 @@ class Cntlr:
             else: # unix or linux where ru_maxrss works
                 import resource as osPrcs  # is this needed?
                 # in KB
-                return float(osPrcs.getrusage(osPrcs.RUSAGE_SELF).ru_maxrss)  # type: ignore[attr-defined]
+                return float(osPrcs.getrusage(osPrcs.RUSAGE_SELF).ru_maxrss)
         except Exception:
             pass
         return 0

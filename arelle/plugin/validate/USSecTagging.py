@@ -1,6 +1,11 @@
+'''
+See COPYRIGHT.md for copyright information.
+'''
+
 from arelle import PluginManager
 from arelle.ModelValue import qname
 from arelle import XbrlConst
+from arelle.Version import copyrightLabel
 import regex as re
 from collections import defaultdict
 
@@ -214,21 +219,15 @@ def final(val, conceptsUsed, *args, **kwargs):
     del val.twoWayMemberStdLabelPattern
     del val.schedules
 
+
 def saveDtsMatches(dts, secDtsTagMatchesFile):
     setup(dts, True)
-
     import sys, csv
-    if sys.version[0] >= '3':
-        csvOpenMode = 'w'
-        csvOpenNewline = ''
-    else:
-        csvOpenMode = 'wb' # for 2.7
-        csvOpenNewline = None
-
+    csvOpenMode = 'w'
+    csvOpenNewline = ''
     csvFile = open(secDtsTagMatchesFile, csvOpenMode, newline=csvOpenNewline)
     csvWriter = csv.writer(csvFile, dialect="excel")
     csvWriter.writerow(("Concept", "Rule", "Row", "Pattern", "Label", "Documentation"))
-
     num1wayConcepts = 0
     num2wayConcepts = 0
     num2wayMembers = 0
@@ -327,7 +326,7 @@ __pluginInfo__ = {
     'description': '''US SEC Tagging Validation.  Includes non-negative rules.''',
     'license': 'Apache-2',
     'author': 'Ewe S. Gap',
-    'copyright': '(c) Copyright 2012 Mark V Systems Limited, All rights reserved.',
+    'copyright': copyrightLabel,
     # classes of mount points (required)
     'Validate.EFM.Start': setup,
     'Validate.EFM.Fact': factCheck,

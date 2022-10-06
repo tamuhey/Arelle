@@ -1,8 +1,5 @@
 '''
-Created on Jul 7, 2018
-
-@author: Mark V Systems Limited
-(c) Copyright 2018 Mark V Systems Limited, All rights reserved.
+See COPYRIGHT.md for copyright information.
 '''
 import os, json, re
 from collections import defaultdict, OrderedDict
@@ -288,10 +285,10 @@ def deprecatedConceptDatesFile(modelManager, abbrNs, latestTaxonomyDoc):
                         if date:
                             deprecatedConceptDates[conceptName] = date
 
-            jsonStr = _STR_UNICODE(json.dumps(
-                OrderedDict(((k,v) for k,v in sorted(deprecatedConceptDates.items()))), # sort in json file
-                ensure_ascii=False, indent=0)) # might not be unicode in 2.7
-            saveFile(cntlr, _fileName, jsonStr)  # 2.7 gets unicode this way
+            jsonStr = json.dumps(
+                OrderedDict(((k, v) for k, v in sorted(deprecatedConceptDates.items())),  # sort in json file
+                            ensure_ascii=False, indent=0))
+            saveFile(cntlr, _fileName, jsonStr)
             deprecationsInstance.close()
             del deprecationsInstance # dereference closed modelXbrl
 
@@ -555,7 +552,7 @@ def buildUgtFullRelsFiles(modelXbrl, dqcRules):
                         for objVal in obj.values():
                             sortDqcLists(objVal)
                 sortDqcLists(dqc0015)
-            jsonStr = _STR_UNICODE(json.dumps(ugtRels, ensure_ascii=False, indent=2)) # might not be unicode in 2.7
+            jsonStr = json.dumps(ugtRels, ensure_ascii=False, indent=2)
             _ugtRelsFileName = resourcesFilePath(modelManager, "us-gaap-rels-{}.json".format(ugtAbbr.rpartition("/")[2]))
             saveFile(cntlr, _ugtRelsFileName, jsonStr)  # 2.7 gets unicode this way
 

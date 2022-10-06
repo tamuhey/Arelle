@@ -1,19 +1,15 @@
 '''
-Created on Oct 05, 2012
-
-@author: Mark V Systems Limited
-(c) Copyright 2012 Mark V Systems Limited, All rights reserved.
+See COPYRIGHT.md for copyright information.
 '''
 import regex as re
 from collections import defaultdict
-from arelle import (ModelDocument, ModelValue,
-                ModelRelationshipSet, XmlUtil, XbrlConst)
+from arelle import (ModelDocument, ModelRelationshipSet, XmlUtil, XbrlConst)
 from arelle.ModelDtsObject import ModelConcept, ModelResource
 from arelle.ModelObject import ModelObject
-from arelle.PluginManager import pluginClassMethods
 from arelle.UrlUtil import isHttpUrl
 from .Dimensions import checkFilingDimensions
 from .DTS import checkFilingDTS
+
 
 def validateFiling(val, modelXbrl):
 
@@ -297,7 +293,7 @@ def validateFiling(val, modelXbrl):
         if qname.namespaceURI not in val.disclosureSystem.baseTaxonomyNamespaces:
             facets = modelType.facets
             if facets:
-                lengthFacets = _DICT_SET(facets.keys()) & {"minLength", "maxLength", "length"}
+                lengthFacets = facets.keys() & {"minLength", "maxLength", "length"}
                 if lengthFacets:
                     modelXbrl.error("SBR.NL.2.2.7.02",
                         _("Type %(typename)s has length restriction facets %(facets)s"),

@@ -3,7 +3,7 @@
 ~~~~~~~~~~~~~~~~~~~
 
 .. module:: arelle.ModelDtsObject
-   :copyright: Copyright 2010-2012 Mark V Systems Limited, All rights reserved.
+   :copyright: See COPYRIGHT.md for copyright information.
    :license: Apache-2.
    :synopsis: This module contains DTS-specialized ModelObject classes: ModelRoleType (role and arcrole types), ModelSchemaObject (parent class for top-level named schema element, attribute, attribute groups, etc), ModelConcept (xs:elements that may be concepts, typed dimension elements, or just plain XML definitions), ModelAttribute (xs:attribute), ModelAttributeGroup, ModelType (both top level named and anonymous simple and complex types), ModelEnumeration, ModelLink (xlink link elements), ModelResource (xlink resource elements), ModelLocator (subclass of ModelResource for xlink locators), and ModelRelationship (not an lxml proxy object, but a resolved relationship that reflects an effective arc between one source and one target).
 
@@ -261,7 +261,7 @@ class ModelParticle():
                 if m == "unbounded":
                     self._maxOccurs = sys.maxsize
                 else:
-                    self._maxOccurs = _INT(m)
+                    self._maxOccurs = int(m)
                     if self._maxOccurs < 0:
                         raise ValueError(_("maxOccurs must be positive").format(m))
             else:
@@ -283,7 +283,7 @@ class ModelParticle():
         except AttributeError:
             m = self.get("minOccurs")
             if m:
-                self._minOccurs = _INT(m)
+                self._minOccurs = int(m)
                 if self._minOccurs < 0:
                     raise ValueError(_("minOccurs must be positive").format(m))
             else:
@@ -1848,7 +1848,7 @@ class ModelRelationship(ModelObject):
                 priority = 0
             else:
                 try:
-                    priority = _INT(p)
+                    priority = int(p)
                 except (TypeError,ValueError) :
                     # XBRL validation error needed
                     priority = 0

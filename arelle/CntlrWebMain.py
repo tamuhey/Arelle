@@ -1,10 +1,7 @@
 '''
-Created on Oct 3, 2010
-
 Use this module to start Arelle in web server mode
 
-@author: Mark V Systems Limited
-(c) Copyright 2010 Mark V Systems Limited, All rights reserved.
+See COPYRIGHT.md for copyright information.
 
 '''
 from arelle.webserver.bottle import Bottle, request, response, static_file
@@ -13,6 +10,7 @@ import os, io, sys, time, threading, uuid, zipfile
 from arelle import Version
 from arelle.FileSource import FileNamedStringIO
 from arelle.PluginManager import pluginClassMethods
+from arelle.PythonUtil import STR_NUM_TYPES
 _os_pid = os.getpid()
 
 GETorPOST = ('GET', 'POST')
@@ -29,8 +27,8 @@ def startWebserver(_cntlr, options):
     global imagesDir, cntlr, optionsPrototype
     cntlr = _cntlr
     imagesDir = cntlr.imagesDir
-    optionValuesTypes = _STR_NUM_TYPES + (type(None),)
-    optionsPrototype = dict((option,value if isinstance(value,_STR_NUM_TYPES) else None)
+    optionValuesTypes = STR_NUM_TYPES + (type(None),)
+    optionsPrototype = dict((option,value if isinstance(value, STR_NUM_TYPES) else None)
                             for option in dir(options)
                             for value in (getattr(options, option),)
                             if isinstance(value,optionValuesTypes) and not option.startswith('_'))
@@ -753,7 +751,7 @@ def about(arelleImgFile=None):
     return htmlBody(_('''<table width="700p">
 <tr><th colspan="2">About arelle</th></tr>
 <tr><td rowspan="12" style="vertical-align:top;"><img src="%s"/></td><td>arelle&reg; %s (%sbit). An open source XBRL platform</td></tr>
-<tr><td>&copy; 2010-%s Mark V Systems Limited.  All rights reserved.</td></tr>
+<tr><td>&copy; 2011-present Workiva, Inc..  All rights reserved.</td></tr>
 <tr><td>Web site: <a href="http://www.arelle.org">http://www.arelle.org</a>.
 E-mail support: <a href="mailto:support@arelle.org">support@arelle.org</a>.</td></tr>
 <tr><td>Licensed under the Apache License, Version 2.0 (the \"License\"); you may not use this file
@@ -768,7 +766,7 @@ See the License for the specific language governing permissions and limitations 
 <tr><td style="text-indent: 2.0em;">lxml %s.%s.%s &copy; 2004 Infrae, ElementTree &copy; 1999-2004 by Fredrik Lundh</td></tr>
 <tr><td style="text-indent: 2.0em;">Bottle &copy; 2011 Marcel Hellkamp</td></tr>
 </table>''') % (arelleImgFile or '/images/arelle32.gif',
-                Version.__version__, cntlr.systemWordSize, Version.copyrightLatestYear,
+                Version.__version__, cntlr.systemWordSize,
                 sys.version_info[0],sys.version_info[1],sys.version_info[2],
                 etree.LXML_VERSION[0],etree.LXML_VERSION[1],etree.LXML_VERSION[2]) )
 

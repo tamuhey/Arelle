@@ -1,8 +1,5 @@
 '''
-Created on Oct 6, 2010
-
-@author: Mark V Systems Limited
-(c) Copyright 2010 Mark V Systems Limited, All rights reserved.
+See COPYRIGHT.md for copyright information.
 '''
 from collections import defaultdict
 import os
@@ -135,7 +132,7 @@ class ViewRelationshipSet(ViewWinTree.ViewTree):
                     self.treeView.heading("references", text=_("References"))
                 elif isinstance(self.arcrole, (list,tuple)) or XbrlConst.isResourceArcrole(self.arcrole):
                     self.isResourceArcrole = True
-                    self.showReferences = isinstance(self.arcrole, _STR_BASE) and self.arcrole.endswith("-reference")
+                    self.showReferences = isinstance(self.arcrole, str) and self.arcrole.endswith("-reference")
                     self.treeView.column("#0", width=160, anchor="w")
                     self.treeView["columns"] = ("arcrole", "resource", "resourcerole", "lang")
                     self.treeView.column("arcrole", width=100, anchor="w", stretch=False)

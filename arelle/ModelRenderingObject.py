@@ -1,8 +1,5 @@
 '''
-Created on Mar 7, 2011
-
-@author: Mark V Systems Limited
-(c) Copyright 2011 Mark V Systems Limited, All rights reserved.
+See COPYRIGHT.md for copyright information.
 '''
 import inspect, os
 from arelle import XmlUtil, XbrlConst, XPathParser, Locale, XPathContext
@@ -127,7 +124,7 @@ class StructuralNode:
         return definitionNode.constraintSets.get(None) # returns None if no default constraint set
 
     def aspectsCovered(self, inherit=False):
-        aspectsCovered = _DICT_SET(self.aspects.keys()) | self.definitionNode.aspectsCovered()
+        aspectsCovered = self.aspects.keys() | self.definitionNode.aspectsCovered()
         if inherit and self.parentStructuralNode is not None:
             aspectsCovered.update(self.parentStructuralNode.aspectsCovered(inherit=inherit))
         return aspectsCovered
@@ -886,10 +883,10 @@ class ModelConstraintSet(ModelFormulaRules):
             return '(unavailable)'  # table defective or not initialized
 
     def aspectValueDependsOnVars(self, aspect):
-        return aspect in _DICT_SET(self.aspectProgs.keys()) or aspect in self._locationAspectCovered
+        return aspect in self.aspectProgs.keys() or aspect in self._locationAspectCovered
 
     def aspectsCovered(self):
-        return _DICT_SET(self.aspectValues.keys()) | _DICT_SET(self.aspectProgs.keys()) | self._locationAspectCovered
+        return self.aspectValues.keys() | self.aspectProgs.keys() | self._locationAspectCovered
 
     # provide model table's aspect model to compile() method of ModelFormulaRules
     @property
@@ -1020,7 +1017,7 @@ class ModelTupleDefinitionNode(ModelRuleDefinitionNode):
         return {Aspect.LOCATION}  # tuple's aspects don't leak to ordinates
 
     def tupleAspectsCovered(self):
-        return _DICT_SET(self.aspectValues.keys()) | _DICT_SET(self.aspectProgs.keys()) | {Aspect.LOCATION}
+        return self.aspectValues.keys() | self.aspectProgs.keys() | {Aspect.LOCATION}
 
     def filteredFacts(self, xpCtx, facts):
         aspects = self.aspectsCovered()
@@ -1076,7 +1073,7 @@ class ModelRelationshipDefinitionNode(ModelClosedDefinitionNode):
     @property
     def generations(self):
         try:
-            return _INT( XmlUtil.childText(self, (XbrlConst.table, XbrlConst.tableMMDD, XbrlConst.table201305, XbrlConst.table201301, XbrlConst.table2011), "generations") )
+            return int( XmlUtil.childText(self, (XbrlConst.table, XbrlConst.tableMMDD, XbrlConst.table201305, XbrlConst.table201301, XbrlConst.table2011), "generations") )
         except (TypeError, ValueError):
             if self.axis in ('sibling', 'child', 'parent'):
                 return 1

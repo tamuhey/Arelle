@@ -1,11 +1,10 @@
 '''
 This module provides database interfaces to postgres SQL
 
-(c) Copyright 2013 Mark V Systems Limited, California US, All rights reserved.
-Mark V copyright applies to this software, which is licensed according to the terms of Arelle(r).
+See COPYRIGHT.md for copyright information.
 '''
 import sys, os, io, glob, time, re, datetime, socket, string, random
-from math import isnan, isinf
+from math import isnan, isinf, isfinite
 from decimal import Decimal
 from arelle.ModelValue import dateTime
 from arelle.PythonUtil import flattenSequence
@@ -204,10 +203,8 @@ class SqlDbConnection():
                 self.__dict__.clear() # dereference everything
             except Exception as ex:
                 self.__dict__.clear() # dereference everything
-                if sys.version[0] >= '3':
-                    raise ex.with_traceback(ex.__traceback__)
-                else:
-                    raise ex
+                raise ex.with_traceback(ex.__traceback__)
+
 
     @property
     def isClosed(self):
@@ -612,7 +609,7 @@ class SqlDbConnection():
                 elif isinstance(col, int):
                     colValues.append(str(col))
                 elif isinstance(col, float):
-                    if _ISFINITE(col):
+                    if isfinite(col):
                         colValues.append(str(col))
                     else:  # no NaN, INF, in SQL implementations (Postgres has it but not IEEE implementation)
                         colValues.append('NULL')
@@ -629,7 +626,7 @@ class SqlDbConnection():
                     colValues.append("'{:04}-{:02}-{:02}'".format(col.year, col.month, col.day))
                 elif col is None:
                     colValues.append('NULL')
-                elif isinstance(col, _STR_BASE) and len(col) >= 4000 and (isOracle or isMSSql):
+                elif isinstance(col, str) and len(col) >= 4000 and (isOracle or isMSSql):
                     if isOracle:
                         colName = "col{}".format(len(colValues))
                         longColValues[colName] = col

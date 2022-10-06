@@ -1,8 +1,5 @@
 '''
-Created on Oct 5, 2010
-
-@author: Mark V Systems Limited
-(c) Copyright 2010 Mark V Systems Limited, All rights reserved.
+See COPYRIGHT.md for copyright information.
 '''
 from __future__ import annotations
 
@@ -16,7 +13,7 @@ from arelle.PrototypeDtsObject import LocPrototype, PrototypeObject
 from arelle.XbrlConst import consecutiveArcrole
 import sys
 
-USING_EQUIVALENCE_KEY = sys.intern(_STR_8BIT("using_equivalence_key")) # indicates hash entry replaced with keyed entry
+USING_EQUIVALENCE_KEY = sys.intern(str("using_equivalence_key")) # indicates hash entry replaced with keyed entry
 NoneType = type(None)
 
 def create(modelXbrl, arcrole, linkrole=None, linkqname=None, arcqname=None, includeProhibits=False):

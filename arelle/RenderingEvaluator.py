@@ -1,8 +1,5 @@
 '''
-Created on Jun 6, 2012
-
-@author: Mark V Systems Limited
-(c) Copyright 2012 Mark V Systems Limited, All rights reserved.
+See COPYRIGHT.md for copyright information.
 '''
 from arelle import XPathContext, XbrlConst, XmlUtil
 from arelle.ModelFormulaObject import (aspectModels, aspectStr, Aspect)
@@ -14,6 +11,7 @@ from arelle.ModelRenderingObject import (CHILD_ROLLUP_FIRST, CHILD_ROLLUP_LAST,
                                          ModelFilterDefinitionNode,
                                          ModelDimensionRelationshipDefinitionNode)
 from arelle.ModelValue import (QName)
+
 
 def init(modelXbrl):
     # setup modelXbrl for rendering evaluation
@@ -75,7 +73,7 @@ def init(modelXbrl):
             else:
                 modelTable.priorAspectAxisDisposition = {}
                 # check ordinate aspects against aspectModel
-                oppositeAspectModel = (_DICT_SET({'dimensional','non-dimensional'}) - _DICT_SET({modelTable.aspectModel})).pop()
+                oppositeAspectModel = ({'dimensional', 'non-dimensional'} - {modelTable.aspectModel}).pop()
                 if hasNsWithAspectModel:
                     uncoverableAspects = aspectModels[oppositeAspectModel] - aspectModels[modelTable.aspectModel]
                 else:

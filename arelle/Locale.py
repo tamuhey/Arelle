@@ -1,23 +1,23 @@
 '''
-Created on Jan 26, 2011
-
 This module is a local copy of python locale in order to allow
 passing in localconv as an argument to functions without affecting
 system-wide settings.  (The system settings can remain in 'C' locale.)
 
-@author: Mark V Systems Limited (incorporating python locale module code)
-(original python authors: Martin von Loewis, improved by Georg Brandl)
-
-(c) Copyright 2011 Mark V Systems Limited, All rights reserved.
+See COPYRIGHT.md for copyright information.
 '''
 from __future__ import annotations
 import sys, subprocess
 import regex as re
+from typing import Generator, cast, Any, Callable
+from fractions import Fraction
+from arelle.typing import TypeGetText, LocaleDict
 try:
     from collections.abc import Mapping
 except:
     from collections import Mapping
 import unicodedata
+
+_: TypeGetText
 
 CHAR_MAX = 127
 LC_ALL = 6
@@ -30,54 +30,73 @@ LC_TIME = 2
 
 C_LOCALE = None # culture-invariant locale
 
-def getUserLocale(localeCode=''):
+defaultLocaleCodes = {
+    "af": "ZA", "ar": "AE", "be": "BY", "bg": "BG", "ca": "ES", "cs": "CZ",
+    "da": "DK", "de": "DE", "el": "GR", "en": "GB", "es": "ES", "et": "EE",
+    "eu": "ES", "fa": "IR", "fi": "FI", "fo": "FO", "fr": "FR", "he": "IL",
+    "hi": "IN", "hr": "HR", "hu": "HU", "id": "ID", "is": "IS", "it": "IT",
+    "ja": "JP", "ko": "KR", "lt": "LT", "lv": "LV", "ms": "MY", "mt": "MT",
+    "nl": "NL", "no": "NO", "pl": "PL", "pt": "PT", "ro": "RO", "ru": "RU",
+    "sk": "SK", "sl": "SI", "sq": "AL", "sr": "RS", "sv": "SE", "th": "TH",
+    "tr": "TR", "uk": "UA", "ur": "PK", "vi": "VN", "zh": "CN"}
+
+def getUserLocale(localeCode: str = '') -> tuple[LocaleDict, str | None]:
     # get system localeconv and reset system back to default
     import locale
     global C_LOCALE
     conv = None
-    if sys.platform == "darwin" and not localeCode:
-        # possibly this MacOS bug: http://bugs.python.org/issue18378
-        # macOS won't provide right default code for english-european culture combinations
-        localeQueryResult = subprocess.getstatusoutput("defaults read -g AppleLocale")  # MacOS only
-        if localeQueryResult[0] == 0 and '_' in localeQueryResult[1]: # successful
-            localeCode = localeQueryResult[1]
-    try:
-        locale.setlocale(locale.LC_ALL, _STR_8BIT(localeCode))  # str needed for 3to2 2.7 python to work
-        conv = locale.localeconv()
-    except locale.Error:
-        if sys.platform == "darwin":
-            # possibly this MacOS bug: http://bugs.python.org/issue18378
-            # the fix to this bug will loose the monetary/number configuration with en_BE, en_FR, etc
-            # so use this alternative which gets the right culture code for numbers even if english default language
-            localeCulture = '-' + localeCode[3:]
-            # find culture (for any language) in available locales
-            for availableLocale in availableLocales():
-                if len(availableLocale) >= 5 and localeCulture in availableLocale:
-                    try:
-                        locale.setlocale(locale.LC_ALL, availableLocale.replace('-','_'))
-                        conv = locale.localeconv() # should get monetary and numeric codes
-                        break
-                    except locale.Error:
-                        pass # this one didn't work
-    locale.setlocale(locale.LC_ALL, _STR_8BIT('C'))  # str needed for 3to2 2.7 python to work
-    if conv is None: # some other issue prevents getting culture code, use 'C' defaults (no thousands sep, no currency, etc)
+    localeSetupMessage = None
+    localeCode = localeCode.replace('-', '_')
+    localeCodeWithDefault = (
+        f"{localeCode}_{defaultLocaleCodes[localeCode]}"
+        if localeCode in defaultLocaleCodes else None)
+    candidateLocaleCodes = [localeCode] + ([localeCodeWithDefault] if localeCodeWithDefault else [])
+    for candidateLocaleCode in candidateLocaleCodes:
+        try:
+            locale.setlocale(locale.LC_ALL, candidateLocaleCode)
+            conv = locale.localeconv()
+            if candidateLocaleCode == localeCodeWithDefault:
+                localeSetupMessage = f'locale code "{localeCode}" should include a country code, e.g. {localeCodeWithDefault}'
+            break
+        except locale.Error:
+            pass
+    else:
+        # Like above, but avoids a fork unless the earlier options don't work out.
+        try:
+            localeCodes = getLocaleList()
+            # Don't die because we couldn't find a locale command or parse its output.
+        except:
+            localeCodes = []
+        matchingLocaleCodes = sorted(
+            (c for c in localeCodes if c.startswith(localeCode)),
+            # prioritize localeCodeWithDefault prefix and UTF-8
+            key=lambda c: (localeCodeWithDefault and not c.startswith(localeCodeWithDefault), not re.search(r'utf-?8$', c)))
+        for candidateLocaleCode in matchingLocaleCodes:
+            try:
+                locale.setlocale(locale.LC_ALL, candidateLocaleCode)
+                conv = locale.localeconv()
+            except locale.Error:
+                pass
+    locale.setlocale(locale.LC_ALL, 'C')
+    if conv is None:  # some other issue prevents getting culture code, use 'C' defaults (no thousands sep, no currency, etc)
+        localeSetupMessage = f"locale code \"{localeCode}\" is not available on this system"
         conv = locale.localeconv() # use 'C' environment, e.g., en_US
-    if C_LOCALE is None: # load culture-invariant C locale
+    if C_LOCALE is None:  # load culture-invariant C locale
         C_LOCALE = locale.localeconv()
-    return conv
+    return cast(LocaleDict, conv), localeSetupMessage
 
-def getLanguageCode():
-    if sys.platform == "darwin":
-        # possibly this MacOS bug: http://bugs.python.org/issue18378
-        # even when fixed, macOS won't provide right default code for some language-culture combinations
+def getLanguageCode() -> str:
+    if sys.platform == "darwin": # MacOS doesn't provide correct language codes
         localeQueryResult = subprocess.getstatusoutput("defaults read -g AppleLocale")  # MacOS only
         if localeQueryResult[0] == 0 and localeQueryResult[1]: # successful
             return localeQueryResult[1][:5].replace("_","-")
     import locale
-    try:
-        return locale.getdefaultlocale()[0].replace("_","-")
-    except (AttributeError, ValueError): #language code and encoding may be None if their values cannot be determined.
-        return "en"
+    languageCode, encoding = locale.getdefaultlocale()
+    # language code and encoding may be None if their values cannot be determined.
+    if isinstance(languageCode, str):
+        return languageCode.replace("_","-")
+    from arelle.XbrlConst import defaultLocale
+    return defaultLocale # XBRL international default locale
 
 def getLanguageCodes(lang: str | None = None) -> list[str]:
     if lang is None:
@@ -123,147 +142,148 @@ iso3region = {
 "UK": "gbr",
 "US": "usa"}
 
+
+def getLocaleList() -> list[str]:
+    process = subprocess.run(['locale', '-a'], capture_output=True, encoding='iso8859-1', text=True)
+    return process.stdout.splitlines() if process.returncode == 0 else []
+
+
 _availableLocales = None
-def availableLocales():
+def availableLocales() -> set[str]:
     global _availableLocales
     if _availableLocales is not None:
         return _availableLocales
     else:
-        localeQueryResult = subprocess.getstatusoutput("locale -a")  # Mac and Unix only
-        if localeQueryResult[0] == 0: # successful
-            _availableLocales = set(locale.partition(".")[0].replace("_", "-")
-                                    for locale in localeQueryResult[1].split("\n"))
-        else:
-            _availableLocales = set()
+        _availableLocales = {locale.partition(".")[0].replace("_", "-") for locale in getLocaleList()}
         return _availableLocales
 
 _languageCodes = None
-def languageCodes():  # dynamically initialize after gettext is loaded
+def languageCodes() -> dict[str, str]:  # dynamically initialize after gettext is loaded
     global _languageCodes
     if _languageCodes is not None:
         return _languageCodes
     else:
-        _languageCodes = { # language name (in English), code, and setlocale string which works in windows
-            _("Afrikaans (South Africa)"): "af-ZA afrikaans",
-            _("Albanian (Albania)"): "sq-AL albanian",
-            _("Arabic (Algeria)"): "ar-DZ arb_algeria",
-            _("Arabic (Bahrain)"): "ar-BH arabic_bahrain",
-            _("Arabic (Egypt)"): "ar-EG arb_egy",
-            _("Arabic (Iraq)"): "ar-IQ arb_irq",
-            _("Arabic (Jordan)"): "ar-JO arb_jor",
-            _("Arabic (Kuwait)"): "ar-KW arb_kwt",
-            _("Arabic (Lebanon)"): "ar-LB arb_lbn",
-            _("Arabic (Libya)"): "ar-LY arb_lby",
-            _("Arabic (Morocco)"): "ar-MA arb_morocco",
-            _("Arabic (Oman)"): "ar-OM arb_omn",
-            _("Arabic (Qatar)"): "ar-QA arabic_qatar",
-            _("Arabic (Saudi Arabia)"): "ar-SA arb_sau",
-            _("Arabic (Syria)"): "ar-SY arb_syr",
-            _("Arabic (Tunisia)"): "ar-TN arb_tunisia",
-            _("Arabic (U.A.E.)"): "ar-AE arb_are",
-            _("Arabic (Yemen)"): "ar-YE arb_yem",
-            _("Basque (Spain)"): "eu-ES basque",
-            _("Bulgarian (Bulgaria)"): "bg-BG bulgarian",
-            _("Belarusian (Belarus)"): "be-BY belarusian",
-            _("Catalan (Spain)"): "ca-ES catalan",
-            _("Chinese (PRC)"): "zh-CN chs",
-            _("Chinese (Taiwan)"): "zh-TW cht",
-            _("Chinese (Singapore)"): "zh-SG chs",
-            _("Croatian (Croatia)"): "hr-HR croatian",
-            _("Czech (Czech Republic)"): "cs-CZ czech",
-            _("Danish (Denmark)"): "da-DK danish",
-            _("Dutch (Belgium)"): "nl-BE nlb",
-            _("Dutch (Netherlands)"): "nl-NL nld",
-            _("English (Australia)"): "en-AU ena",
-            _("English (Belize)"): "en-BZ eng_belize",
-            _("English (Canada)"): "en-CA enc",
-            _("English (Caribbean)"): "en-029 eng_caribbean",
-            _("English (Ireland)"): "en-IE eni",
-            _("English (Jamaica)"): "en-JM enj",
-            _("English (New Zealand)"): "en-NZ enz",
-            _("English (South Africa)"): "en-ZA ens",
-            _("English (Trinidad)"): "en-TT eng",
-            _("English (United States)"): "en-US enu",
-            _("English (United Kingdom)"): "en-GB eng",
-            _("Estonian (Estonia)"): "et-EE estonian",
-            _("Faeroese (Faroe Islands)"): "fo-FO faroese",
-            _("Farsi (Iran)"): "fa-IR persian",
-            _("Finnish (Finland)"): "fi-FI fin",
-            _("French (Belgium)"): "fr-BE frb",
-            _("French (Canada)"): "fr-CA frc",
-            _("French (France)"): "fr-FR fra",
-            _("French (Luxembourg)"): "fr-LU frl",
-            _("French (Switzerland)"): "fr-CH frs",
-            _("German (Austria)"): "de-AT dea",
-            _("German (Germany)"): "de-DE deu",
-            _("German (Luxembourg)"): "de-LU del",
-            _("German (Switzerland)"): "de-CH des",
-            _("Greek (Greece)"): "el-GR ell",
-            _("Hebrew (Israel)"): "he-IL hebrew",
-            _("Hindi (India)"): "hi-IN hindi",
-            _("Hungarian (Hungary)"): "hu-HU hun",
-            _("Icelandic (Iceland)"): "is-IS icelandic",
-            _("Indonesian (Indonesia)"): "id-ID indonesian",
-            _("Italian (Italy)"): "it-IT ita",
-            _("Italian (Switzerland)"): "it-CH its",
-            _("Japanese (Japan)"): "ja-JP jpn",
-            _("Korean (Korea)"): "ko-KR kor",
-            _("Latvian (Latvia)"): "lv-LV latvian",
-            _("Lithuanian (Lituania)"): "lt-LT lithuanian",
-            _("Malaysian (Malaysia)"): "ms-MY malay",
-            _("Maltese (Malta)"): "mt-MT maltese",
-            _("Norwegian (Bokmal)"): "no-NO nor",
-            _("Norwegian (Nynorsk)"): "no-NO non",
-            _("Persian (Iran)"): "fa-IR persian",
-            _("Polish (Poland)"): "pl-PL plk",
-            _("Portuguese (Brazil)"): "pt-BR ptb",
-            _("Portuguese (Portugal)"): "pt-PT ptg",
-            _("Romanian (Romania)"): "ro-RO rom",
-            _("Russian (Russia)"): "ru-RU rus",
-            _("Serbian (Cyrillic)"): "sr-RS srb",
-            _("Serbian (Latin)"): "sr-RS srl",
-            _("Slovak (Slovakia)"): "sk-SK sky",
-            _("Slovenian (Slovania)"): "sl-SI slovenian",
-            _("Spanish (Argentina)"): "es-AR esr",
-            _("Spanish (Bolivia)"): "es-BO esb",
-            _("Spanish (Colombia)"): "es-CO eso",
-            _("Spanish (Chile)"): "es-CL esl",
-            _("Spanish (Costa Rica)"): "es-CR esc",
-            _("Spanish (Dominican Republic)"): "es-DO esd",
-            _("Spanish (Ecuador)"): "es-EC esf",
-            _("Spanish (El Salvador)"): "es-SV ese",
-            _("Spanish (Guatemala)"): "es-GT esg",
-            _("Spanish (Honduras)"): "es-HN esh",
-            _("Spanish (Mexico)"): "es-MX esm",
-            _("Spanish (Nicaragua)"): "es-NI esi",
-            _("Spanish (Panama)"): "es-PA esa",
-            _("Spanish (Paraguay)"): "es-PY esz",
-            _("Spanish (Peru)"): "es-PE esr",
-            _("Spanish (Puerto Rico)"): "es-PR esu",
-            _("Spanish (Spain)"): "es-ES esn",
-            _("Spanish (United States)"): "es-US est",
-            _("Spanish (Uruguay)"): "es-UY esy",
-            _("Spanish (Venezuela)"): "es-VE esv",
-            _("Swedish (Sweden)"): "sv-SE sve",
-            _("Swedish (Finland)"): "sv-FI svf",
-            _("Thai (Thailand)"): "th-TH thai",
-            _("Turkish (Turkey)"): "tr-TR trk",
-            _("Ukrainian (Ukraine)"): "uk-UA ukr",
-            _("Urdu (Pakistan)"): "ur-PK urdu",
-            _("Vietnamese (Vietnam)"): "vi-VN vietnamese",
+        _languageCodes = { # language name (in English) and lang code
+            _("Afrikaans (South Africa)"): "af-ZA",
+            _("Albanian (Albania)"): "sq-AL",
+            _("Arabic (Algeria)"): "ar-DZ",
+            _("Arabic (Bahrain)"): "ar-BH",
+            _("Arabic (Egypt)"): "ar-EG",
+            _("Arabic (Iraq)"): "ar-IQ",
+            _("Arabic (Jordan)"): "ar-JO",
+            _("Arabic (Kuwait)"): "ar-KW",
+            _("Arabic (Lebanon)"): "ar-LB",
+            _("Arabic (Libya)"): "ar-LY",
+            _("Arabic (Morocco)"): "ar-MA",
+            _("Arabic (Oman)"): "ar-OM",
+            _("Arabic (Qatar)"): "ar-QA",
+            _("Arabic (Saudi Arabia)"): "ar-SA",
+            _("Arabic (Syria)"): "ar-SY",
+            _("Arabic (Tunisia)"): "ar-TN",
+            _("Arabic (U.A.E.)"): "ar-AE",
+            _("Arabic (Yemen)"): "ar-YE",
+            _("Basque (Spain)"): "eu-ES",
+            _("Bulgarian (Bulgaria)"): "bg-BG",
+            _("Belarusian (Belarus)"): "be-BY",
+            _("Catalan (Spain)"): "ca-ES",
+            _("Chinese (PRC)"): "zh-CN",
+            _("Chinese (Taiwan)"): "zh-TW",
+            _("Chinese (Singapore)"): "zh-SG",
+            _("Croatian (Croatia)"): "hr-HR",
+            _("Czech (Czech Republic)"): "cs-CZ",
+            _("Danish (Denmark)"): "da-DK",
+            _("Dutch (Belgium)"): "nl-BE",
+            _("Dutch (Netherlands)"): "nl-NL",
+            _("English (Australia)"): "en-AU",
+            _("English (Belize)"): "en-BZ",
+            _("English (Canada)"): "en-CA",
+            _("English (Caribbean)"): "en-029", #en-CB does not work with windows or linux
+            _("English (Ireland)"): "en-IE",
+            _("English (Jamaica)"): "en-JM",
+            _("English (New Zealand)"): "en-NZ",
+            _("English (South Africa)"): "en-ZA",
+            _("English (Trinidad)"): "en-TT",
+            _("English (United States)"): "en-US",
+            _("English (United Kingdom)"): "en-GB",
+            _("Estonian (Estonia)"): "et-EE",
+            _("Faeroese (Faroe Islands)"): "fo-FO",
+            _("Farsi (Iran)"): "fa-IR",
+            _("Finnish (Finland)"): "fi-FI",
+            _("French (Belgium)"): "fr-BE",
+            _("French (Canada)"): "fr-CA",
+            _("French (France)"): "fr-FR",
+            _("French (Luxembourg)"): "fr-LU",
+            _("French (Switzerland)"): "fr-CH",
+            _("German (Austria)"): "de-AT",
+            _("German (Germany)"): "de-DE",
+            _("German (Luxembourg)"): "de-LU",
+            _("German (Switzerland)"): "de-CH",
+            _("Greek (Greece)"): "el-GR",
+            _("Hebrew (Israel)"): "he-IL",
+            _("Hindi (India)"): "hi-IN",
+            _("Hungarian (Hungary)"): "hu-HU",
+            _("Icelandic (Iceland)"): "is-IS",
+            _("Indonesian (Indonesia)"): "id-ID",
+            _("Italian (Italy)"): "it-IT",
+            _("Italian (Switzerland)"): "it-CH",
+            _("Japanese (Japan)"): "ja-JP",
+            _("Korean (Korea)"): "ko-KR",
+            _("Latvian (Latvia)"): "lv-LV",
+            _("Lithuanian (Lituania)"): "lt-LT",
+            _("Malaysian (Malaysia)"): "ms-MY",
+            _("Maltese (Malta)"): "mt-MT",
+            _("Norwegian (Bokmal)"): "no-NO",
+            _("Norwegian (Nynorsk)"): "no-NO",
+            _("Persian (Iran)"): "fa-IR",
+            _("Polish (Poland)"): "pl-PL",
+            _("Portuguese (Brazil)"): "pt-BR",
+            _("Portuguese (Portugal)"): "pt-PT",
+            _("Romanian (Romania)"): "ro-RO",
+            _("Russian (Russia)"): "ru-RU",
+            _("Serbian (Cyrillic)"): "sr-RS",
+            _("Serbian (Latin)"): "sr-RS",
+            _("Slovak (Slovakia)"): "sk-SK",
+            _("Slovenian (Slovania)"): "sl-SI",
+            _("Spanish (Argentina)"): "es-AR",
+            _("Spanish (Bolivia)"): "es-BO",
+            _("Spanish (Colombia)"): "es-CO",
+            _("Spanish (Chile)"): "es-CL",
+            _("Spanish (Costa Rica)"): "es-CR",
+            _("Spanish (Dominican Republic)"): "es-DO",
+            _("Spanish (Ecuador)"): "es-EC",
+            _("Spanish (El Salvador)"): "es-SV",
+            _("Spanish (Guatemala)"): "es-GT",
+            _("Spanish (Honduras)"): "es-HN",
+            _("Spanish (Mexico)"): "es-MX",
+            _("Spanish (Nicaragua)"): "es-NI",
+            _("Spanish (Panama)"): "es-PA",
+            _("Spanish (Paraguay)"): "es-PY",
+            _("Spanish (Peru)"): "es-PE",
+            _("Spanish (Puerto Rico)"): "es-PR",
+            _("Spanish (Spain)"): "es-ES",
+            _("Spanish (United States)"): "es-US",
+            _("Spanish (Uruguay)"): "es-UY",
+            _("Spanish (Venezuela)"): "es-VE",
+            _("Swedish (Sweden)"): "sv-SE",
+            _("Swedish (Finland)"): "sv-FI",
+            _("Thai (Thailand)"): "th-TH",
+            _("Turkish (Turkey)"): "tr-TR",
+            _("Ukrainian (Ukraine)"): "uk-UA",
+            _("Urdu (Pakistan)"): "ur-PK",
+            _("Vietnamese (Vietnam)"): "vi-VN",
         }
         return _languageCodes
 
-_disableRtl: bool = False # disable for implementations where tkinter supports rtl
+_disableRTL: bool = False # disable for implementations where tkinter supports rtl
 def setDisableRTL(disableRTL: bool) -> None:
     global _disableRTL
     _disableRTL = disableRTL
 
-def rtlString(source, lang):
+def rtlString(source: str, lang: str | None) -> str:
     if lang and source and lang[0:2] in {"ar","he"} and not _disableRTL:
-        line = []
+        line: list[str] = []
         lineInsertion = 0
-        words = []
+        words: list[str] = []
         rtl = True
         for c in source:
             bidi = unicodedata.bidirectional(c)
@@ -296,8 +316,8 @@ def rtlString(source, lang):
         return source
 
 # Iterate over grouping intervals
-def _grouping_intervals(grouping):
-    last_interval = 3 # added by Mark V to prevent compile error but not necessary semantically
+def _grouping_intervals(grouping: list[int]) -> Generator[int, None, None]:
+    last_interval = 3 # added to prevent compile error but not necessary semantically
     for interval in grouping:
         # if grouping is -1, we are done
         if interval == CHAR_MAX:
@@ -310,7 +330,7 @@ def _grouping_intervals(grouping):
         last_interval = interval
 
 #perform the grouping from right to left
-def _group(conv, s, monetary=False):
+def _group(conv: LocaleDict, s: str, monetary: bool = False) -> tuple[str, int]:
     thousands_sep = conv[monetary and 'mon_thousands_sep' or 'thousands_sep']
     grouping = conv[monetary and 'mon_grouping' or 'grouping']
     if not grouping:
@@ -342,7 +362,7 @@ def _group(conv, s, monetary=False):
     )
 
 # Strip a given amount of excess padding from the given string
-def _strip_padding(s, amount):
+def _strip_padding(s: str, amount: int) -> str:
     lpos = 0
     while amount and s[lpos] == ' ':
         lpos += 1
@@ -356,7 +376,14 @@ def _strip_padding(s, amount):
 _percent_re = re.compile(r'%(?:\((?P<key>.*?)\))?'
                          r'(?P<modifiers>[-#0-9 +*.hlL]*?)[eEfFgGdiouxXcrs%]')
 
-def format(conv, percent, value, grouping=False, monetary=False, *additional):
+def format(
+    conv: LocaleDict,
+    percent: str,
+    value: Any, # this can be a Mapping, tuple, str, float ... anything that can appear in "{}".format(<value>)
+    grouping: bool = False,
+    monetary: bool = False,
+    *additional: str
+) -> str:
     """Returns the locale-aware substitution of a %? specifier
     (percent).
 
@@ -370,7 +397,14 @@ def format(conv, percent, value, grouping=False, monetary=False, *additional):
                              "format specifier, %s not valid") % repr(percent))
     return _format(conv, percent, value, grouping, monetary, *additional)
 
-def _format(conv, percent, value, grouping=False, monetary=False, *additional):
+def _format(
+    conv: LocaleDict,
+    percent: str,
+    value: Any, # this can be a Mapping, tuple, str, float ... anything that can appear in "{}".format(<value>)
+    grouping: bool = False,
+    monetary: bool = False,
+    *additional: str
+) -> str:
     if percent.startswith("{"): # new formatting {:.{}f}
         formattype = percent[-2]
         if additional:
@@ -401,7 +435,12 @@ def _format(conv, percent, value, grouping=False, monetary=False, *additional):
             formatted = _strip_padding(formatted, seps)
     return formatted
 
-def format_string(conv, f, val, grouping=False):
+def format_string(
+    conv: LocaleDict,
+    f: str,
+    val: Any, # this can be a Mapping, tuple, str, float ... anything that can appear in "{}".format(<val>)
+    grouping: bool = False
+) -> str:
     """Formats a string in the same way that the % formatting would use,
     but takes the current locale into account.
     Grouping is applied if the third parameter is true."""
@@ -434,9 +473,15 @@ def format_string(conv, f, val, grouping=False):
                 i += (1 + starcount)
     val = tuple(new_val)
 
-    return new_f % val
+    return cast(str, new_f % val)
 
-def currency(conv, val, symbol=True, grouping=False, international=False):
+def currency(
+    conv: LocaleDict,
+    val: int | float,
+    symbol: bool = True,
+    grouping: bool = False,
+    international: bool = False
+) -> str:
     """Formats val according to the currency settings
     in the current locale."""
 
@@ -446,7 +491,7 @@ def currency(conv, val, symbol=True, grouping=False, international=False):
         raise ValueError("Currency formatting is not possible using "
                          "the 'C' locale.")
 
-    s = format('%%.%if' % digits, abs(val), grouping, monetary=True)
+    s = format(conv, '%%.%if' % digits, abs(val), grouping, monetary=True)
     # '<' and '>' are markers if the sign must be inserted between symbol and value
     s = '<' + s + '>'
 
@@ -480,11 +525,11 @@ def currency(conv, val, symbol=True, grouping=False, international=False):
 
     return s.replace('<', '').replace('>', '')
 
-def ftostr(conv, val):
+def ftostr(conv: LocaleDict, val: Any) -> str:
     """Convert float to integer, taking the locale into account."""
     return format(conv, "%.12g", val)
 
-def atof(conv, string, func=float):
+def atof(conv: LocaleDict, string: str, func: Callable[[str], Any] = float) -> Any:  # return type depends on func param, it is used to return float, int, and str
     "Parses a string as a float according to the locale settings."
     #First, get rid of the grouping
     ts = conv['thousands_sep']
@@ -497,14 +542,14 @@ def atof(conv, string, func=float):
     #finally, parse the string
     return func(string)
 
-def atoi(conv, str):
+def atoi(conv: LocaleDict, str: str) -> int:
     "Converts a string to an integer according to the locale settings."
-    return atof(conv, str, _INT)
+    return cast(int, atof(conv, str, int))
 
 # decimal formatting
-from decimal import getcontext, Decimal
+from decimal import Decimal
 
-def format_picture(conv, value, picture):
+def format_picture(conv: LocaleDict, value: Any, picture: str) -> str:
     monetary = False
     decimal_point = conv['decimal_point']
     thousands_sep = conv[monetary and 'mon_thousands_sep' or 'thousands_sep']
@@ -515,10 +560,12 @@ def format_picture(conv, value, picture):
 
     if isinstance(value, float):
         value = Decimal.from_float(value)
-    elif isinstance(value, _STR_NUM_TYPES):
+    elif isinstance(value, (str, int)):
         value = Decimal(value)
+    elif isinstance(value, Fraction):
+        value = Decimal(float(value))
     elif not isinstance(value, Decimal):
-        raise ValueError(_('Picture requires a number convertable to decimal or float').format(picture))
+        raise ValueError(_('Picture requires a number convertible to decimal or float').format(picture))
 
     if value.is_nan():
         return 'NaN'
@@ -527,12 +574,12 @@ def format_picture(conv, value, picture):
 
     pic, sep, negPic = picture.partition(';')
     if negPic and ';' in negPic:
-        raise ValueError(_('Picture contains multiple picture sepearators {0}').format(picture))
+        raise ValueError(_('Picture contains multiple picture separators {0}').format(picture))
     if isNegative and negPic:
         pic = negPic
 
     if len([c for c in pic if c in (percent, per_mille) ]) > 1:
-        raise ValueError(_('Picture contains multiple percent or per_mille charcters {0}').format(picture))
+        raise ValueError(_('Picture contains multiple percent or per_mille characters {0}').format(picture))
     if percent in pic:
         value *= 100
     elif per_mille in pic:
@@ -547,7 +594,7 @@ def format_picture(conv, value, picture):
     suffix = ''
     if fractPart:
         if decimal_point in fractPart:
-            raise ValueError(_('Sub-picture contains decimal point sepearators {0}').format(pic))
+            raise ValueError(_('Sub-picture contains decimal point separators {0}').format(pic))
 
         for c in fractPart:
             if c.isdecimal():
@@ -589,7 +636,20 @@ def format_picture(conv, value, picture):
                           trailpos=suffix,
                           trailneg=suffix)
 
-def format_decimal(conv, value, intPlaces=1, fractPlaces=2, curr='', sep=None, grouping=None, dp=None, pos=None, neg=None, trailpos=None, trailneg=None):
+def format_decimal(
+    conv: LocaleDict | None,
+    value: Decimal,
+    intPlaces: int = 1,
+    fractPlaces: int = 2,
+    curr: str = '',
+    sep: str | None = None,
+    grouping: int | None = None,
+    dp: str | None = None,
+    pos: str | None = None,
+    neg: str | None = None,
+    trailpos: str | None = None,
+    trailneg: str | None = None
+) -> str:
     """Convert Decimal to a formatted string including currency if any.
 
     intPlaces:  required number of digits before the decimal point
@@ -603,17 +663,16 @@ def format_decimal(conv, value, intPlaces=1, fractPlaces=2, curr='', sep=None, g
     trailneg:optional trailing minus indicator:  '-', ')', space or blank
 
     >>> d = Decimal('-1234567.8901')
-    >>> format(d, curr='$')
+    >>> format_decimal(getUserLocale()[0], d, curr='$')
     '-$1,234,567.89'
-    >>> format(d, places=0, sep='.', dp='', neg='', trailneg='-')
+    >>> format_decimal(getUserLocale()[0], d, fractPlaces=0, sep='.', dp='', neg='', trailneg='-')
     '1.234.568-'
-    >>> format(d, curr='$', neg='(', trailneg=')')
+    >>> format_decimal(getUserLocale()[0], d, curr='$', neg='(', trailneg=')')
     '($1,234,567.89)'
-    >>> format(Decimal(123456789), sep=' ')
+    >>> format_decimal(getUserLocale()[0], Decimal(123456789), sep=' ')
     '123 456 789.00'
-    >>> format(Decimal('-0.02'), neg='<', trailneg='>')
+    >>> format_decimal(getUserLocale()[0], Decimal('-0.02'), neg='<', trailneg='>')
     '<0.02>'
-
     """
     if conv is not None:
         if dp is None:
@@ -657,11 +716,11 @@ def format_decimal(conv, value, intPlaces=1, fractPlaces=2, curr='', sep=None, g
         if grouping is None:
             grouping = 3
     q = Decimal(10) ** -fractPlaces      # 2 places --> '0.01'
-    sign, digits, exp = value.quantize(q).as_tuple()
-    result = []
-    digits = list(map(str, digits))
+    sign, _digits, exp = value.quantize(q).as_tuple()
+    result: list[str] = []
+    digits = list(map(str, _digits))
     build, next = result.append, digits.pop
-    build(trailneg if sign else trailpos)
+    build((trailneg if sign else trailpos) or '')
     if value.is_finite():
         for i in range(fractPlaces):
             build(next() if digits else '0')
@@ -680,5 +739,5 @@ def format_decimal(conv, value, intPlaces=1, fractPlaces=2, curr='', sep=None, g
     elif value.is_infinite():
         result.append("ytinifnI")
     build(curr)
-    build(neg if sign else pos)
+    build((neg if sign else pos) or '')
     return ''.join(reversed(result))

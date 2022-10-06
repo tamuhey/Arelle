@@ -1,9 +1,5 @@
 '''
-Created on Oct 5, 2010
-Refactored from ModelObject on Jun 11, 2011
-
-@author: Mark V Systems Limited
-(c) Copyright 2010 Mark V Systems Limited, All rights reserved.
+See COPYRIGHT.md for copyright information.
 '''
 import os, io, logging
 from collections import defaultdict
@@ -341,7 +337,7 @@ class ModelTestcaseVariation(ModelObject):
             asserTests = {}
             for atElt in XmlUtil.children(resultElement, None, "assertionTests"):
                 try:
-                    asserTests[atElt.get("assertionID")] = (_INT(atElt.get("countSatisfied")),_INT(atElt.get("countNotSatisfied")))
+                    asserTests[atElt.get("assertionID")] = (int(atElt.get("countSatisfied")),int(atElt.get("countNotSatisfied")))
                 except ValueError:
                     pass
             if asserTests:
