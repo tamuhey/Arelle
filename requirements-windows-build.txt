@@ -1,2 +1,2 @@
-cx_Freeze==6.11
+cx_Freeze==6.12.0
 requests_negotiate_sspi==0.5.2
