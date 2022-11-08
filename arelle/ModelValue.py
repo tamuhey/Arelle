@@ -5,7 +5,8 @@ from __future__ import annotations
 import datetime, isodate
 from decimal import Decimal
 from functools import total_ordering
-from typing import TYPE_CHECKING, Any, Type, cast, overload
+from typing import TYPE_CHECKING, Any, cast, overload, Optional, Union
+from fractions import Fraction
 
 if TYPE_CHECKING:
     from arelle.ModelObject import ModelObject
@@ -14,6 +15,7 @@ if TYPE_CHECKING:
     from arelle.ModelFormulaObject import ModelCustomFunctionSignature
     from arelle.ModelDtsObject import ModelType
     from arelle.ModelInstanceObject import ModelInlineFact
+    from arelle.XmlValidate import XsdPattern
 
 import regex as re
 XmlUtil = None
@@ -136,7 +138,7 @@ def qnameEltPfxName(
     | ModelInlineFact
     | ModelObject,
     prefixedName: str,
-    prefixException: Exception | None = None,
+    prefixException: type[Exception] | None = None,
 ) -> QName | None:
     prefix: str | None
     namespaceURI: str | None
@@ -255,7 +257,7 @@ def dateTime(
     addOneDay: bool = False,
     # TODO: type is a reserved name in Python, we should rename this
     type: int | None = None,
-    castException: Type[Exception] | None = None,
+    castException: type[Exception] | None = None,
 ) -> DateTime | None:
     from arelle.ModelObject import ModelObject
 
@@ -577,7 +579,7 @@ class YearMonthDayTimeDuration():
             return "PT0S"
         return "P" + ''.join(per)
 
-def time(value: str, castException: Type[Exception] | None = None) -> Time | None:
+def time(value: str, castException: type[Exception] | None = None) -> Time | None:
     from arelle.ModelObject import ModelObject
 
     if value == "MinTime":
@@ -626,176 +628,226 @@ class Time(datetime.time):
         time.hour24 = hour24
         return time
 
-class gYearMonth():
-    def __init__(self, year: int, month: int) -> None:
-        self.year = int(year) # may be negative
+
+class gYearMonth:
+    def __init__(self, year: int | str, month: int | str) -> None:
+        self.year = int(year)  # may be negative
         self.month = int(month)
+
     def __repr__(self) -> str:
         return self.__str__()
+
     def __str__(self) -> str:
-        return "{0:0{2}}-{1:02}".format(self.year, self.month, 5 if self.year < 0 else 4) # may be negative
-    def __eq__(self,other: Any) -> bool:
+        return "{0:0{2}}-{1:02}".format(self.year, self.month, 5 if self.year < 0 else 4)  # may be negative
+
+    def __eq__(self, other: Any) -> bool:
         if not isinstance(other, gYearMonth):
             return NotImplemented
         return self.year == other.year and self.month == other.month
-    def __ne__(self,other: Any) -> bool:
+
+    def __ne__(self, other: Any) -> bool:
         return not self.__eq__(other)
+
     def __lt__(self, other: Any) -> bool:
         if not isinstance(other, gYearMonth):
             return NotImplemented
         return (self.year < other.year) or (self.year == other.year and self.month < other.month)
+
     def __le__(self, other: Any) -> bool:
         if not isinstance(other, gYearMonth):
             return NotImplemented
         return (self.year < other.year) or (self.year == other.year and self.month <= other.month)
+
     def __gt__(self, other: Any) -> bool:
         if not isinstance(other, gYearMonth):
             return NotImplemented
         return (self.year > other.year) or (self.year == other.year and self.month > other.month)
+
     def __ge__(self, other: Any) -> bool:
         if not isinstance(other, gYearMonth):
             return NotImplemented
         return (self.year > other.year) or (self.year == other.year and self.month >= other.month)
+
     def __bool__(self) -> bool:
         return self.year != 0 or self.month != 0
 
 
-class gMonthDay():
-    def __init__(self, month: int, day: int) -> None:
+class gMonthDay:
+    def __init__(self, month: int | str, day: int | str) -> None:
         self.month = int(month)
         self.day = int(day)
+
     def __repr__(self) -> str:
         return self.__str__()
+
     def __str__(self) -> str:
         return "--{0:02}-{1:02}".format(self.month, self.day)
-    def __eq__(self,other: Any) -> bool:
+
+    def __eq__(self, other: Any) -> bool:
         if not isinstance(other, gMonthDay):
             return NotImplemented
         return self.month == other.month and self.day == other.day
-    def __ne__(self,other: Any) -> bool:
+
+    def __ne__(self, other: Any) -> bool:
         if not isinstance(other, gMonthDay):
             return NotImplemented
         return not self.__eq__(other)
-    def __lt__(self,other: Any) -> bool:
+
+    def __lt__(self, other: Any) -> bool:
         if not isinstance(other, gMonthDay):
             return NotImplemented
         return (self.month < other.month) or (self.month == other.month and self.day < other.day)
-    def __le__(self,other: Any) -> bool:
+
+    def __le__(self, other: Any) -> bool:
         if not isinstance(other, gMonthDay):
             return NotImplemented
         return (self.month < other.month) or (self.month == other.month and self.day <= other.day)
-    def __gt__(self,other: Any) -> bool:
+
+    def __gt__(self, other: Any) -> bool:
         if not isinstance(other, gMonthDay):
             return NotImplemented
         return (self.month > other.month) or (self.month == other.month and self.day > other.day)
-    def __ge__(self,other: Any) -> bool:
+
+    def __ge__(self, other: Any) -> bool:
         if not isinstance(other, gMonthDay):
             return NotImplemented
         return (self.month > other.month) or (self.month == other.month and self.day >= other.day)
+
     def __bool__(self) -> bool:
         return self.month != 0 or self.day != 0
 
-class gYear():
-    def __init__(self, year: int):
-        self.year = int(year) # may be negative
+
+class gYear:
+    def __init__(self, year: int | str) -> None:
+        self.year = int(year)  # may be negative
+
     def __repr__(self) -> str:
         return self.__str__()
+
     def __str__(self) -> str:
-        return "{0:0{1}}".format(self.year, 5 if self.year < 0 else 4) # may be negative
-    def __eq__(self,other: Any) -> bool:
+        return "{0:0{1}}".format(self.year, 5 if self.year < 0 else 4)  # may be negative
+
+    def __eq__(self, other: Any) -> bool:
         if not isinstance(other, gYear):
             return NotImplemented
         return self.year == other.year
-    def __ne__(self,other: Any) -> bool:
+
+    def __ne__(self, other: Any) -> bool:
         if not isinstance(other, gYear):
             return NotImplemented
         return not self.__eq__(other)
+
     def __lt__(self, other: Any) -> bool:
         if not isinstance(other, gYear):
             return NotImplemented
         return self.year < other.year
-    def __le__(self,other: Any) -> bool:
+
+    def __le__(self, other: Any) -> bool:
         if not isinstance(other, gYear):
             return NotImplemented
         return self.year <= other.year
-    def __gt__(self,other: Any) -> bool:
+
+    def __gt__(self, other: Any) -> bool:
         if not isinstance(other, gYear):
             return NotImplemented
         return self.year > other.year
-    def __ge__(self,other: Any) -> bool:
+
+    def __ge__(self, other: Any) -> bool:
         if not isinstance(other, gYear):
             return NotImplemented
         return self.year >= other.year
+
     def __bool__(self) -> bool:
         return self.year != 0 != 0
 
-class gMonth():
-    def __init__(self, month: int):
+
+class gMonth:
+    def __init__(self, month: int | str) -> None:
         self.month = int(month)
+
     def __repr__(self) -> str:
         return self.__str__()
+
     def __str__(self) -> str:
         return "--{0:02}".format(self.month)
-    def __eq__(self,other: Any) -> bool:
+
+    def __eq__(self, other: Any) -> bool:
         if not isinstance(other, gMonth):
             return NotImplemented
         return self.month == other.month
-    def __ne__(self,other: Any) -> bool:
+
+    def __ne__(self, other: Any) -> bool:
         if not isinstance(other, gMonth):
             return NotImplemented
         return not self.__eq__(other)
+
     def __lt__(self, other: Any) -> bool:
         if not isinstance(other, gMonth):
             return NotImplemented
         return self.month < other.month
-    def __le__(self,other: Any) -> bool:
+
+    def __le__(self, other: Any) -> bool:
         if not isinstance(other, gMonth):
             return NotImplemented
         return self.month <= other.month
-    def __gt__(self,other: Any) -> bool:
+
+    def __gt__(self, other: Any) -> bool:
         if not isinstance(other, gMonth):
             return NotImplemented
         return self.month > other.month
-    def __ge__(self,other: Any) -> bool:
+
+    def __ge__(self, other: Any) -> bool:
         if not isinstance(other, gMonth):
             return NotImplemented
         return self.month >= other.month
+
     def __bool__(self) -> bool:
         return self.month != 0
 
-class gDay():
-    def __init__(self, day: int) -> None:
+
+class gDay:
+    def __init__(self, day: int | str) -> None:
         self.day = int(day)
+
     def __repr__(self) -> str:
         return self.__str__()
+
     def __str__(self) -> str:
         return "---{0:02}".format(self.day)
-    def __eq__(self,other: Any) -> bool:
+
+    def __eq__(self, other: Any) -> bool:
         if not isinstance(other, gDay):
             return NotImplemented
         return self.day == other.day
-    def __ne__(self,other: Any) -> bool:
+
+    def __ne__(self, other: Any) -> bool:
         if not isinstance(other, gDay):
             return NotImplemented
         return not self.__eq__(other)
+
     def __lt__(self, other: Any) -> bool:
         if not isinstance(other, gDay):
             return NotImplemented
         return self.day < other.day
-    def __le__(self,other: Any) -> bool:
+
+    def __le__(self, other: Any) -> bool:
         if not isinstance(other, gDay):
             return NotImplemented
         return self.day <= other.day
-    def __gt__(self,other: Any) -> bool:
+
+    def __gt__(self, other: Any) -> bool:
         if not isinstance(other, gDay):
             return NotImplemented
         return self.day > other.day
-    def __ge__(self,other: Any) -> bool:
+
+    def __ge__(self, other: Any) -> bool:
         if not isinstance(other, gDay):
             return NotImplemented
         return self.day >= other.day
+
     def __bool__(self) -> bool:
         return self.day != 0
+
 
 isoDurationPattern = re.compile(
     r"^(?P<sign>[+-])?"
@@ -919,3 +971,32 @@ class InvalidValue(str):
         return str.__new__(cls, value)
 
 INVALIDixVALUE = InvalidValue("(ixTransformValueError)")
+
+if TYPE_CHECKING:
+    TypeSValue = Union[
+        bool,
+        float,
+        int,
+        InvalidValue,
+        None,
+        str,
+    ]
+    TypeXValue = Union[
+        datetime.datetime,
+        datetime.time,
+        Decimal,
+        dict[str, re.Pattern[str]],
+        float,
+        gDay,
+        gMonth,
+        gMonthDay,
+        gYearMonth,
+        gYear,
+        Fraction,
+        list[Optional[QName]],
+        None,
+        re.Pattern[str],
+        str,
+        QName,
+        'XsdPattern',
+    ]
