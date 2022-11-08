@@ -22,16 +22,19 @@ classifiers = [
     'Programming Language :: Python :: 3.7',
     'Programming Language :: Python :: 3.8',
     'Programming Language :: Python :: 3.9',
+    'Programming Language :: Python :: 3.10',
     'Operating System :: OS Independent',
     'Topic :: Text Processing :: Markup :: XML'
 ]
-requires-python = ">=3.7,<3.10"
+requires-python = ">=3.7"
 dependencies = [
+    'certifi',
     'isodate==0.*',
     'lxml==4.*',
     'numpy==1.*',
     'openpyxl==3.*',
-    'regex==2022.*',
+    'pyparsing==3.*',
+    'regex',
 ]
 
 [project.optional-dependencies]
@@ -89,7 +92,7 @@ empty_parameter_set_mark = "fail_at_collect"
 # Warn when a # type: ignore comment does not specify any error codes
 enable_error_code = "ignore-without-code"
 
-python_version = "3.9"
+python_version = "3.10"
 
 show_error_codes = true
 
@@ -109,16 +112,19 @@ module = [
     'arelle.plugin.validate.ESEF.*',
     'arelle.plugin.validate.ESEF_2022.*',
     'arelle.Cntlr',
+    'arelle.FileSource',
     'arelle.Locale',
     'arelle.ModelObject',
     'arelle.ModelValue',
     'arelle.SystemInfo',
     'arelle.Updater',
     'arelle.UrlUtil',
+    'arelle.XmlValidateSchema',
     'arelle.ValidateXbrl',
     'arelle.XbrlConst',
     'arelle.XbrlUtil',
     'arelle.XmlUtil',
+    'arelle.XmlValidate',
 ]
 ignore_errors = false
 strict = true
@@ -128,6 +134,7 @@ strict = true
 # the py.typed marker here
 [[tool.mypy.overrides]]
 module = [
+    'google.appengine.api.*',
     'gtk',
     'isodate.*',
     'win32clipboard',
