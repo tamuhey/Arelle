@@ -54,7 +54,7 @@ ObjectMaker = [
     'graphviz==0.*',
 ]
 WebServer = [
-    'cheroot==8.*',
+    'cheroot==9.*',
     'CherryPy==18.*',
     'tornado==6.*',
 ]
