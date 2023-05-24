@@ -2,14 +2,17 @@
 See COPYRIGHT.md for copyright information.
 """
 from __future__ import annotations
-from arelle.ModelXbrl import ModelXbrl
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from arelle.ModelXbrl import ModelXbrl
 
 # initialize object from loaded linkbases
 from collections import defaultdict
 from typing import Any, Union
 from arelle import ModelDtsObject, XbrlConst, ModelValue
 from arelle.ModelObject import ModelObject
-from arelle.ModelDtsObject import ModelRelationship, ModelResource
+from arelle.ModelDtsObject import ModelLink, ModelRelationship, ModelResource
 from arelle.PrototypeDtsObject import LocPrototype, PrototypeObject
 from arelle.XbrlConst import consecutiveArcrole
 import sys
@@ -192,7 +195,7 @@ class ModelRelationshipSet:
         if isinstance(arcrole, (str, NoneType)) and isinstance(
             linkrole, (str, NoneType)
         ):
-            modelLinks = self.modelXbrl.baseSets.get(
+            modelLinks: list[ModelLink] = self.modelXbrl.baseSets.get(
                 (arcrole, linkrole, linkqname, arcqname), []
             )
         else:  # arcrole is a set of arcroles
